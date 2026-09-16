@@ -1,0 +1,416 @@
+# Mythical Runner — Implementation Plan (Cloudflare)
+
+A web implementation of *Magical Athlete* (CMYK 2025 edition): room-based, multiplayer,
+turn-based, running at zero cost on Cloudflare's free plan.
+
+- **Stack:** Vite + React + TypeScript (static) · Cloudflare Worker + Durable Objects · WebSockets
+- **Cost:** $0/month, enforced by hard limits rather than overage billing
+- **Status:** phases 0–1 complete. The engine plays a full four-race game with no
+  abilities; `npm run typecheck` and `npm test` (1500 fuzzed games) are green. Next up is
+  phase 2, the ability pipeline.
+
+---
+
+## 1. The source game
+
+*Magical Athlete*, CMYK 2025 edition ([BGG #454103](https://boardgamegeek.com/boardgame/454103/magical-athlete)).
+
+| Element | Rule |
+|-|-|
+| Players | 2–6, ~30 min |
+| Draft | Roll-off for first player (highest unique die). Lay out 2 racer cards per player; snake draft until each player holds **4 racers** |
+| Races | **4 races**. Track is 30 spaces, double-sided: *Mild Mile* (plain) and *Wild Wilds* (spaces that push racers forward/back and award point tokens). Board flips between races |
+| Race start | All players **simultaneously and secretly** commit one unused racer, reveal, place meeples on the start space |
+| Turn order | Re-rolled **every race** — players roll off for who goes first, so first seat is pure chance each time rather than inherited from the draft |
+| Turn | In player order: roll d6, move that many spaces. Abilities trigger *before*, *after*, or *instead of* rolling |
+| Status | Tripped racers lie down and spend their next turn standing up instead of moving |
+| Race end | Ends the moment **two** racers cross the finish line → 1st gets the gold cup, 2nd the silver cup. Everyone else scores nothing |
+| Scoring | Cup values escalate across the 4 races — gold 3/4/4/5, silver 1/2/2/3 (confirmed). Bronze stars (3pt and 1pt) come from Wild Wilds spaces |
+| Win | Most points after race 4 |
+
+Roughly 35 racers, each with a deliberately rule-breaking power. Confirmed examples:
+Legs (move exactly 5 instead of rolling), Banana (trips anyone passing it), Centaur (kicks
+racers backward), Big Baby (occupies a whole space as a blocker), M.O.U.T.H. (eliminates
+racers landing on it), Lovable Loser (scores for starting a turn in last place), Duelist
+(dice duels).
+
+### Open dependency
+
+Authoritative card text for all ~35 racers is **not yet available** — published reviews name
+only about a dozen. Phases 0–4 do not depend on this. Phase 5 does. Needs the rulebook or
+photographs of the cards.
+
+### Legal note
+
+This is a commercial, in-print game. A private implementation for personal play is fine;
+publishing it with the real racer names and artwork is not. Original art and a neutral name
+would be required before anything goes public.
+
+---
+
+## 2. Does it need a server?
+
+Yes. There is no honest static-only version:
+
+- Rooms and invites need somewhere to hold state between page loads.
+- Secret simultaneous racer selection needs a referee nobody can peek at.
+- Dice need a source neither client controls.
+- Reconnects need a snapshot to resume from.
+
+P2P WebRTC still requires a signalling server *and* makes cheating trivial, so it saves
+nothing.
+
+What you do **not** need is a machine to babysit. Durable Objects give one addressable,
+single-threaded, stateful object per room, which maps 1:1 onto the problem.
+
+---
+
+## 3. Cost analysis — why this is $0
+
+SQLite-backed Durable Objects have been on the Workers Free plan since April 2025.
+
+Two conditions:
+
+1. Must use the **SQLite storage backend** (`new_sqlite_classes` in the migration, not
+   `new_classes`). Legacy KV-backed DOs are paid-only. Not a limitation — the familiar
+   `storage.put/get` KV API still works on top of SQLite.
+2. Free limits are **hard stops, not overages**. Exceeding one fails the operation with an
+   error rather than generating a bill. With no payment method on the account there is no
+   path to a surprise charge.
+
+| Limit | Free / day | Projected usage |
+|-|-|-|
+| DO requests | 100,000 | Inbound WS messages bill at **20:1** → ~2M messages/day. A 6-player game is a few hundred messages ≈ 25 request-equivalents. Thousands of games/day |
+| DO duration | 13,000 GB-s | ~29 h of *active compute* at 128 MB. With hibernation, time is only burned while processing a message |
+| SQL rows written | 100,000 | **Tightest limit** — see §5.5 |
+| SQL rows read | 5,000,000 | Irrelevant at this scale |
+| Storage | 5 GB total | Irrelevant; finished rooms are deleted |
+| Static assets | unlimited, free | The entire frontend |
+
+Outbound WebSocket messages are not billed at all, nor are protocol pings — exactly the
+shape of this game (few inbound actions, many outbound broadcasts).
+
+`*.workers.dev` is free; a custom domain is optional.
+
+### Why not Next.js / SSR
+
+The Workers free plan caps a Worker bundle at 3 MiB and dynamic requests at 100k/day with
+10 ms CPU each. Next.js via OpenNext fits that badly. This app is a WebSocket-driven SPA
+with no SEO surface and no server-rendered content, so SSR buys nothing. A static build
+served from Workers Static Assets is free and unlimited, and never touches the request cap.
+
+---
+
+## 4. Repository layout
+
+As built through phase 1. Items marked `(phase N)` do not exist yet.
+
+```
+mythical-runner/
+  packages/engine/          # pure TS, zero runtime deps, the entire game
+    src/
+      ids.ts                # branded PlayerId / RacerId / RoomCode / ChoiceId
+      rng.ts                # splitmix32 PRNG derived from (seed, step)
+      state.ts              # GameState, Phase, RacerState, PendingDecision, PlayerView
+      actions.ts            # discriminated union of every Action
+      events.ts             # discriminated union of every Event (drives UI)
+      scoring.ts            # Token, RACE_AWARDS, star supply
+      errors.ts             # IllegalActionError, EngineError, invariant
+      redact.ts             # GameState -> PlayerView
+      globals.d.ts          # structuredClone / console / process declarations
+      tracks/               # types.ts, mildMile.ts, wildWilds.ts, index.ts
+      characters/           # types.ts, registry.ts (vanilla until phase 2)
+      reducer/
+        index.ts            # initGame, applyAction, legalActions, timeout
+        working.ts          # DeepMutable working copy + lookup helpers
+        movement.ts         # step-by-step movement and space effects
+        lobby.ts            # join / leave / start
+        draft.ts            # roll-off and snake draft
+        commit.ts           # secret selection and reveal
+        racing.ts           # turn loop, finish detection, cup awards
+        pipeline.ts         # (phase 2) hook dispatch + pending decisions
+      dev/
+        hotseat.ts          # scripted full game + replay check
+        fuzz.ts             # randomised games, crash and determinism hunt
+  apps/server/              # (phase 3) Cloudflare Worker + RoomDO
+  apps/web/                 # (phase 4) Vite + React SPA
+  docs/
+```
+
+**npm workspaces** (pnpm is not installed on this machine; npm 10 workspaces are
+equivalent for this purpose). `engine` depends on neither app; both apps depend on `engine`.
+
+---
+
+## 5. Architecture
+
+### 5.1 Engine — the whole game as a pure function
+
+No I/O, no React, no network.
+
+```ts
+initGame(seed: number): GameState
+applyAction(state: GameState, action: Action): { state, events[] }
+legalActions(state, playerId): Action[]
+redact(state, playerId): PlayerView   // strips seed, commits, pending context
+```
+
+Seeded RNG, so any game is a replayable list of `(seed, actions[])`. This is what makes the
+thing testable, and what lets the client predict moves locally.
+
+> **Changed in phase 1.** This section originally sketched
+> `applyAction(state, action, rng)`. The RNG is now derived internally from
+> `(state.seed, state.step)` and the parameter is gone. A caller advancing the stream out
+> of lockstep with `step` would desync replays in a way that is extremely hard to debug;
+> deriving it internally makes that mistake unrepresentable. Verified by the fuzzer: every
+> game's action log replays to a byte-identical final state.
+
+`applyAction` throws `IllegalActionError` without mutating anything — application is
+all-or-nothing, so a rejected message leaves the room untouched.
+
+### 5.2 Core types
+
+As implemented — see [state.ts](../packages/engine/src/state.ts) for the authoritative
+version with full comments.
+
+```ts
+type Phase =
+  | { t: 'lobby' }
+  | { t: 'draftRoll'; rolls: Record<PlayerId, number | null> }
+  | { t: 'draft'; deck: RacerId[]; layout: RacerId[]; order: PlayerId[]; pick: number }
+  | { t: 'commit'; raceNo: 1|2|3|4; committed: Record<PlayerId, RacerId | null> }
+  | { t: 'racing'; raceNo: 1|2|3|4; active: PlayerId; finished: PlayerId[]
+      stalledTurns: number; claimedSpaces: number[] }
+  | { t: 'scored'; raceNo: 1|2|3|4 }
+  | { t: 'gameOver'; winners: PlayerId[] }
+
+type RacerState = {
+  owner: PlayerId
+  racerId: RacerId
+  pos: number                     // -1 = start space, 30 = finished
+  tripped: boolean
+  eliminated: boolean
+  finishedRank: number | null
+  memo: Record<string, unknown>   // per-character scratch space
+}
+
+type GameState = {
+  seed: number; step: number      // rng derived from (seed, step)
+  players: Player[]               // id, name, connected
+  seatOrder: PlayerId[]
+  hands: Record<PlayerId, RacerId[]>   // drafted, public
+  used: Record<PlayerId, RacerId[]>
+  scores: Record<PlayerId, Token[]>
+  starSupply: Record<1 | 3, number>
+  phase: Phase
+  board: RacerState[]
+  pending: PendingDecision | null
+  deadline: number | null
+}
+```
+
+Three additions phase 1 forced that the original sketch did not have:
+
+- **`draftRoll` is its own phase.** The roll-off for draft order has real state (who has
+  rolled, who must re-roll after a tie) and could not be folded into `draft`.
+- **`claimedSpaces`** tracks which star spaces have been looted this race. Supply alone is
+  not enough: a racer bounced back and forth across a star space by Wild Wilds arrows would
+  otherwise farm it indefinitely.
+- **`stalledTurns`** counts consecutive turns with no forward progress. It is unreachable
+  today — every roll advances someone — but phase 2's blockers and backward movement can
+  genuinely deadlock a race, and hitting that as an infinite loop in production is worse
+  than capping it now.
+
+`deadline` is a wall-clock timestamp owned by the server, not the engine. The engine only
+re-validates it when handling `system/timeout`.
+
+`pending` is the linchpin. When a handler needs input it returns one, `applyAction` parks,
+and the only legal action in the game becomes that player's response. Duelist, Centaur's
+kick target, and every "may" ability route through it.
+
+### 5.3 The ability pipeline
+
+35 rule-breaking powers will destroy the codebase if written as
+`if (character === 'banana')` inside the move function. Use an event pipeline instead —
+characters register handlers on hooks.
+
+Resolution order within a turn:
+
+`onTurnStart → replaceRoll → modifyRoll → beforeMove → [per step: onPassOver, onEnterSpace] → onLandOn → onOtherEntersMySpace → onTurnEnd`
+
+Out-of-band: `onRaceStart`, `onPassedBy`, `onAnyoneFinishes`, `onScoring`.
+
+```ts
+type Character = {
+  id: RacerId
+  name: string
+  text: string                     // rules text shown in UI
+  hooks: Partial<Record<Hook, Handler>>
+}
+type Handler = (ctx: Ctx) => HookResult   // mutate via ctx helpers, or return a PendingDecision
+```
+
+Three rules that prevent rewrites:
+
+1. **Movement is one space at a time.** A loop firing `onPassOver` per intermediate space and
+   `onEnterSpace` on arrival. Forced and backward movement use the same loop. Banana,
+   blockers and Wild Wilds arrows then fall out for free.
+2. **Handlers never mutate state directly** — they emit intents (`move`, `trip`, `award`,
+   `eliminate`) which the engine applies. Ordering stays deterministic and the event log
+   becomes a complete replay.
+3. **Every handler is resumable.** Returning a `PendingDecision` stores a continuation key in
+   `memo`; on resume the handler is re-entered with the answer. Do not use JS generators
+   across a serialization boundary — the DO hibernates.
+
+Characters live as data (`characters/banana.ts` exporting metadata + handlers), never a
+switch statement.
+
+### 5.4 Server — Worker + Durable Object
+
+- `POST /api/rooms` → Worker mints a 4-character join code and creates `RoomDO` by that name.
+- `GET /r/:code` → static SPA; client opens a WS to
+  `/api/rooms/:code/ws?playerId=…&token=…`.
+- `RoomDO` holds `GameState` in memory, mirrored to DO storage (see §5.5).
+- Every inbound message: verify token → check the action against `legalActions(state, playerId)`
+  → `applyAction` → broadcast `redact(state, p)` plus new events to each connected player
+  individually.
+- **The client never receives the seed**, or players precompute rolls.
+- **WebSocket Hibernation API is mandatory**, not an optimisation. A non-hibernating DO
+  holding open sockets accrues duration continuously and would chew through 13,000 GB-s.
+  Use `acceptWebSocket()` plus the handler methods (`webSocketMessage`, `webSocketClose`)
+  rather than `addEventListener`. Consequence: the DO must rebuild everything it needs from
+  storage on wake and must not rely on instance fields surviving hibernation.
+- Reconnect: client sends its last known `step`; the DO replays events since then, or ships a
+  full snapshot.
+- Turn timer via `storage.setAlarm()`. On expiry, auto-roll for the active player and
+  auto-resolve any `pending`.
+- Disconnect ≠ drop. Players stay in the game; the timer carries them.
+
+### 5.5 Persistence
+
+100k row-writes/day is the real ceiling. Writing a snapshot after every action is ~500
+writes/game → about 200 games/day. Plenty for friends, but easily improved:
+
+The DO holds authoritative state **in memory** and writes to storage only on a timer
+(~every 2 s) and at phase boundaries. Durable Objects guarantee the in-memory copy is the
+single source of truth while the object is alive, so storage is purely crash/eviction
+insurance. This drops to a handful of writes per game and removes the ceiling entirely. It
+also happens to be exactly what hibernation-safety requires.
+
+### 5.6 Identity
+
+No accounts. An anonymous `playerId` plus a per-player secret token in `localStorage`; the
+room join code lives in the URL (`/r/ABCD`). The secret token is what stops someone
+submitting turns as another player.
+
+### 5.7 Redaction
+
+Only one secret exists, but it matters: during `commit`, each player's chosen racer.
+`redact` replaces other players' entries with `'hidden' | null`.
+
+Write `redact` in phase 1 even though it is nearly a no-op then. Retrofitting it later means
+auditing every payload.
+
+### 5.8 Client
+
+Vite + React + TypeScript, built static. A single WS connection in a context provider, with
+a small store consumed through `useSyncExternalStore`.
+
+- `/` — create room, or join by code
+- `/r/:code` — one page rendering per `phase.t`: Lobby → Draft → Commit → Race → Scoreboard
+- Board: SVG track, 30 spaces laid out along a path. Meeples are `<g>` elements with a CSS
+  `transform` transition. Animate the event stream **sequentially** through a queue, one hop
+  per ~180 ms, so ability chains read as cause-and-effect rather than teleporting.
+- Right rail: turn order, scores, and a plain-language event log ("Banana trips Centaur!").
+  The log is generated from `Event[]`, so it is free.
+- Card text always visible for the active racer and on hover for others. With 35
+  game-breaking abilities, hiding rules text is the main usability failure mode.
+
+---
+
+## 6. Build phases
+
+| # | Deliverable | Gate | Status |
+|-|-|-|-|
+| 0 | Types, both 30-space tracks as data, seeded RNG, action/event unions | `npm run typecheck` clean | **done** |
+| 1 | Engine core, **no abilities**: draft, commit, turn loop, movement, trip/stand-up, top-2 finish, token scoring, 4-race loop | Hot-seat CLI plays a full 4-race game | **done** |
+| 2 | Hook pipeline + pending decisions + ~6 racers covering every hook type (incl. Duelist for the interactive case) | Scripted scenario test per racer passes | next |
+| 3 | Worker + RoomDO: create/join, WS, authority, redaction, reconnect, alarm timer | Two browsers play a full game | |
+| 4 | Web client end to end, SVG board, animation queue, mobile layout | Playable on a phone | |
+| 5 | Remaining ~29 racers — **blocked on card text** | Each racer has a scenario test | blocked |
+| 6 | Spectators, replay viewer, fill bots, sound | — | |
+
+Phases 1–2 are the real work. Phase 5 should be cheap if phase 2 is designed correctly.
+
+### Phase 0 — delivered
+
+Identifiers, `makeRng(seed, step)`, both tracks as data, scoring tables, the state shape,
+and the action (11 members) and event (22 members) unions.
+
+### Phase 1 — delivered
+
+The reducer. A complete game runs end to end: roll-off → snake draft → secret commit →
+race → scoring → next race → game over.
+
+Run it:
+
+```
+npm run typecheck          # whole workspace
+npm test                   # 1000 fuzzed games
+npm run hotseat -w @mr/engine -- 20260916 4    # one narrated game
+npm run fuzz    -w @mr/engine -- 2000 1        # crash + determinism sweep
+```
+
+Two harnesses live in `packages/engine/src/dev/`:
+
+- **hotseat** plays a scripted game and then re-applies the recorded action log to a fresh
+  `initGame(seed)`, asserting the final states are byte-identical. This is the replay
+  guarantee the whole architecture rests on.
+- **fuzz** plays randomised legal games at 2–6 players, hunting crashes, non-termination
+  and replay mismatches, and reporting the win distribution by seat.
+
+Latest: 1500 games, 0 failures, 0 replay mismatches, 0 stalemates, ~202 actions/game.
+
+### Still invented
+
+The **Wild Wilds space layout** in
+[tracks/wildWilds.ts](../packages/engine/src/tracks/wildWilds.ts) is a plausible
+placeholder, not the real board — no published source gives the arrangement. Star counts
+are capped so both wild races fit the real component supply. It is isolated in one file
+with nothing else depending on the specific arrangement, so replacing it from the physical
+board is a one-file change.
+
+---
+
+## 7. Testing
+
+- **Golden replays** — *built (phase 1)*. A game is `(seed, Action[])`. The hotseat harness
+  records one and re-applies it to a fresh `initGame(seed)`, asserting the final states
+  match. Any engine change that breaks a replay is either a bug or an intentional rules
+  change.
+- **Fuzzer** — *built (phase 1)*. Random-legal games at 2–6 players, hunting crashes,
+  non-termination and replay mismatches.
+- **Scenario tests per racer** — *phase 2*. Hand-constructed `GameState`, one action, assert
+  the resulting events.
+- **Stalemate rule** — *built (phase 1)*, though unreachable until abilities exist. Blockers
+  plus backward movement can genuinely deadlock a race; after
+  `6 x playerCount` consecutive turns with no forward progress the race is called and
+  whoever has already finished keeps their cups.
+
+The fuzzer also reports the win distribution by seat. That is a **bug detector, not a
+balance metric** — a seat winning too rarely usually means it is being skipped, not that
+the game is unfair. Balance is explicitly not a goal for this project.
+
+---
+
+## 8. Sources
+
+- [BGG — Magical Athlete](https://boardgamegeek.com/boardgame/454103/magical-athlete)
+- [GeekDad — Wacky Racing in Magical Athlete](https://geekdad.com/2025/11/wacky-racing-in-magical-athlete/)
+- [Board Game Review](https://boardgamereview.co.uk/game-reviews/magical-athlete-board-game-review/)
+- [Meeple Mountain](https://www.meeplemountain.com/reviews/magical-athlete/)
+- [CMYK Games](https://www.cmyk.games/products/magical-athlete)
+- [Durable Objects free tier changelog](https://developers.cloudflare.com/changelog/2025-04-07-durable-objects-free-tier/)
+- [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/)
+- [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/)
+- [SQLite storage API](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/)

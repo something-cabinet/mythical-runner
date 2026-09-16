@@ -1,0 +1,106 @@
+import type { ChoiceId, PlayerId, RacerId } from './ids.js';
+
+/**
+ * Every way the game state can change.
+ *
+ * A game is fully described by `(seed, Action[])`. Nothing else may mutate state — that
+ * is what makes replay tests and client-side prediction possible.
+ *
+ * `by` is always the acting player. The server verifies it against the connection's
+ * authenticated identity before the engine ever sees it; the engine then separately
+ * checks the action is legal for that player. Both checks matter: the first stops
+ * impersonation, the second stops out-of-turn play.
+ */
+
+export interface LobbyJoin {
+  readonly t: 'lobby/join';
+  readonly by: PlayerId;
+  readonly name: string;
+}
+
+export interface LobbyLeave {
+  readonly t: 'lobby/leave';
+  readonly by: PlayerId;
+}
+
+export interface LobbySetConnected {
+  readonly t: 'lobby/setConnected';
+  readonly by: PlayerId;
+  readonly connected: boolean;
+}
+
+/** Only the host (seatOrder[0]) may start. */
+export interface LobbyStart {
+  readonly t: 'lobby/start';
+  readonly by: PlayerId;
+}
+
+/** Roll-off for draft order. Highest unique roll goes first; ties re-roll. */
+export interface DraftRoll {
+  readonly t: 'draft/roll';
+  readonly by: PlayerId;
+}
+
+export interface DraftPick {
+  readonly t: 'draft/pick';
+  readonly by: PlayerId;
+  readonly racerId: RacerId;
+}
+
+/** Secret until every player has committed. */
+export interface RaceCommit {
+  readonly t: 'race/commit';
+  readonly by: PlayerId;
+  readonly racerId: RacerId;
+}
+
+export interface RaceRoll {
+  readonly t: 'race/roll';
+  readonly by: PlayerId;
+}
+
+/**
+ * Answer to a PendingDecision. The only legal action in the game while `pending` is set.
+ */
+export interface RaceDecide {
+  readonly t: 'race/decide';
+  readonly by: PlayerId;
+  readonly choice: ChoiceId;
+}
+
+/** Acknowledge the post-race scoreboard and move to the next race. */
+export interface RaceContinue {
+  readonly t: 'race/continue';
+  readonly by: PlayerId;
+}
+
+/**
+ * Turn-timer expiry. Not issued by a player — the server emits it once `deadline` has
+ * passed, and the engine re-validates the deadline before honouring it.
+ */
+export interface SystemTimeout {
+  readonly t: 'system/timeout';
+  readonly at: number;
+}
+
+export type Action =
+  | LobbyJoin
+  | LobbyLeave
+  | LobbySetConnected
+  | LobbyStart
+  | DraftRoll
+  | DraftPick
+  | RaceCommit
+  | RaceRoll
+  | RaceDecide
+  | RaceContinue
+  | SystemTimeout;
+
+export type ActionType = Action['t'];
+
+/** Actions carrying an acting player, i.e. everything except system actions. */
+export type PlayerAction = Extract<Action, { by: PlayerId }>;
+
+export function isPlayerAction(action: Action): action is PlayerAction {
+  return 'by' in action;
+}
