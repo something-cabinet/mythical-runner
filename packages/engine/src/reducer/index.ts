@@ -1,14 +1,14 @@
-import type { Action, SystemTimeout } from '../actions.js';
+import type { Action, RaceDecide, SystemTimeout } from '../actions.js';
 import { IllegalActionError, invariant } from '../errors.js';
 import type { PlayerId } from '../ids.js';
 import { makeRng, type Rng } from '../rng.js';
-import { STAR_SUPPLY } from '../scoring.js';
 import type { GameEvent } from '../events.js';
 import type { GameState } from '../state.js';
 import { currentDrafter, draftPick, draftRoll } from './draft.js';
 import { join, leave, setConnected, start } from './lobby.js';
 import { beginCommit as _beginCommit, raceCommit } from './commit.js';
-import { advanceAfterScoring, raceContinue, raceRoll, takeTurn } from './racing.js';
+import { advanceAfterScoring, endTurn, raceContinue, raceRoll, takeTurn } from './racing.js';
+import { answerPending, runQueue } from './pipeline.js';
 import { finish, hand, makeCtx, used, type Ctx } from './working.js';
 
 export interface ApplyResult {
@@ -26,10 +26,12 @@ export function initGame(seed: number): GameState {
     hands: {},
     used: {},
     scores: {},
-    starSupply: { ...STAR_SUPPLY },
+    trailingPlayer: null,
     phase: { t: 'lobby' },
     board: [],
     pending: null,
+    queue: [],
+    turnStartPos: -1,
     deadline: null,
   };
 }
@@ -51,6 +53,9 @@ export function initGame(seed: number): GameState {
 export function applyAction(state: GameState, action: Action): ApplyResult {
   const ctx = makeCtx(state);
   const rng = makeRng(state.seed, state.step);
+  // The pipeline runs turn jobs but racing.ts owns turn-order rules; injecting rather
+  // than importing keeps the two modules from being circular.
+  ctx.onEndTurn = () => endTurn(ctx);
 
   route(ctx, action, rng);
 
@@ -76,13 +81,30 @@ function route(ctx: Ctx, action: Action, rng: Rng): void {
     case 'race/roll':
       return raceRoll(ctx, action, rng);
     case 'race/decide':
-      // Phase 2 introduces PendingDecision; until then nothing can be pending.
-      throw new IllegalActionError(action, 'no decision is pending');
+      return decide(ctx, action, rng);
     case 'race/continue':
       return raceContinue(ctx, action);
     case 'system/timeout':
       return timeout(ctx, action, rng);
   }
+}
+
+/**
+ * Answers a suspended ability and lets the turn continue.
+ *
+ * This is the only legal action in the whole game while something is pending, and the
+ * player who must answer is frequently not the one taking the turn.
+ */
+function decide(ctx: Ctx, a: RaceDecide, rng: Rng): void {
+  const pending = ctx.s.pending;
+  if (!pending) throw new IllegalActionError(a, 'no decision is pending');
+  if (pending.player !== a.by) throw new IllegalActionError(a, 'not your decision');
+  if (!pending.options.some((o) => o.id === a.choice)) {
+    throw new IllegalActionError(a, 'that choice is not on offer');
+  }
+
+  answerPending(ctx, a.choice, false);
+  runQueue(ctx, rng);
 }
 
 /**
@@ -95,6 +117,13 @@ function timeout(ctx: Ctx, a: SystemTimeout, rng: Rng): void {
   const { s } = ctx;
   if (s.deadline !== null && a.at < s.deadline) {
     throw new IllegalActionError(a, 'deadline has not passed');
+  }
+
+  // A suspended ability outranks the phase: nothing else can proceed until it is answered.
+  if (s.pending) {
+    answerPending(ctx, s.pending.defaultChoice, true);
+    runQueue(ctx, rng);
+    return;
   }
 
   switch (s.phase.t) {

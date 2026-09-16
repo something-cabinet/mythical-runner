@@ -5,9 +5,9 @@ turn-based, running at zero cost on Cloudflare's free plan.
 
 - **Stack:** Vite + React + TypeScript (static) · Cloudflare Worker + Durable Objects · WebSockets
 - **Cost:** $0/month, enforced by hard limits rather than overage billing
-- **Status:** phases 0–1 complete. The engine plays a full four-race game with no
-  abilities; `npm run typecheck` and `npm test` (1500 fuzzed games) are green. Next up is
-  phase 2, the ability pipeline.
+- **Status:** phases 0–2 complete; phase 3 is next. See **[STATUS.md](./STATUS.md)** for the
+  handoff note — where things stand, how to verify, and what to do next. That file is the
+  place to start in a new session; this one is the design it is following.
 
 ---
 
@@ -21,24 +21,30 @@ turn-based, running at zero cost on Cloudflare's free plan.
 | Draft | Roll-off for first player (highest unique die). Lay out 2 racer cards per player; snake draft until each player holds **4 racers** |
 | Races | **4 races**. Track is 30 spaces, double-sided: *Mild Mile* (plain) and *Wild Wilds* (spaces that push racers forward/back and award point tokens). Board flips between races |
 | Race start | All players **simultaneously and secretly** commit one unused racer, reveal, place meeples on the start space |
-| Turn order | Re-rolled **every race** — players roll off for who goes first, so first seat is pure chance each time rather than inherited from the draft |
+| Turn order | Race 1 by roll-off. Races 2–4: the player whose racer finished **farthest behind (or was eliminated first)** goes first — a catch-up rule, not a roll-off |
 | Turn | In player order: roll d6, move that many spaces. Abilities trigger *before*, *after*, or *instead of* rolling |
 | Status | Tripped racers lie down and spend their next turn standing up instead of moving |
 | Race end | Ends the moment **two** racers cross the finish line → 1st gets the gold cup, 2nd the silver cup. Everyone else scores nothing |
-| Scoring | Cup values escalate across the 4 races — gold 3/4/4/5, silver 1/2/2/3 (confirmed). Bronze stars (3pt and 1pt) come from Wild Wilds spaces |
+| Scoring | Cup values escalate across the 4 races — gold 3/4/4/5, silver 1/2/2/3. Star spaces and some powers give bronze point chips |
 | Win | Most points after race 4 |
 
-Roughly 35 racers, each with a deliberately rule-breaking power. Confirmed examples:
-Legs (move exactly 5 instead of rolling), Banana (trips anyone passing it), Centaur (kicks
-racers backward), Big Baby (occupies a whole space as a blocker), M.O.U.T.H. (eliminates
-racers landing on it), Lovable Loser (scores for starting a turn in last place), Duelist
-(dice duels).
+**36 racers**, each with a deliberately rule-breaking power.
 
-### Open dependency
+### The rules are settled
 
-Authoritative card text for all ~35 racers is **not yet available** — published reviews name
-only about a dozen. Phases 0–4 do not depend on this. Phase 5 does. Needs the rulebook or
-photographs of the cards.
+[magical-athlete-rules.md](./magical-athlete-rules.md) is the **authority** — full rulebook
+text including all 36 racers' powers and their clarifying notes. Where the engine disagrees
+with it, the engine is wrong. The phase 5 card-text dependency is closed.
+
+Three rules shape the engine more than any other, and all three were got wrong on the first
+pass:
+
+- **Passing** is *"when a racer starts a move behind a racer and ends the same move ahead of
+  them"* — judged once the whole move completes, never space by space.
+- **Tripping** *"doesn't end your current move prematurely"*: finish the move, then fall. A
+  tripped racer skips their next main move but their powers still trigger.
+- **Sharing a space** requires both racers to be *stopped* there. *"If racers temporarily
+  occupy the same space over the course of moving, warping, etc. — that doesn't count!"*
 
 ### Legal note
 
@@ -103,7 +109,7 @@ served from Workers Static Assets is free and unlimited, and never touches the r
 
 ## 4. Repository layout
 
-As built through phase 1. Items marked `(phase N)` do not exist yet.
+As built through phase 2. Items marked `(phase N)` do not exist yet.
 
 ```
 mythical-runner/
@@ -114,24 +120,29 @@ mythical-runner/
       state.ts              # GameState, Phase, RacerState, PendingDecision, PlayerView
       actions.ts            # discriminated union of every Action
       events.ts             # discriminated union of every Event (drives UI)
-      scoring.ts            # Token, RACE_AWARDS, star supply
+      scoring.ts            # Token, RACE_AWARDS
       errors.ts             # IllegalActionError, EngineError, invariant
       redact.ts             # GameState -> PlayerView
       globals.d.ts          # structuredClone / console / process declarations
+      jobs.ts               # Job union — a turn as serializable data
       tracks/               # types.ts, mildMile.ts, wildWilds.ts, index.ts
-      characters/           # types.ts, registry.ts (vanilla until phase 2)
+      characters/
+        types.ts            # RacerDef
+        hooks.ts            # HookCtx and the Hooks interface
+        registry.ts         # roster; 9 real racers + vanilla padding
+        defs/index.ts       # the nine implemented racers
       reducer/
         index.ts            # initGame, applyAction, legalActions, timeout
         working.ts          # DeepMutable working copy + lookup helpers
-        movement.ts         # step-by-step movement and space effects
         lobby.ts            # join / leave / start
         draft.ts            # roll-off and snake draft
         commit.ts           # secret selection and reveal
         racing.ts           # turn loop, finish detection, cup awards
-        pipeline.ts         # (phase 2) hook dispatch + pending decisions
+        pipeline.ts         # job queue, hook dispatch, pending decisions
       dev/
         hotseat.ts          # scripted full game + replay check
         fuzz.ts             # randomised games, crash and determinism hunt
+        scenarios.ts        # per-racer ability tests
   apps/server/              # (phase 3) Cloudflare Worker + RoomDO
   apps/web/                 # (phase 4) Vite + React SPA
   docs/
@@ -334,10 +345,10 @@ a small store consumed through `useSyncExternalStore`.
 |-|-|-|-|
 | 0 | Types, both 30-space tracks as data, seeded RNG, action/event unions | `npm run typecheck` clean | **done** |
 | 1 | Engine core, **no abilities**: draft, commit, turn loop, movement, trip/stand-up, top-2 finish, token scoring, 4-race loop | Hot-seat CLI plays a full 4-race game | **done** |
-| 2 | Hook pipeline + pending decisions + ~6 racers covering every hook type (incl. Duelist for the interactive case) | Scripted scenario test per racer passes | next |
-| 3 | Worker + RoomDO: create/join, WS, authority, redaction, reconnect, alarm timer | Two browsers play a full game | |
+| 2 | Hook pipeline + pending decisions + 9 racers covering every hook type (incl. Duelist for the interactive case) | Scripted scenario test per racer passes | **done** |
+| 3 | Worker + RoomDO: create/join, WS, authority, redaction, reconnect, alarm timer | Two browsers play a full game | next |
 | 4 | Web client end to end, SVG board, animation queue, mobile layout | Playable on a phone | |
-| 5 | Remaining ~29 racers — **blocked on card text** | Each racer has a scenario test | blocked |
+| 5 | Remaining 27 racers — card text is available, so this is data entry | Each racer has a scenario test | |
 | 6 | Spectators, replay viewer, fill bots, sound | — | |
 
 Phases 1–2 are the real work. Phase 5 should be cheap if phase 2 is designed correctly.
@@ -371,14 +382,65 @@ Two harnesses live in `packages/engine/src/dev/`:
 
 Latest: 1500 games, 0 failures, 0 replay mismatches, 0 stalemates, ~202 actions/game.
 
+### Phase 2 — delivered
+
+The ability pipeline, plus seven racers chosen to hit every hook between them: Legs
+(`replaceRoll`), Banana (`onPassOver` / `onOtherEntersMySpace`), Big Baby
+(`blocksMovement`), M.O.U.T.H. (elimination on arrival), Lovable Loser (`onTurnStart`
+scoring), Centaur (an optional choice by the active player), and Duelist (a choice
+demanded of a player who is *not* taking the turn).
+
+**A turn is a job queue, not a call stack.** This is the one structural decision phase 2
+turned on. An ability can suspend mid-movement to ask someone a question, and the answer
+may not arrive for minutes — during which the Durable Object hibernates and the JS call
+stack ceases to exist. So `GameState.queue` holds the turn as plain serializable data; the
+engine drains it, suspending simply means stopping with jobs still in it, and a
+half-finished six-space move survives as a `move` job with `remaining` counted down.
+
+Two things that had to be got right, both found by tracing the resume path rather than by
+a test:
+
+- **Jobs are popped before they run, not peeked.** An earlier version retired a job only
+  if nothing had been pushed in front of it. That meant a job which suspended stayed at
+  the head and re-ran on resume — Centaur would re-ask its question forever.
+- **The continuation lives on `pending.resume`, not in the queue.** During a suspension
+  the queue holds only the interrupted work, so the interrupted job re-queues itself
+  normally without having to reason about where a resume job might already be sitting.
+  `answerPending` then unshifts the resume job in front of it.
+
+Verified across 800 fuzzed games: every ability fires, every branch is reached (duel won,
+lost and drawn; kick accepted and declined), 2375 decisions were raised and answered, and
+the queue drained to empty at the end of every single game. A scenario test asserts that a
+suspended turn survives a JSON round trip and resumes identically — the hibernation case,
+tested directly.
+
+### Rules rework (after the rulebook arrived)
+
+The first pass at phase 2 was built from published reviews and got the three rules above
+wrong, along with every one of the implemented racers. All of it has been corrected against
+the rulebook:
+
+- Per-step pass and occupancy triggers replaced with a `passCheck` job that runs once a move
+  completes, comparing start and end positions.
+- Trip no longer halts movement; the stand-up is handled inside the `mainMove` job so a
+  tripped racer's other powers still fire.
+- Huge Baby (previously "Big Baby") displaces a racer to the space behind rather than
+  blocking movement — and explicitly without emitting a move, per the card.
+- Centaur's hoofwhack is mandatory and fires on passing, not an optional kick.
+- Duelist is the *Duelist's* choice, the winner advances 2, and it can fire on another
+  player's turn.
+- Point chips are a plain number. The 9 bronze 3-point chips are just change for three
+  1-point chips, so there are no denominations and no supply to exhaust.
+- Wild Wilds spaces are arrows (signed), TRIP spaces, and stars — not backward arrows.
+- The Start space is index 0 and counts as a space, per the rules.
+
 ### Still invented
 
 The **Wild Wilds space layout** in
 [tracks/wildWilds.ts](../packages/engine/src/tracks/wildWilds.ts) is a plausible
-placeholder, not the real board — no published source gives the arrangement. Star counts
-are capped so both wild races fit the real component supply. It is isolated in one file
-with nothing else depending on the specific arrangement, so replacing it from the physical
-board is a one-file change.
+placeholder, not the real board — the rulebook documents the three space types but does not
+print the board. It is isolated in one file with nothing else depending on the specific
+arrangement, so replacing it from the physical board is a one-file change.
 
 ---
 
@@ -390,8 +452,12 @@ board is a one-file change.
   change.
 - **Fuzzer** — *built (phase 1)*. Random-legal games at 2–6 players, hunting crashes,
   non-termination and replay mismatches.
-- **Scenario tests per racer** — *phase 2*. Hand-constructed `GameState`, one action, assert
-  the resulting events.
+- **Scenario tests per racer** — *built (phase 2)*. Hand-constructed `GameState`, one
+  action, assert the resulting events. Dice are forced by searching for a seed that
+  produces the wanted roll, rather than by mocking the RNG — so the tests exercise the
+  real engine.
+- **Timeout fuzzing** — *built (phase 2)*. A third of fuzzed games fire `system/timeout` at
+  random, exercising auto-rolls, auto-commits and auto-answered decisions.
 - **Stalemate rule** — *built (phase 1)*, though unreachable until abilities exist. Blockers
   plus backward movement can genuinely deadlock a race; after
   `6 x playerCount` consecutive turns with no forward progress the race is called and

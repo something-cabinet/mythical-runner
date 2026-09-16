@@ -3,30 +3,37 @@
  *
  * Positions use a single integer axis shared by both tracks:
  *
- *   START = -1   the staging space every racer begins on
- *   0 .. 29      the 30 track spaces
+ *   START = 0    the staging space — the rules are explicit that "the Start space counts
+ *                as a space", so it is on the track, not off it
+ *   1 .. 29      the remaining track spaces
  *   FINISH = 30  past the last space; a racer at FINISH has crossed the line
  *
- * Keeping START off-board as -1 (rather than as space 0) means "move N spaces" is
- * always plain addition, including on the very first turn.
+ * "Anything past the finish line doesn't [count as a space]", so FINISH is a terminal
+ * marker rather than a space with effects.
  */
 
-export const START = -1;
+export const START = 0;
 export const TRACK_LENGTH = 30;
 export const FINISH = TRACK_LENGTH;
 
 export type SpaceEffect =
   /** Nothing happens. Every space on the Mild Mile. */
   | { readonly t: 'plain' }
-  /** Racer is pushed forward on landing. Does not re-trigger chained effects. */
-  | { readonly t: 'forward'; readonly amount: number }
-  /** Racer is pushed backward on landing. Cannot go below START. */
-  | { readonly t: 'back'; readonly amount: number }
-  /** Racer claims a point token on landing, if any remain in that space's supply. */
-  | { readonly t: 'star'; readonly value: 1 | 3 };
+  /**
+   * "When you stop on a space with an arrow, move the number of spaces shown in the
+   * arrow's direction. This counts as a separate move than how you got there, and never
+   * part of your main move."
+   *
+   * `amount` is signed: negative points back toward Start.
+   */
+  | { readonly t: 'arrow'; readonly amount: number }
+  /** "When you stop on a space that says TRIP, you trip!" */
+  | { readonly t: 'trip' }
+  /** "When you stop on a space with a star, take a bronze 1 point chip." */
+  | { readonly t: 'star'; readonly value: number };
 
 export interface Space {
-  /** 0-based index along the track. */
+  /** 0-based index along the track; index 0 is the Start space. */
   readonly index: number;
   readonly effect: SpaceEffect;
 }
@@ -40,20 +47,20 @@ export interface Track {
   readonly spaces: readonly Space[];
 }
 
-/** Convenience for building space arrays. */
 export function plain(index: number): Space {
   return { index, effect: { t: 'plain' } };
 }
 
-export function forward(index: number, amount: number): Space {
-  return { index, effect: { t: 'forward', amount } };
+/** Positive is toward the finish, negative is back toward Start. */
+export function arrow(index: number, amount: number): Space {
+  return { index, effect: { t: 'arrow', amount } };
 }
 
-export function back(index: number, amount: number): Space {
-  return { index, effect: { t: 'back', amount } };
+export function trip(index: number): Space {
+  return { index, effect: { t: 'trip' } };
 }
 
-export function star(index: number, value: 1 | 3): Space {
+export function star(index: number, value = 1): Space {
   return { index, effect: { t: 'star', value } };
 }
 
@@ -68,9 +75,11 @@ export function assertValidTrack(track: Track): Track {
     if (space.index !== i) {
       throw new Error(`Track '${track.id}' space at position ${i} declares index ${space.index}`);
     }
-    const { effect } = space;
-    if ((effect.t === 'forward' || effect.t === 'back') && effect.amount <= 0) {
-      throw new Error(`Track '${track.id}' space ${i} has non-positive amount ${effect.amount}`);
+    if (space.effect.t === 'arrow' && space.effect.amount === 0) {
+      throw new Error(`Track '${track.id}' space ${i} has a zero-length arrow`);
+    }
+    if (i === 0 && space.effect.t !== 'plain') {
+      throw new Error(`Track '${track.id}' gives the Start space an effect`);
     }
   });
   return track;

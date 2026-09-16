@@ -38,6 +38,14 @@ export interface Ctx {
   readonly s: MutableState;
   readonly events: GameEvent[];
   emit(event: GameEvent): void;
+  /**
+   * Runs the `endTurn` job: finish detection, turn hand-off, race end.
+   *
+   * Injected by the reducer entry point rather than imported, because the pipeline runs
+   * turn jobs and `racing.ts` owns turn-order rules — importing either direction would
+   * make the two modules circular.
+   */
+  onEndTurn: () => void;
 }
 
 export function makeCtx(state: GameState): Ctx {
@@ -48,6 +56,9 @@ export function makeCtx(state: GameState): Ctx {
     events,
     emit(event) {
       events.push(event);
+    },
+    onEndTurn() {
+      invariant(false, 'onEndTurn was not wired up by the reducer entry point');
     },
   };
 }

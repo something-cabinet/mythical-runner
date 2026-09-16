@@ -13,8 +13,9 @@ import type { RaceNumber } from './tracks/index.js';
  *  - a reconnecting client can be caught up by replaying events since its last `step`
  *    instead of receiving a whole snapshot.
  *
- * Because of the first point, movement emits one `racer/moved` per space traversed,
- * never a single jump to the destination.
+ * Because of the first point, movement emits one `racer/moved` per space traversed, never
+ * a single jump to the destination. A warp is deliberately a different event: the rules say
+ * it "doesn't count as moving", so the client snaps rather than animating a hop.
  */
 
 export interface PlayerJoined {
@@ -56,6 +57,15 @@ export interface RaceStarted {
   readonly trackId: string;
 }
 
+/** Who leads off the next race, and why. */
+export interface TurnOrderSet {
+  readonly t: 'turnOrder/set';
+  readonly raceNo: RaceNumber;
+  readonly first: PlayerId;
+  /** 'rolloff' for race 1; 'trailing' for the farthest-behind rule thereafter. */
+  readonly reason: 'rolloff' | 'trailing';
+}
+
 /** Fired for all players at once when the last commit lands. */
 export interface RacersRevealed {
   readonly t: 'race/revealed';
@@ -63,10 +73,11 @@ export interface RacersRevealed {
 }
 
 /**
- * The per-race roll-off for who goes first.
+ * A roll-off for who goes first.
  *
- * Re-rolled fresh every race, so first seat is pure chance rather than inherited from
- * the draft order.
+ * Used for race 1 only; races 2-4 use the farthest-behind rule instead. Also used as a
+ * fallback when no trailing racer can be identified, e.g. a 2-player race where both
+ * racers crossed the line.
  */
 export interface TurnOrderRolled {
   readonly t: 'turnOrder/rolled';
@@ -98,7 +109,27 @@ export interface RacerMoved {
   readonly racerId: RacerId;
   readonly from: number;
   readonly to: number;
-  readonly reason: 'roll' | 'ability' | 'space';
+  readonly reason: 'main' | 'power' | 'space';
+}
+
+/** A racer completed a move having started behind `passed` and ended ahead of them. */
+export interface RacerPassed {
+  readonly t: 'racer/passed';
+  readonly racerId: RacerId;
+  readonly passed: RacerId;
+}
+
+/**
+ * A racer was relocated without moving.
+ *
+ * "When a racer warps, put their token on the new space, but don't count it as moving for
+ * triggering powers, passing racers, etc." — so this is deliberately distinct from
+ * `racer/moved`, and the client should snap rather than animate a hop.
+ */
+export interface RacerWarped {
+  readonly t: 'racer/warped';
+  readonly racerId: RacerId;
+  readonly to: number;
 }
 
 export interface RacerTripped {
@@ -180,9 +211,12 @@ export type GameEvent =
   | RaceStarted
   | RacersRevealed
   | TurnOrderRolled
+  | TurnOrderSet
   | TurnBegan
   | DiceRolled
   | RacerMoved
+  | RacerPassed
+  | RacerWarped
   | RacerTripped
   | RacerStoodUp
   | RacerEliminated

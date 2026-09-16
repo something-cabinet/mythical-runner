@@ -28,6 +28,8 @@ export function fuzz(games: number, baseSeed: number): void {
   let replayMismatches = 0;
   let stalemates = 0;
   let totalActions = 0;
+  let timeoutGames = 0;
+  let autoDecisions = 0;
 
   for (let g = 0; g < games; g++) {
     const seed = (baseSeed + g * 7919) >>> 0;
@@ -36,11 +38,16 @@ export function fuzz(games: number, baseSeed: number): void {
 
     try {
       const rng = makeRng(seed, 0x1234);
+      // A third of games are played with a flaky, distracted table.
+      const timeoutRate = g % 3 === 0 ? 0.15 : 0;
       const result = playGame({
         seed,
         playerCount,
+        timeoutRate,
         choose: (options: Action[]) => options[rng.nextInt(options.length)] as Action,
       });
+      timeoutGames += timeoutRate > 0 ? 1 : 0;
+      autoDecisions += result.events.filter((e) => e.t === 'decision/made' && e.auto).length;
 
       totalActions += result.actions.length;
       stalemates += result.events.filter((e) => e.t === 'race/ended' && e.byStalemate).length;
@@ -82,6 +89,7 @@ export function fuzz(games: number, baseSeed: number): void {
   console.log(`replay mismatch:  ${replayMismatches}`);
   console.log(`stalemate races:  ${stalemates}`);
   console.log(`avg actions/game: ${(totalActions / Math.max(1, games - failures.length)).toFixed(1)}`);
+  console.log(`timeout games:    ${timeoutGames} (auto-answered decisions: ${autoDecisions})`);
 
   console.log('\nwins by seat index (all player counts pooled):');
   const seats = [...winsBySeat.keys()].sort((a, b) => a - b);

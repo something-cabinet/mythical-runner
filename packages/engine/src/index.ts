@@ -17,8 +17,18 @@ export * from './state.js';
 export * from './actions.js';
 export * from './events.js';
 export * from './errors.js';
+export * from './jobs.js';
 export * from './characters/types.js';
-export { RACERS, ALL_RACER_IDS, getRacer, racerName } from './characters/registry.js';
+export type { Hooks, HookCtx, HookName, AskRequest, MutableRacer } from './characters/hooks.js';
+export {
+  RACERS,
+  ALL_RACER_IDS,
+  RACERS_WITH_ABILITIES,
+  getRacer,
+  getHooks,
+  racerName,
+  racerText,
+} from './characters/registry.js';
 export { initGame, applyAction, legalActions, type ApplyResult } from './reducer/index.js';
 export { currentDrafter } from './reducer/draft.js';
 export { redact } from './redact.js';

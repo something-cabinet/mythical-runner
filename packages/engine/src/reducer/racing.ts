@@ -4,24 +4,24 @@ import { IllegalActionError, invariant } from '../errors.js';
 import type { PlayerId } from '../ids.js';
 import type { Rng } from '../rng.js';
 import { goldToken, silverToken, totalPoints } from '../scoring.js';
-import { FINISH, type RaceNumber } from '../tracks/index.js';
+import { FINISH, START, type RaceNumber } from '../tracks/index.js';
 import { FINISHERS_PER_RACE, RACE_COUNT } from '../state.js';
 import { beginCommit } from './commit.js';
-import { moveSteps } from './movement.js';
+import { fireRaceStart, runQueue } from './pipeline.js';
 import { activeRacers, type Ctx, racerOf, scoreOf, seatAt } from './working.js';
 
 /**
  * How many consecutive turns without forward progress before a race is called off.
  *
- * Unreachable in phase 1 — every roll advances someone. It exists because phase 2's
- * blockers and backward-movement abilities genuinely can deadlock a race, and discovering
- * that via an infinite loop in production is worse than discovering it here.
+ * Blockers and backward-movement abilities can genuinely deadlock a race, and finding
+ * that out as an infinite loop in production is worse than capping it here. When it
+ * trips, whoever already finished keeps their cups.
  */
 const STALL_LIMIT_PER_PLAYER = 6;
 
 export function beginRacing(ctx: Ctx, raceNo: RaceNumber, rng: Rng): void {
   const { s } = ctx;
-  const first = rollForFirstSeat(ctx, raceNo, rng);
+  const first = firstSeatFor(ctx, raceNo, rng);
 
   s.phase = {
     t: 'racing',
@@ -31,21 +31,38 @@ export function beginRacing(ctx: Ctx, raceNo: RaceNumber, rng: Rng): void {
     stalledTurns: 0,
     claimedSpaces: [],
   };
+  s.queue = [];
+  s.turnStartPos = START;
+
+  fireRaceStart(ctx, rng);
   announceTurn(ctx);
 }
 
 /**
- * Rolls off for who takes the first turn of this race. Highest roll wins; ties re-roll.
+ * Who leads off a race.
  *
- * Going first is a genuine edge, because a race ends the moment the SECOND racer crosses
- * the line — late seats often never get a final turn. Re-rolling every race makes that
- * edge land on someone different each time instead of compounding on one seat.
+ * Race 1: "Before the first race, roll off exactly like you did for the draft. Whoever
+ * wins goes first."
  *
- * Resolved by the engine rather than as a player action. Players clicking a die four more
- * times per game would change nothing about the outcome, and the roll is shown in the log
- * either way.
+ * Races 2-4: "The player with the farthest behind (or first eliminated) racer in the last
+ * race goes first in the next race." A catch-up rule, not a roll-off — `trailingPlayer` is
+ * recorded when each race ends, while the board still exists.
  */
-function rollForFirstSeat(ctx: Ctx, raceNo: RaceNumber, rng: Rng): PlayerId {
+function firstSeatFor(ctx: Ctx, raceNo: RaceNumber, rng: Rng): PlayerId {
+  const { s } = ctx;
+
+  if (raceNo > 1 && s.trailingPlayer !== null && s.seatOrder.includes(s.trailingPlayer)) {
+    ctx.emit({ t: 'turnOrder/set', raceNo, first: s.trailingPlayer, reason: 'trailing' });
+    return s.trailingPlayer;
+  }
+
+  const first = rollOff(ctx, raceNo, rng);
+  ctx.emit({ t: 'turnOrder/set', raceNo, first, reason: 'rolloff' });
+  return first;
+}
+
+/** Everyone rolls; highest wins; ties re-roll among the tied players. */
+function rollOff(ctx: Ctx, raceNo: RaceNumber, rng: Rng): PlayerId {
   const { s } = ctx;
   let contenders = [...s.seatOrder];
   const shown: { player: PlayerId; value: number }[] = [];
@@ -54,10 +71,8 @@ function rollForFirstSeat(ctx: Ctx, raceNo: RaceNumber, rng: Rng): PlayerId {
   for (let attempt = 0; attempt < 100 && contenders.length > 1; attempt++) {
     const rolls = contenders.map((player) => ({ player, value: rng.rollD6() }));
     if (attempt === 0) shown.push(...rolls);
-
     const best = Math.max(...rolls.map((r) => r.value));
-    const winners = rolls.filter((r) => r.value === best).map((r) => r.player);
-    contenders = winners;
+    contenders = rolls.filter((r) => r.value === best).map((r) => r.player);
   }
 
   const first = contenders[0];
@@ -93,36 +108,50 @@ export function takeTurn(ctx: Ctx, rng: Rng): void {
   invariant(s.phase.t === 'racing', 'takeTurn outside a race');
 
   const racer = racerOf(s, s.phase.active);
-  const posBefore = racer.pos;
+  s.turnStartPos = racer.pos;
 
-  if (racer.tripped) {
-    // A tripped racer spends the whole turn getting up.
-    racer.tripped = false;
-    ctx.emit({ t: 'racer/stoodUp', racerId: racer.racerId });
-  } else {
-    // PHASE 2 SEAM: onTurnStart / replaceRoll / modifyRoll hooks fire around here.
-    const value = rng.rollD6();
-    ctx.emit({ t: 'dice/rolled', player: s.phase.active, racerId: racer.racerId, value });
-    moveSteps(ctx, racer, value, 'roll');
-  }
+  // Standing up from a trip is handled inside the mainMove job, because "your powers can
+  // still trigger" on a tripped turn — only the roll and movement are skipped.
+  s.queue.push(
+    { t: 'beforeMove', racer: racer.racerId },
+    { t: 'mainMove', racer: racer.racerId },
+    { t: 'turnEnd', racer: racer.racerId },
+    { t: 'endTurn' },
+  );
 
-  if (racer.pos === FINISH && racer.finishedRank === null) {
-    const rank = s.phase.finished.length + 1;
-    racer.finishedRank = rank;
-    s.phase.finished.push(racer.owner);
-    ctx.emit({ t: 'racer/finished', racerId: racer.racerId, player: racer.owner, rank });
-  }
-
-  s.phase.stalledTurns = racer.pos > posBefore ? 0 : s.phase.stalledTurns + 1;
-
-  endTurn(ctx);
+  runQueue(ctx, rng);
 }
 
-function endTurn(ctx: Ctx): void {
+/**
+ * Closes out a turn: record finishers, then hand on or end the race.
+ *
+ * Reached via the `endTurn` job rather than called directly, so it always runs after every
+ * ability the turn triggered has fully resolved — including ones that suspended for
+ * minutes waiting on a player.
+ */
+export function endTurn(ctx: Ctx): void {
   const { s } = ctx;
   invariant(s.phase.t === 'racing', 'endTurn outside a race');
+  // Captured once: emitting events invalidates TypeScript's narrowing of `s.phase`, and
+  // re-asserting it on every line would bury the actual logic.
+  const phase = s.phase;
 
-  if (s.phase.finished.length >= FINISHERS_PER_RACE) {
+  // Anyone who crossed the line this turn is placed now, in board order. Abilities can
+  // push more than one racer over at once, so this is a sweep, not a single check.
+  for (const racer of s.board) {
+    if (racer.pos === FINISH && racer.finishedRank === null && !racer.eliminated) {
+      const rank = phase.finished.length + 1;
+      racer.finishedRank = rank;
+      phase.finished.push(racer.owner);
+      ctx.emit({ t: 'racer/finished', racerId: racer.racerId, player: racer.owner, rank });
+    }
+  }
+
+  const mover = s.board.find((r) => r.owner === phase.active);
+  const progressed = mover !== undefined && mover.pos > s.turnStartPos;
+  phase.stalledTurns = progressed ? 0 : phase.stalledTurns + 1;
+
+  if (phase.finished.length >= FINISHERS_PER_RACE) {
     endRace(ctx, false);
     return;
   }
@@ -132,19 +161,19 @@ function endTurn(ctx: Ctx): void {
     endRace(ctx, false);
     return;
   }
-  if (s.phase.stalledTurns >= s.seatOrder.length * STALL_LIMIT_PER_PLAYER) {
+  if (phase.stalledTurns >= s.seatOrder.length * STALL_LIMIT_PER_PLAYER) {
     endRace(ctx, true);
     return;
   }
 
   // Advance to the next seat that still has a racer running.
   const n = s.seatOrder.length;
-  const from = s.seatOrder.indexOf(s.phase.active);
+  const from = s.seatOrder.indexOf(phase.active);
   for (let i = 1; i <= n; i++) {
     const candidate = seatAt(s, (from + i) % n);
     const racer = s.board.find((r) => r.owner === candidate);
     if (racer && racer.finishedRank === null && !racer.eliminated) {
-      s.phase.active = candidate;
+      phase.active = candidate;
       announceTurn(ctx);
       return;
     }
@@ -177,9 +206,38 @@ function endRace(ctx: Ctx, byStalemate: boolean): void {
     ctx.emit({ t: 'token/awarded', player: second, token });
   }
 
+  s.trailingPlayer = trailingPlayerOf(ctx);
+
   ctx.emit({ t: 'race/ended', raceNo, podium: [...podium], byStalemate });
   s.phase = { t: 'scored', raceNo };
   s.deadline = null;
+  // Anything still queued belonged to a turn in a race that no longer exists.
+  s.queue = [];
+  s.pending = null;
+}
+
+/**
+ * The player whose racer finished farthest behind, or was eliminated first.
+ *
+ * Eliminated racers outrank position entirely — the rulebook says "farthest behind (or
+ * first eliminated)", and elimination order is recovered from `eliminationOrder`. Racers
+ * that crossed the line are never candidates.
+ */
+function trailingPlayerOf(ctx: Ctx): PlayerId | null {
+  const { s } = ctx;
+  const eliminated = s.board
+    .filter((r) => r.eliminated)
+    .sort((a, b) => a.eliminationOrder - b.eliminationOrder);
+  const firstOut = eliminated[0];
+  if (firstOut) return firstOut.owner;
+
+  const running = s.board.filter((r) => r.finishedRank === null);
+  if (running.length === 0) return null;
+
+  let worst = running[0];
+  invariant(worst, 'unreachable: running is non-empty');
+  for (const r of running) if (r.pos < worst.pos) worst = r;
+  return worst.owner;
 }
 
 /** Acknowledges the scoreboard and starts the next race, or ends the game. */

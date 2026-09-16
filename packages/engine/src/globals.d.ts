@@ -25,3 +25,11 @@ declare const console: {
   error(...args: unknown[]): void;
 };
 
+
+/** Used only by the dev harness. */
+declare const Date: { now(): number };
+
+declare const JSON: {
+  stringify(value: unknown): string;
+  parse(text: string): unknown;
+};

@@ -13,7 +13,8 @@
     "build": "tsc",
     "hotseat": "tsc && node dist/dev/hotseat.js",
     "fuzz": "tsc && node dist/dev/fuzz.js",
-    "test": "tsc && node dist/dev/fuzz.js 1000 1"
+    "scenarios": "tsc && node dist/dev/scenarios.js",
+    "test": "tsc && node dist/dev/scenarios.js && node dist/dev/fuzz.js 1000 1"
   },
   "devDependencies": {
     "typescript": "^5.7.2"

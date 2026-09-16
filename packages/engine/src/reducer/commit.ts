@@ -69,6 +69,7 @@ function reveal(ctx: Ctx, rng: Rng): void {
     pos: START,
     tripped: false,
     eliminated: false,
+    eliminationOrder: 0,
     finishedRank: null,
     memo: {},
   }));

@@ -1,25 +1,17 @@
 import { racerId, type RacerId } from '../ids.js';
+import { SLICE_RACERS } from './defs/index.js';
+import type { Hooks } from './hooks.js';
 import type { RacerDef } from './types.js';
 
 /**
  * The racer roster.
  *
- * ############################################################################
- * # PHASE 1: VANILLA PLACEHOLDERS                                            #
- * #                                                                          #
- * # Every racer here is mechanically identical — roll, move, nothing else.   #
- * # That is deliberate. Phase 1 proves the draft, commit, turn loop, finish  #
- * # detection and scoring work in isolation, with no ability interactions to #
- * # confound a failure.                                                      #
- * #                                                                          #
- * # Phase 2 replaces these with real definitions carrying `hooks`. Nothing   #
- * # outside this file knows how many racers exist or what they do, so that   #
- * # swap is contained.                                                       #
- * ############################################################################
+ * Phase 2 status: seven racers are real (see `defs/index.ts`) and exercise every hook in
+ * the pipeline. The rest are vanilla padding — roll, move, nothing else — so that a
+ * 6-player draft, which consumes 24 cards, still has a full pool to deal from.
  *
- * Count matches the real game (35), which matters for one reason: the draft deals
- * 4 x playerCount cards, so at 6 players it consumes 24. The roster must comfortably
- * exceed that or late drafts become forced.
+ * Phase 5 replaces the padding with the remaining real racers. Nothing outside this file
+ * knows which are which.
  */
 const ROSTER_SIZE = 35;
 
@@ -32,11 +24,17 @@ function vanilla(n: number): RacerDef {
   };
 }
 
-export const RACERS: readonly RacerDef[] = Array.from({ length: ROSTER_SIZE }, (_, i) =>
-  vanilla(i + 1),
-);
+const PADDING_COUNT = ROSTER_SIZE - SLICE_RACERS.length;
+
+export const RACERS: readonly RacerDef[] = [
+  ...SLICE_RACERS,
+  ...Array.from({ length: PADDING_COUNT }, (_, i) => vanilla(i + 1)),
+];
 
 const BY_ID = new Map<RacerId, RacerDef>(RACERS.map((r) => [r.id, r]));
+
+/** Shared empty hook set, so vanilla racers cost nothing to dispatch. */
+const NO_HOOKS: Hooks = Object.freeze({});
 
 export function getRacer(id: RacerId): RacerDef {
   const def = BY_ID.get(id);
@@ -44,8 +42,22 @@ export function getRacer(id: RacerId): RacerDef {
   return def;
 }
 
+/** The hooks for a racer, or an empty set. Hot path — called per movement step. */
+export function getHooks(id: RacerId): Hooks {
+  return (BY_ID.get(id)?.hooks as Hooks | undefined) ?? NO_HOOKS;
+}
+
 export function racerName(id: RacerId): string {
   return BY_ID.get(id)?.name ?? String(id);
 }
 
+export function racerText(id: RacerId): string {
+  return BY_ID.get(id)?.text ?? '';
+}
+
 export const ALL_RACER_IDS: readonly RacerId[] = RACERS.map((r) => r.id);
+
+/** Racers with at least one hook. Used by tests and by the fuzzer's reporting. */
+export const RACERS_WITH_ABILITIES: readonly RacerId[] = RACERS.filter(
+  (r) => r.hooks !== undefined,
+).map((r) => r.id);

@@ -16,6 +16,7 @@ import { racerName } from '../characters/registry.js';
 import type { Action } from '../actions.js';
 import type { GameEvent } from '../events.js';
 import { playerId, type PlayerId } from '../ids.js';
+import { makeRng } from '../rng.js';
 import { totalPoints } from '../scoring.js';
 import type { GameState } from '../state.js';
 
@@ -26,6 +27,14 @@ export interface PlayOptions {
   readonly choose?: (options: Action[], state: GameState) => Action;
   /** Safety valve: a bug that fails to advance the phase would otherwise hang. */
   readonly maxActions?: number;
+  /**
+   * Probability per step of firing `system/timeout` instead of a player action.
+   *
+   * Exercises the auto-advance path — auto-rolls, auto-commits, and auto-answered
+   * decisions — which real games hit whenever someone wanders off, and which would
+   * otherwise only ever be covered by a single scenario test.
+   */
+  readonly timeoutRate?: number;
 }
 
 export interface PlayResult {
@@ -39,6 +48,8 @@ export function playGame(opts: PlayOptions): PlayResult {
   const { seed, playerCount } = opts;
   const choose = opts.choose ?? ((options) => options[0] as Action);
   const maxActions = opts.maxActions ?? 20000;
+  const timeoutRate = opts.timeoutRate ?? 0;
+  const timeoutRng = makeRng(seed, 0xbeef);
 
   const players: PlayerId[] = Array.from({ length: playerCount }, (_, i) =>
     playerId(`p${i + 1}`),
@@ -63,6 +74,11 @@ export function playGame(opts: PlayOptions): PlayResult {
   while (state.phase.t !== 'gameOver') {
     if (actions.length > maxActions) {
       throw new Error(`game did not terminate within ${maxActions} actions`);
+    }
+
+    if (timeoutRate > 0 && timeoutRng.nextFloat() < timeoutRate) {
+      apply({ t: 'system/timeout', at: 0 });
+      continue;
     }
 
     // Find someone with something to do. Order matters only for determinism.
@@ -100,7 +116,15 @@ export function describe(e: GameEvent): string | null {
     case 'race/revealed':
       return `Entries: ${e.picks.map((p) => `${p.player}=${racerName(p.racerId)}`).join(', ')}`;
     case 'turnOrder/rolled':
-      return `Roll-off: ${e.rolls.map((r) => `${r.player}=${r.value}`).join(' ')} -> ${e.first} goes first.`;
+      return `Roll-off: ${e.rolls.map((r) => `${r.player}=${r.value}`).join(' ')}`;
+    case 'turnOrder/set':
+      return e.reason === 'trailing'
+        ? `${e.first} goes first (farthest behind last race).`
+        : `${e.first} goes first (won the roll-off).`;
+    case 'racer/warped':
+      return `  ${racerName(e.racerId)} warps to ${e.to}.`;
+    case 'racer/eliminated':
+      return `  ${racerName(e.racerId)} is out of the race!`;
     case 'dice/rolled':
       return `  ${e.player} rolls ${e.value} (${racerName(e.racerId)})`;
     case 'racer/stoodUp':

@@ -1,4 +1,5 @@
 import type { ChoiceId, PlayerId, RacerId } from './ids.js';
+import type { Job } from './jobs.js';
 import type { Token } from './scoring.js';
 import type { RaceNumber } from './tracks/index.js';
 
@@ -22,11 +23,18 @@ export interface Player {
 export interface RacerState {
   readonly owner: PlayerId;
   readonly racerId: RacerId;
-  /** START (-1) .. FINISH (30). See tracks/types.ts. */
+  /** START (0) .. FINISH (30). See tracks/types.ts. */
   readonly pos: number;
-  /** Tripped racers spend their next turn standing up instead of moving. */
+  /** A tripped racer skips their next main move, but their powers still trigger. */
   readonly tripped: boolean;
   readonly eliminated: boolean;
+  /**
+   * Order of elimination within the race, 1-based; 0 while still in.
+   *
+   * Needed because the next race's first player is "the player with the farthest behind
+   * (or first eliminated) racer", and elimination order cannot be recovered from position.
+   */
+  readonly eliminationOrder: number;
   /** Finishing rank, 1-based, or null if still racing. */
   readonly finishedRank: number | null;
   /**
@@ -40,17 +48,17 @@ export interface RacerState {
 /**
  * A choice the engine is blocked on.
  *
- * Abilities frequently need input from a player who is NOT the active player — Duelist's
- * duels, Centaur's kick target, every optional "may" ability. When a handler needs one, it
- * returns a PendingDecision; the engine parks, and the only legal action in the entire game
- * becomes that player's response.
+ * Powers frequently need input from a player who is NOT the active player — Duelist can
+ * be declared on someone else's turn, and every "CAN" power is optional. When a handler
+ * needs one, it returns a PendingDecision; the engine parks, and the only legal action in
+ * the entire game becomes that player's response.
  */
 export interface PendingDecision {
   /** Who must answer. Not necessarily the active player. */
   readonly player: PlayerId;
-  /** Which racer's ability raised this, for UI attribution. */
+  /** Which racer's power raised this, for UI attribution. */
   readonly source: RacerId;
-  /** Short prompt, e.g. "Choose a racer to kick backward". */
+  /** Short prompt, e.g. "Shout DUEL?". */
   readonly prompt: string;
   readonly options: readonly DecisionOption[];
   /**
@@ -103,8 +111,9 @@ export type Phase =
       /** In finishing order. The race ends when this reaches FINISHERS_PER_RACE. */
       readonly finished: readonly PlayerId[];
       /**
-       * Consecutive turns in which no racer gained ground. Feeds the stalemate rule:
-       * blockers plus backward-movement abilities can genuinely deadlock a race.
+       * Consecutive turns in which no racer gained ground. Implements additional rule 9:
+       * "If racer powers create a loop where no one can finish, the race ends with no one
+       * getting the remaining points."
        */
       readonly stalledTurns: number;
       /**
@@ -135,13 +144,39 @@ export interface GameState {
   /** Racers already raced, and therefore no longer selectable. */
   readonly used: Readonly<Record<PlayerId, readonly RacerId[]>>;
   readonly scores: Readonly<Record<PlayerId, readonly Token[]>>;
-  /** Remaining star supply, decremented across both Wild Wilds races. */
-  readonly starSupply: Readonly<Record<1 | 3, number>>;
+
+  /**
+   * Who leads off the next race: "the player with the farthest behind (or first
+   * eliminated) racer in the last race". Computed as each race ends, while the board still
+   * exists, because the board is cleared before the next race is set up. Null before race 1.
+   */
+  readonly trailingPlayer: PlayerId | null;
 
   readonly phase: Phase;
   /** Only populated during 'racing'. */
   readonly board: readonly RacerState[];
   readonly pending: PendingDecision | null;
+  /**
+   * Work still to do in the current turn.
+   *
+   * A turn cannot live on the JS call stack, because an ability may suspend mid-movement
+   * to ask a player something and the Durable Object may hibernate before they answer.
+   * So the turn is an explicit queue of jobs held in serializable state: the engine drains
+   * it, and suspending simply means stopping with jobs still in it.
+   *
+   * Empty except while a turn is resolving. Never sent to clients in a meaningful way —
+   * it is drained to empty before any broadcast.
+   */
+  readonly queue: readonly Job[];
+
+  /**
+   * Where the active racer stood when its turn began.
+   *
+   * Held in state rather than a local because the turn may suspend and resume across
+   * separate actions, and the stalemate counter needs to compare against the start of the
+   * whole turn, not the start of the resumed fragment.
+   */
+  readonly turnStartPos: number;
 
   /**
    * Unix ms after which the active player (or pending decider) may be auto-advanced.
