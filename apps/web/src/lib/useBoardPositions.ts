@@ -9,8 +9,27 @@ const HOP_MS = 170;
 /** A burst of powers can queue dozens of hops; past this, play faster so turns don't drag. */
 const BACKLOG_FAST = 24;
 const HOP_FAST_MS = 60;
+/** How long the die tumbles, then how long the result sits before the racer moves. */
+export const ROLL_TUMBLE_MS = 650;
+const ROLL_HOLD_MS = 550;
 
-type Step = { readonly racer: RacerId; readonly to: number; readonly hop: boolean };
+/** The most recent roll, for the board to show as a die. */
+export interface ShownRoll {
+  /** Changes with every roll, so the die remounts and tumbles again. */
+  readonly key: number;
+  readonly racerId: RacerId;
+  readonly value: number;
+  readonly modifiedBy?: RacerId | undefined;
+  /** False while it is part of the turn being played out; true once the next turn begins. */
+  readonly stale: boolean;
+  /** Shown without the tumble, e.g. under reduced motion. */
+  readonly instant: boolean;
+}
+
+type Step =
+  | { readonly t: 'move'; readonly racer: RacerId; readonly to: number; readonly hop: boolean }
+  | { readonly t: 'roll'; readonly racer: RacerId; readonly value: number; readonly modifiedBy?: RacerId | undefined }
+  | { readonly t: 'turn' };
 
 function truth(message: StateMessage | null): Positions {
   const out: Record<string, number> = {};
@@ -23,6 +42,7 @@ export interface BoardAnimation {
   readonly positions: Positions;
   /** True while queued moves are still playing out. */
   readonly animating: boolean;
+  readonly roll: ShownRoll | null;
 }
 
 /**
@@ -45,11 +65,17 @@ export interface BoardAnimation {
  *    a reconnect delivers a snapshot with no events at all. Resyncing means the drawing can
  *    never drift from the truth for longer than one turn.
  *
- * Honours `prefers-reduced-motion` by skipping the replay entirely.
+ * A `dice/rolled` event queues a pause for the die to tumble and land, so everyone sees the
+ * number before the racer sets off.
+ *
+ * Honours `prefers-reduced-motion` by skipping the replay entirely; the die then just shows
+ * the latest roll.
  */
 export function useBoardPositions(client: RoomClient, message: StateMessage | null): BoardAnimation {
   const [positions, setPositions] = useState<Positions>(() => truth(message));
   const [animating, setAnimating] = useState(false);
+  const [roll, setRoll] = useState<ShownRoll | null>(null);
+  const rollKey = useRef(0);
   const queue = useRef<Step[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef(message);
@@ -66,8 +92,24 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
         setAnimating(false);
         return;
       }
-      setPositions((prev) => ({ ...prev, [next.racer]: next.to }));
-      const delay = !next.hop ? 0 : queue.current.length > BACKLOG_FAST ? HOP_FAST_MS : HOP_MS;
+      let delay = 0;
+      if (next.t === 'move') {
+        setPositions((prev) => ({ ...prev, [next.racer]: next.to }));
+        delay = !next.hop ? 0 : queue.current.length > BACKLOG_FAST ? HOP_FAST_MS : HOP_MS;
+      } else if (next.t === 'roll') {
+        setRoll({
+          key: ++rollKey.current,
+          racerId: next.racer,
+          value: next.value,
+          modifiedBy: next.modifiedBy,
+          stale: false,
+          instant: false,
+        });
+        // A long backlog means a burst of powers; don't make it longer.
+        delay = queue.current.length > BACKLOG_FAST ? HOP_FAST_MS : ROLL_TUMBLE_MS + ROLL_HOLD_MS;
+      } else {
+        setRoll((prev) => (prev ? { ...prev, stale: true } : prev));
+      }
       timer.current = setTimeout(drain, delay);
     };
 
@@ -78,6 +120,17 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
         timer.current = null;
         setPositions(truth(latest.current));
         setAnimating(false);
+        const last = [...events].reverse().find((e) => e.t === 'dice/rolled');
+        if (last?.t === 'dice/rolled') {
+          setRoll({
+            key: ++rollKey.current,
+            racerId: last.racerId,
+            value: last.value,
+            modifiedBy: last.modifiedBy,
+            stale: false,
+            instant: true,
+          });
+        }
         return;
       }
 
@@ -85,10 +138,15 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
         if (e.t === 'race/started') {
           // A new race: everyone is back on Start. Drop any stale hops from the last race.
           queue.current = [];
+          setRoll(null);
+        } else if (e.t === 'dice/rolled') {
+          queue.current.push({ t: 'roll', racer: e.racerId, value: e.value, modifiedBy: e.modifiedBy });
+        } else if (e.t === 'turn/began') {
+          queue.current.push({ t: 'turn' });
         } else if (e.t === 'racer/moved') {
-          queue.current.push({ racer: e.racerId, to: e.to, hop: true });
+          queue.current.push({ t: 'move', racer: e.racerId, to: e.to, hop: true });
         } else if (e.t === 'racer/warped') {
-          queue.current.push({ racer: e.racerId, to: e.to, hop: false });
+          queue.current.push({ t: 'move', racer: e.racerId, to: e.to, hop: false });
         }
       }
 
@@ -116,5 +174,5 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
     if (!timer.current && queue.current.length === 0) setPositions(truth(latest.current));
   }, [boardKey]);
 
-  return { positions, animating };
+  return { positions, animating, roll };
 }

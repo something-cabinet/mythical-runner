@@ -1,64 +1,206 @@
 import { FINISH, trackForRace, type PlayerView, type RacerId, type RaceNumber } from '@mr/engine';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { ordinal, racerInitials, racerName, rawName, seatColor } from '../lib/present';
+import { ROLL_TUMBLE_MS, type ShownRoll } from '../lib/useBoardPositions';
 
 /**
- * The race track, drawn as a snake so thirty spaces fit a phone held upright.
+ * The race track, drawn as a loop like the physical board.
  *
- *   row 0:   0  1  2  3  4  5  →
- *   row 1:  11 10  9  8  7  6  ←
- *   row 2:  12 13 14 15 16 17  →
- *   row 3:  23 22 21 20 19 18  ←
- *   row 4:  24 25 26 27 28 29  →  finish
+ * Laid out on a 15 × 4 grid (landscape):
  *
- * A line runs through the space centres in order, so the direction of travel is readable
- * without numbering every space. Space 0 is the Start space, which the rules count as a
- * real space.
+ *   START·· 1  2  3  4  5  6  7  8  9 10 11 12
+ *   FIN     ┌───────── infield ─────────┐   13
+ *   FIN     └───────────────────────────┘   14
+ *   29 28 27 26 25 24 23 22 21 20 19 18 17 16 15
+ *
+ * Space 0 is the Start space, which the rules count as a real space. The finish sits just
+ * past space 29, where the loop closes. On a phone the same grid is transposed, so the
+ * track runs down the left side and back up the right.
  */
 
-const COLS = 6;
-const ROWS = 5;
-const CELL = 100;
-const GAP = 10;
-const PAD = 10;
-const FINISH_H = 84;
-/** Token radius for a racer alone on a space; shrinks as a space gets crowded. */
-const R_FINISH = 26;
+const COLS = 15;
+const ROWS = 4;
+const GAP = 6;
+/** The dark rim around the track. */
+const PAD = 14;
+const R_FINISH = 24;
 
-const WIDTH = PAD * 2 + COLS * CELL + (COLS - 1) * GAP;
-const FINISH_Y = PAD + ROWS * (CELL + GAP);
-const HEIGHT = FINISH_Y + FINISH_H + PAD;
+/** Plain spaces cycle through the board's colours, like the printed track. */
+const SPACE_COLORS = ['#f28fd0', '#ffc93c', '#44bf6c', '#5ea8ef', '#f0473c'] as const;
 
-function cellOrigin(index: number): { x: number; y: number } {
-  const row = Math.floor(index / COLS);
-  const offset = index % COLS;
-  const col = row % 2 === 0 ? offset : COLS - 1 - offset;
-  return { x: PAD + col * (CELL + GAP), y: PAD + row * (CELL + GAP) };
+interface Cell {
+  readonly c: number;
+  readonly r: number;
+  readonly cs: number;
+  readonly rs: number;
 }
 
-function cellCenter(index: number): { x: number; y: number } {
-  const { x, y } = cellOrigin(index);
-  return { x: x + CELL / 2, y: y + CELL / 2 };
+interface Rect {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
 }
 
-/**
- * Where to put the n-th of `count` racers sharing one space, and how big to draw it.
- *
- * The board scales down to roughly 45 px per space on a phone, so a token has to be as
- * large as the crowd allows: one racer gets nearly the whole space, six share it.
- */
-function slot(n: number, count: number): { dx: number; dy: number; r: number } {
-  if (count <= 1) return { dx: 0, dy: 8, r: 30 };
-  if (count === 2) return { dx: n === 0 ? -23 : 23, dy: 8, r: 23 };
-  const perRow = count <= 4 ? 2 : 3;
-  const step = perRow === 2 ? 44 : 31;
-  const col = n % perRow;
-  const row = Math.floor(n / perRow);
-  const rows = Math.ceil(count / perRow);
+/** Where a space sits on the landscape grid. */
+function gridCell(index: number): Cell {
+  if (index === 0) return { c: 0, r: 0, cs: 3, rs: 1 };
+  if (index <= 12) return { c: index + 2, r: 0, cs: 1, rs: 1 };
+  if (index <= 14) return { c: COLS - 1, r: index - 12, cs: 1, rs: 1 };
+  return { c: 29 - index, r: ROWS - 1, cs: 1, rs: 1 };
+}
+
+const FINISH_CELL: Cell = { c: 0, r: 1, cs: 1, rs: 2 };
+const INFIELD_CELL: Cell = { c: 1, r: 1, cs: COLS - 2, rs: 2 };
+
+interface Geometry {
+  readonly portrait: boolean;
+  readonly width: number;
+  readonly height: number;
+  rect(cell: Cell): Rect;
+}
+
+function geometry(portrait: boolean): Geometry {
+  // Portrait cells are short and wide so thirty spaces fit a phone without endless scrolling.
+  const colW = 100;
+  const rowH = portrait ? 54 : 100;
+  const across = portrait ? ROWS : COLS;
+  const down = portrait ? COLS : ROWS;
   return {
-    dx: (col - (perRow - 1) / 2) * step,
-    dy: (row - (rows - 1) / 2) * 40 + 10,
-    r: perRow === 2 ? 20 : 15,
+    portrait,
+    width: PAD * 2 + across * colW + (across - 1) * GAP,
+    height: PAD * 2 + down * rowH + (down - 1) * GAP,
+    rect(cell) {
+      const c = portrait ? cell.r : cell.c;
+      const r = portrait ? cell.c : cell.r;
+      const cs = portrait ? cell.rs : cell.cs;
+      const rs = portrait ? cell.cs : cell.rs;
+      return {
+        x: PAD + c * (colW + GAP),
+        y: PAD + r * (rowH + GAP),
+        w: cs * colW + (cs - 1) * GAP,
+        h: rs * rowH + (rs - 1) * GAP,
+      };
+    },
   };
+}
+
+const center = (b: Rect) => ({ x: b.x + b.w / 2, y: b.y + b.h / 2 });
+
+/** Splits a strip off a box for a label, so racers standing there never cover it. */
+function splitLabel(b: Rect, side: 'top' | 'left', size: number): { label: { x: number; y: number }; tokens: Rect } {
+  return side === 'top'
+    ? { label: { x: b.x + b.w / 2, y: b.y + size / 2 }, tokens: { ...b, y: b.y + size, h: b.h - size } }
+    : { label: { x: b.x + size / 2, y: b.y + b.h / 2 }, tokens: { ...b, x: b.x + size, w: b.w - size } };
+}
+
+/**
+ * Where to put the n-th of `count` tokens in a box, and how big to draw them: whichever
+ * row/column split gives the largest tokens.
+ */
+function slot(n: number, count: number, w: number, h: number, max: number): { dx: number; dy: number; r: number } {
+  let best = { perRow: 1, r: 0 };
+  for (let perRow = 1; perRow <= Math.max(1, count); perRow++) {
+    const rows = Math.ceil(count / perRow);
+    const r = Math.min(max, (Math.min(w / perRow, h / rows) / 2) * 0.88);
+    if (r > best.r) best = { perRow, r };
+  }
+  const rows = Math.ceil(count / best.perRow);
+  const col = n % best.perRow;
+  const row = Math.floor(n / best.perRow);
+  const inRow = row === rows - 1 ? count - row * best.perRow : best.perRow;
+  const stepX = w / best.perRow;
+  const stepY = h / rows;
+  return {
+    dx: (col - (inRow - 1) / 2) * stepX,
+    dy: (row - (rows - 1) / 2) * stepY,
+    r: best.r,
+  };
+}
+
+const WIDE_QUERY = '(min-width: 960px)';
+
+function subscribeWide(onChange: () => void): () => void {
+  const mq = window.matchMedia(WIDE_QUERY);
+  mq.addEventListener('change', onChange);
+  return () => mq.removeEventListener('change', onChange);
+}
+
+/** Landscape once the race screen is wide enough to give the board its own full-width row. */
+function useWide(): boolean {
+  return useSyncExternalStore(subscribeWide, () => window.matchMedia(WIDE_QUERY).matches);
+}
+
+/** Pip positions on a die face, in units of a third of the face. */
+const PIPS: Record<number, readonly (readonly [number, number])[]> = {
+  1: [[0, 0]],
+  2: [[-1, -1], [1, 1]],
+  3: [[-1, -1], [0, 0], [1, 1]],
+  4: [[-1, -1], [1, -1], [-1, 1], [1, 1]],
+  5: [[-1, -1], [1, -1], [0, 0], [-1, 1], [1, 1]],
+  6: [[-1, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [1, 1]],
+};
+
+/**
+ * The latest roll as a big die in the infield. It tumbles through random faces, lands on
+ * the result, and then names who rolled it. Remounted per roll via `key`.
+ */
+function Die({ roll, x, y, size, color, portrait }: {
+  roll: ShownRoll;
+  x: number;
+  y: number;
+  size: number;
+  color: string;
+  portrait: boolean;
+}) {
+  const [face, setFace] = useState(() => (roll.instant ? roll.value : 1 + Math.floor(Math.random() * 6)));
+  const [landed, setLanded] = useState(roll.instant);
+
+  useEffect(() => {
+    if (roll.instant) return;
+    const spin = setInterval(() => setFace((f) => ((f + 1 + Math.floor(Math.random() * 4)) % 6) + 1), 75);
+    const land = setTimeout(() => {
+      clearInterval(spin);
+      setFace(roll.value);
+      setLanded(true);
+    }, ROLL_TUMBLE_MS);
+    return () => {
+      clearInterval(spin);
+      clearTimeout(land);
+    };
+  }, [roll]);
+
+  const pips = PIPS[face];
+  const unit = size / 3.4;
+  const name = racerName(roll.racerId);
+  const labelX = portrait ? x : x + size / 2 + 22;
+  const labelY = portrait ? y + size / 2 + 30 : y;
+
+  return (
+    <g className={`dice${landed ? ' dice-landed' : ' dice-tumbling'}${roll.stale ? ' dice-stale' : ''}`}>
+      <title>{`${name} rolled ${roll.value}`}</title>
+      <g transform={`translate(${x} ${y})`}>
+        <g className="dice-body">
+          <rect x={-size / 2} y={-size / 2} width={size} height={size} rx={size * 0.2} className="dice-face" style={{ stroke: color }} />
+          {pips ? (
+            pips.map(([px, py], i) => <circle key={i} cx={px * unit} cy={py * unit} r={size * 0.085} className="dice-pip" />)
+          ) : (
+            <text className="dice-number num">{face}</text>
+          )}
+        </g>
+      </g>
+      {landed && (
+        <text className="dice-label" x={labelX} y={labelY} style={{ textAnchor: portrait ? 'middle' : 'start' }}>
+          <tspan x={labelX} dy={portrait ? 0 : '-0.55em'} style={{ fill: color }}>
+            {name}
+          </tspan>
+          <tspan x={labelX} dy="1.2em">
+            {roll.modifiedBy ? `rolled ${roll.value} (${racerName(roll.modifiedBy)})` : `rolled ${roll.value}`}
+          </tspan>
+        </text>
+      )}
+    </g>
+  );
 }
 
 interface BoardProps {
@@ -69,16 +211,26 @@ interface BoardProps {
   /** Racers to highlight, e.g. the target of a decision. */
   readonly highlight?: readonly RacerId[];
   readonly claimedSpaces?: readonly number[];
+  /** The latest roll, drawn as a die in the infield. */
+  readonly roll?: ShownRoll | null;
+  /** The racer whose turn it is, which gets a glow. */
+  readonly activeRacer?: RacerId | null;
 }
 
-export function Board({ view, raceNo, positions, highlight = [], claimedSpaces = [] }: BoardProps) {
+export function Board({
+  view,
+  raceNo,
+  positions,
+  highlight = [],
+  claimedSpaces = [],
+  roll = null,
+  activeRacer = null,
+}: BoardProps) {
   const track = trackForRace(raceNo);
-
-  const pathPoints = track.spaces.map((s) => cellCenter(s.index));
-  const last = pathPoints[pathPoints.length - 1] ?? { x: 0, y: 0 };
-  const path = [...pathPoints, { x: last.x, y: FINISH_Y + FINISH_H / 2 }]
-    .map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x} ${p.y}`)
-    .join(' ');
+  const g = geometry(!useWide());
+  const boxes = track.spaces.map((s) => g.rect(gridCell(s.index)));
+  const finishBox = g.rect(FINISH_CELL);
+  const infield = g.rect(INFIELD_CELL);
 
   // Group racers by where they are drawn, so racers sharing a space fan out.
   const live = view.board.filter((r) => !r.eliminated);
@@ -95,58 +247,109 @@ export function Board({ view, raceNo, positions, highlight = [], claimedSpaces =
     .filter((r) => drawnPos(r.racerId, r.pos) >= FINISH)
     .sort((a, b) => (a.finishedRank ?? 99) - (b.finishedRank ?? 99));
 
-  return (
-    <svg
-      className="board"
-      viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-      role="img"
-      aria-label={`${track.name} race track`}
-    >
-      <path className="track-line" d={path} />
+  /** Direction of travel at a space, in degrees, for drawing arrows. */
+  const heading = (index: number): number => {
+    const from = boxes[Math.min(index, boxes.length - 2)];
+    const to = boxes[Math.min(index + 1, boxes.length - 1)];
+    if (!from || !to) return 0;
+    const a = center(from);
+    const b = center(to);
+    return (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+  };
 
-      {track.spaces.map((space) => {
-        const { x, y } = cellOrigin(space.index);
-        const c = cellCenter(space.index);
+  const inf = center(infield);
+  const startSplit = g.portrait ? splitLabel(boxes[0] ?? finishBox, 'top', 40) : splitLabel(boxes[0] ?? finishBox, 'left', 130);
+  const finishSplit = g.portrait ? splitLabel(finishBox, 'left', 78) : splitLabel(finishBox, 'top', 28);
+
+  return (
+    <svg className="board" viewBox={`0 0 ${g.width} ${g.height}`} role="img" aria-label={`${track.name} race track`}>
+      <rect className="board-rim" x={0} y={0} width={g.width} height={g.height} rx={PAD + 26} />
+      <rect
+        className="board-outline"
+        x={PAD / 2}
+        y={PAD / 2}
+        width={g.width - PAD}
+        height={g.height - PAD}
+        rx={PAD + 20}
+      />
+      <rect
+        className="board-outline"
+        x={infield.x - GAP / 2}
+        y={infield.y - GAP / 2}
+        width={infield.w + GAP}
+        height={infield.h + GAP}
+        rx={10}
+      />
+      <text
+        className={`infield-name${roll && !roll.stale ? ' infield-name-dim' : ''}`}
+        x={inf.x}
+        y={inf.y}
+        transform={g.portrait ? `rotate(-90 ${inf.x} ${inf.y})` : undefined}
+      >
+        {track.name.toUpperCase()}
+      </text>
+
+      {track.spaces.map((space, i) => {
+        const b = boxes[i] ?? { x: 0, y: 0, w: 0, h: 0 };
+        const c = center(b);
         const e = space.effect;
         const isStart = space.index === 0;
-        const kind = isStart ? 'start' : e.t;
         const claimed = e.t === 'star' && claimedSpaces.includes(space.index);
+        const fill = isStart ? SPACE_COLORS[3] : SPACE_COLORS[(space.index - 1) % SPACE_COLORS.length];
+        const inset = 7;
 
         return (
-          <g key={space.index}>
-            <rect
-              className={`space space-${kind}${claimed ? ' space-claimed' : ''}`}
-              x={x}
-              y={y}
-              width={CELL}
-              height={CELL}
-              rx={16}
-            />
-            {!isStart && (
-              <text className="idx num" x={x + 10} y={y + 22}>
-                {space.index}
-              </text>
+          <g key={space.index} className={claimed ? 'space-claimed' : undefined}>
+            <rect className="space" x={b.x} y={b.y} width={b.w} height={b.h} rx={8} fill={fill} />
+            {e.t !== 'plain' && (
+              <rect
+                className="space-panel"
+                x={b.x + inset}
+                y={b.y + inset}
+                width={b.w - inset * 2}
+                height={b.h - inset * 2}
+                rx={5}
+              />
             )}
             {isStart && (
-              // Top-left like the space numbers, so racers waiting on Start never cover it.
-              <text className="idx" x={x + 10} y={y + 22}>
+              <text
+                className="start-label"
+                x={startSplit.label.x}
+                y={startSplit.label.y}
+                style={g.portrait ? { fontSize: 24 } : undefined}
+              >
                 START
               </text>
             )}
+            {!isStart && e.t === 'plain' && space.index % 5 === 0 && (
+              <text className="milestone num" x={c.x} y={c.y}>
+                {space.index}
+              </text>
+            )}
+            {!isStart && !(e.t === 'plain' && space.index % 5 === 0) && (
+              <text className="idx num" x={b.x + 6} y={b.y + 15}>
+                {space.index}
+              </text>
+            )}
             {e.t === 'star' && (
-              <text className={`glyph glyph-star${claimed ? ' space-claimed' : ''}`} x={c.x} y={c.y}>
+              <text className="glyph glyph-star" x={c.x} y={c.y}>
                 ★
               </text>
             )}
             {e.t === 'trip' && (
               <text className="glyph glyph-trip" x={c.x} y={c.y}>
-                TRIP
+                TRIP!
               </text>
             )}
             {e.t === 'arrow' && (
-              <text className="glyph glyph-arrow num" x={c.x} y={c.y}>
-                {e.amount > 0 ? `+${e.amount}` : `−${-e.amount}`}
-              </text>
+              <g transform={`translate(${c.x} ${c.y})`}>
+                <path
+                  className="glyph-arrow-shape"
+                  d="M-24 -9 H4 V-18 L24 0 L4 18 V9 H-24 Z"
+                  transform={`rotate(${heading(space.index) + (e.amount < 0 ? 180 : 0)}) scale(${g.portrait ? 0.85 : 1})`}
+                />
+                <text className="glyph glyph-arrow num">{Math.abs(e.amount)}</text>
+              </g>
             )}
             <title>
               {isStart
@@ -163,10 +366,30 @@ export function Board({ view, raceNo, positions, highlight = [], claimedSpaces =
         );
       })}
 
-      <rect className="finish" x={PAD} y={FINISH_Y} width={WIDTH - PAD * 2} height={FINISH_H} rx={16} />
-      <text className="finish-label" x={PAD + 22} y={FINISH_Y + FINISH_H / 2 + 6}>
+      <rect className="finish" x={finishBox.x} y={finishBox.y} width={finishBox.w} height={finishBox.h} rx={8} />
+      <text
+        className="finish-label"
+        x={finishSplit.label.x}
+        y={finishSplit.label.y}
+      >
         FINISH
       </text>
+
+      {roll && (() => {
+        const owner = view.board.find((b) => b.racerId === roll.racerId)?.owner;
+        const size = g.portrait ? 96 : 120;
+        return (
+          <Die
+            key={roll.key}
+            roll={roll}
+            x={g.portrait ? inf.x : inf.x - 90}
+            y={g.portrait ? inf.y - 40 : inf.y}
+            size={size}
+            color={owner ? seatColor(view, owner) : '#ffc93c'}
+            portrait={g.portrait}
+          />
+        );
+      })()}
 
       {live.map((r) => {
         const pos = drawnPos(r.racerId, r.pos);
@@ -176,15 +399,19 @@ export function Board({ view, raceNo, positions, highlight = [], claimedSpaces =
         let rank: number | null = null;
 
         if (pos >= FINISH) {
-          const n = finished.findIndex((f) => f.racerId === r.racerId);
+          const n = Math.max(0, finished.findIndex((f) => f.racerId === r.racerId));
           rank = r.finishedRank;
-          x = PAD + 200 + Math.max(0, n) * 70;
-          y = FINISH_Y + FINISH_H / 2;
-          radius = R_FINISH;
+          const area = finishSplit.tokens;
+          const s = slot(n, finished.length, area.w - 8, area.h - 8, R_FINISH);
+          x = center(area).x + s.dx;
+          y = center(area).y + s.dy;
+          radius = s.r;
         } else {
           const group = groups.get(pos) ?? [r.racerId];
-          const c = cellCenter(pos);
-          const s = slot(group.indexOf(r.racerId), group.length);
+          const b = boxes[pos] ?? boxes[0] ?? { x: 0, y: 0, w: 0, h: 0 };
+          const area = pos === 0 ? startSplit.tokens : b;
+          const c = center(area);
+          const s = slot(group.indexOf(r.racerId), group.length, area.w - 6, area.h - 6, 30);
           x = c.x + s.dx;
           y = c.y + s.dy;
           radius = s.r;
@@ -203,21 +430,25 @@ export function Board({ view, raceNo, positions, highlight = [], claimedSpaces =
             style={{ transform: `translate(${x}px, ${y}px)` }}
           >
             <title>{label}</title>
-            {targeted && <circle r={radius + 7} fill="none" className="piece-target" />}
-            <circle
-              r={radius}
-              fill={seatColor(view, r.owner)}
-              className={mine ? 'piece-you' : 'piece-ring'}
-            />
-            <text className="piece-label" style={{ fontSize: Math.round(radius * 0.8) }}>
-              {racerInitials(r.racerId)}
-            </text>
+            {targeted && <circle r={radius + 6} fill="none" className="piece-target" />}
+            {r.racerId === activeRacer && rank === null && (
+              <circle r={radius + 5} className="piece-active" style={{ fill: seatColor(view, r.owner) }} />
+            )}
+            {/* Keyed by space, so every step remounts it and replays the hop. */}
+            <g key={pos} className="piece-hop">
+              <circle
+                r={radius}
+                fill={seatColor(view, r.owner)}
+                className={mine ? 'piece-you' : 'piece-ring'}
+              />
+              <text className="piece-label" style={{ fontSize: Math.round(radius * 0.8) }}>
+                {racerInitials(r.racerId)}
+              </text>
+            </g>
             {r.tripped && (
-              // A badge on its own background, so it reads in both themes rather than
-              // disappearing against the dark board.
               <g transform={`translate(${radius * 0.72} ${-radius * 0.72})`}>
-                <circle r={Math.max(8, radius * 0.38)} className="trip-badge" />
-                <text className="trip-badge-label" style={{ fontSize: Math.max(10, Math.round(radius * 0.46)) }}>
+                <circle r={Math.max(7, radius * 0.38)} className="trip-badge" />
+                <text className="trip-badge-label" style={{ fontSize: Math.max(9, Math.round(radius * 0.46)) }}>
                   z
                 </text>
               </g>

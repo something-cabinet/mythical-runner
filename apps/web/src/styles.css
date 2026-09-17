@@ -26,12 +26,6 @@
   --bad: #c42f45;
   --power: #6a4fd8;
 
-  --space-star: #fff0c2;
-  --space-trip: #ffe1dc;
-  --space-arrow: #d9f3f1;
-  --space-plain: #f3ecdf;
-  --track-line: #d8ccb6;
-
   --radius: 14px;
   --radius-sm: 9px;
   --shadow: 0 1px 2px rgb(35 28 46 / 6%), 0 4px 16px rgb(35 28 46 / 7%);
@@ -61,11 +55,6 @@
     --bad: #ff6b81;
     --power: #b3a4ff;
 
-    --space-star: #3d3218;
-    --space-trip: #3f2226;
-    --space-arrow: #173a3b;
-    --space-plain: #2a2339;
-    --track-line: #3b3150;
 
     --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 6px 20px rgb(0 0 0 / 25%);
     --focus: 0 0 0 3px rgb(255 197 61 / 40%);
@@ -557,80 +546,120 @@ select {
   user-select: none;
 }
 
-.board .space {
-  stroke: var(--border);
-  stroke-width: 2;
+.race-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.board .space-plain {
-  fill: var(--space-plain);
+/* The board is a dark physical object in both themes, like the printed track. */
+.board .board-rim {
+  fill: #1b1724;
 }
-.board .space-star {
-  fill: var(--space-star);
+
+.board .board-outline {
+  fill: none;
+  stroke: #f3eefc;
+  stroke-width: 2.5;
 }
-.board .space-trip {
-  fill: var(--space-trip);
+
+.board .infield-name {
+  fill: #f3eefc;
+  font-size: 58px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-anchor: middle;
+  dominant-baseline: central;
+  opacity: 0.9;
 }
-.board .space-arrow {
-  fill: var(--space-arrow);
+
+.board .space {
+  stroke: #1b1724;
+  stroke-width: 1;
 }
-.board .space-start {
-  fill: var(--surface-3);
+
+.board .space-panel {
+  fill: #1b1724;
+  opacity: 0.82;
 }
 
 .board .space-claimed {
-  opacity: 0.55;
-}
-
-.board .track-line {
-  stroke: var(--track-line);
-  stroke-width: 10;
-  fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  opacity: 0.45;
 }
 
 .board .idx {
-  font-size: 17px;
-  fill: var(--faint);
-  font-weight: 700;
+  font-size: 14px;
+  fill: #1b1724;
+  font-weight: 800;
+  opacity: 0.55;
+}
+
+.board .space-panel ~ .idx {
+  fill: #f3eefc;
+  opacity: 0.7;
+}
+
+.board .milestone {
+  font-size: 30px;
+  font-weight: 900;
+  fill: #1b1724;
+  opacity: 0.55;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+.board .start-label {
+  fill: #e0321f;
+  font-size: 30px;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.02em;
+  text-anchor: middle;
+  dominant-baseline: central;
 }
 
 .board .glyph {
-  font-size: 26px;
-  font-weight: 800;
+  font-size: 24px;
+  font-weight: 900;
   text-anchor: middle;
   dominant-baseline: central;
 }
 
 .board .glyph-star {
-  fill: var(--accent);
-  font-size: 34px;
+  fill: #ffc93c;
+  font-size: 32px;
 }
+
 .board .glyph-trip {
-  fill: var(--coral);
-  font-size: 19px;
+  fill: #ff6b5a;
+  font-size: 18px;
   letter-spacing: 0.04em;
 }
+
+.board .glyph-arrow-shape {
+  fill: #ffc93c;
+}
+
 .board .glyph-arrow {
-  fill: #1a8a83;
+  fill: #1b1724;
+  font-size: 17px;
 }
-@media (prefers-color-scheme: dark) {
-  .board .glyph-arrow {
-    fill: #5fe0d8;
-  }
-}
+
 .board .finish {
-  fill: var(--surface-3);
-  stroke: var(--border);
-  stroke-width: 2;
+  fill: #2c2538;
+  stroke: #ffc93c;
+  stroke-width: 2.5;
+  stroke-dasharray: 8 6;
 }
 
 .board .finish-label {
-  fill: var(--muted);
-  font-size: 18px;
-  font-weight: 800;
-  letter-spacing: 0.2em;
+  fill: #ffc93c;
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-anchor: middle;
+  dominant-baseline: central;
+  opacity: 0.6;
 }
 
 .board .piece {
@@ -652,14 +681,17 @@ select {
   pointer-events: none;
 }
 
+/* Tokens share hues with the spaces, so a dark ring keeps them apart. */
 .board .piece-ring {
-  stroke: var(--surface);
+  stroke: #1b1724;
   stroke-width: 3;
 }
 
 .board .piece-you {
-  stroke: var(--text);
-  stroke-width: 4.5;
+  stroke: #fff;
+  stroke-width: 4;
+  paint-order: stroke;
+  filter: drop-shadow(0 0 1.5px #1b1724) drop-shadow(0 0 1.5px #1b1724);
 }
 
 .board .piece-target {
@@ -668,8 +700,128 @@ select {
   animation: pulse 0.9s ease-in-out infinite;
 }
 
-.board .piece-tripped > circle:not(.trip-badge) {
+.board .piece-tripped .piece-hop > circle {
   opacity: 0.6;
+}
+
+/* A little jump on every space moved. */
+.board .piece-hop {
+  animation: piece-hop 170ms ease-out;
+}
+
+@keyframes piece-hop {
+  40% {
+    transform: translateY(-9px) scale(1.12);
+  }
+}
+
+/* The racer whose turn it is breathes a soft halo in its seat colour. */
+.board .piece-active {
+  opacity: 0.45;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: piece-glow 1.3s ease-in-out infinite;
+}
+
+@keyframes piece-glow {
+  50% {
+    opacity: 0.12;
+    transform: scale(1.3);
+  }
+}
+
+/* ---- Dice ---- */
+
+.board .infield-name {
+  transition: opacity 250ms ease;
+}
+
+.board .infield-name-dim {
+  opacity: 0.12;
+}
+
+.board .dice {
+  transition: opacity 400ms ease;
+}
+
+.board .dice-stale {
+  opacity: 0.35;
+}
+
+.board .dice-body {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.board .dice-tumbling .dice-body {
+  animation: dice-tumble 650ms cubic-bezier(0.3, 0.6, 0.4, 1);
+}
+
+.board .dice-landed .dice-body {
+  animation: dice-land 320ms cubic-bezier(0.3, 1.6, 0.5, 1);
+}
+
+@keyframes dice-tumble {
+  0% {
+    transform: translate(-60px, -40px) rotate(-200deg) scale(0.4);
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    transform: rotate(0deg) scale(1);
+  }
+}
+
+@keyframes dice-land {
+  0% {
+    transform: scale(1.25);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.board .dice-face {
+  fill: #fffdf7;
+  stroke-width: 7;
+  filter: drop-shadow(0 6px 10px rgb(0 0 0 / 45%));
+}
+
+.board .dice-pip,
+.board .dice-number {
+  fill: #1b1724;
+}
+
+.board .dice-number {
+  font-size: 54px;
+  font-weight: 900;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+.board .dice-label {
+  fill: #f3eefc;
+  font-size: 26px;
+  font-weight: 850;
+  dominant-baseline: central;
+  animation: dice-label-in 250ms ease-out;
+}
+
+@keyframes dice-label-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board .piece-hop,
+  .board .piece-active,
+  .board .dice-body,
+  .board .dice-label {
+    animation: none;
+  }
 }
 
 .board .trip-badge {
@@ -870,6 +1022,11 @@ select {
     grid-template-columns: minmax(0, 1.25fr) minmax(320px, 1fr);
     gap: 16px;
     align-items: start;
+  }
+
+  /* The board turns landscape here and takes the full row, like the printed track. */
+  .race-board {
+    grid-column: 1 / -1;
   }
 
   .actionbar-inner-wide {

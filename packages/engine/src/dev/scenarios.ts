@@ -1133,13 +1133,13 @@ scenario('Scoocher — a loop that asks a question every lap still ends', () => 
 });
 
 scenario('Romantic — swooning onto an arrow that knocks it back to the pair ends (rule 8)', () => {
-  // Found by the fuzzer. Wild Wilds: space 27 is a -4 arrow. Romantic stops beside a pair
-  // at 25, swoons to 27 beside another racer, is knocked back to 23, swoons to 25 again...
+  // Found by the fuzzer. Wild Wilds: space 16 is a -4 arrow. Romantic stops beside a pair
+  // at 14, swoons to 16 beside another racer, is knocked back to 12, swoons to 14 again...
   const s = raceState(
     [
-      { player: 'p1', racer: 'romantic', pos: 23 },
-      { player: 'p2', racer: 'vanilla-01', pos: 25 },
-      { player: 'p3', racer: 'vanilla-02', pos: 27 },
+      { player: 'p1', racer: 'romantic', pos: 12 },
+      { player: 'p2', racer: 'vanilla-01', pos: 14 },
+      { player: 'p3', racer: 'vanilla-02', pos: 16 },
     ],
     'p1',
     2,

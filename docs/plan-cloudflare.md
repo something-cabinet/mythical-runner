@@ -652,13 +652,12 @@ the rulebook:
 - Wild Wilds spaces are arrows (signed), TRIP spaces, and stars — not backward arrows.
 - The Start space is index 0 and counts as a space, per the rules.
 
-### Still invented
+### Transcribed from the board
 
 The **Wild Wilds space layout** in
-[tracks/wildWilds.ts](../packages/engine/src/tracks/wildWilds.ts) is a plausible
-placeholder, not the real board — the rulebook documents the three space types but does not
-print the board. It is isolated in one file with nothing else depending on the specific
-arrangement, so replacing it from the physical board is a one-file change.
+[tracks/wildWilds.ts](../packages/engine/src/tracks/wildWilds.ts) is copied from a photo of
+the printed board, since the rulebook documents the three space types but does not print
+the board.
 
 ---
 

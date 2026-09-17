@@ -47,9 +47,7 @@ export interface Track {
   readonly spaces: readonly Space[];
   /**
    * The index of the physical board's second corner, for Blimp's "before/on or after the
-   * second corner". The rulebook doesn't give coordinates for the corners, so — like the
-   * Wild Wilds space layout — this is invented. Roughly the far corner of an oval, i.e.
-   * about half way round.
+   * second corner". Both printed tracks turn their second corner at space 15.
    */
   readonly secondCorner: number;
 }

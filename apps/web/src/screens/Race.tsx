@@ -44,17 +44,22 @@ export function RaceScreen() {
       <main className="page page-wide">
         <StatusBanner />
         <div className="race-layout">
-          <div className="stack">
-            <section className="card" style={{ padding: 10 }}>
-              <Board
-                view={view}
-                raceNo={phase.raceNo as RaceNumber}
-                positions={board.positions}
-                highlight={targets}
-                claimedSpaces={racing ? phase.claimedSpaces : []}
-              />
-            </section>
-          </div>
+          <section className="card race-board" style={{ padding: 10 }}>
+            <Board
+              view={view}
+              raceNo={phase.raceNo as RaceNumber}
+              positions={board.positions}
+              highlight={targets}
+              claimedSpaces={racing ? phase.claimedSpaces : []}
+              roll={board.roll}
+              activeRacer={
+                // Follow the die while its move plays out; the server has already moved on.
+                board.roll && !board.roll.stale
+                  ? board.roll.racerId
+                  : (view.board.find((r) => r.owner === active)?.racerId ?? null)
+              }
+            />
+          </section>
 
           <div className="stack">
             <section className="card" aria-labelledby="field-heading">
@@ -87,7 +92,9 @@ export function RaceScreen() {
                 </div>
               ))}
             </section>
+          </div>
 
+          <div className="stack">
             <section className="card" aria-labelledby="log-heading">
               <div className="spread" style={{ marginBottom: 8 }}>
                 <h2 id="log-heading" className="section-title">
