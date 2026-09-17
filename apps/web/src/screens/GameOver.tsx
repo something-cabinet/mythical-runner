@@ -1,0 +1,64 @@
+import { RACE_COUNT, totalPoints, type RaceNumber } from '@mr/engine';
+import { ActionBar, PlayerToken } from '../components/bits';
+import { playerName, points, rawName } from '../lib/present';
+import { useRoomContext } from '../lib/roomContext';
+import { navigate } from '../lib/router';
+
+export function GameOverScreen() {
+  const { view } = useRoomContext();
+  if (view.phase.t !== 'gameOver') return null;
+
+  const winners = view.phase.winners;
+  const youWon = winners.includes(view.you);
+  const headline =
+    winners.length > 1
+      ? `A tie between ${winners.map((w) => (w === view.you ? 'you' : playerName(view, w))).join(' & ')}!`
+      : youWon
+        ? 'You win!'
+        : `${playerName(view, winners[0] ?? view.you)} wins!`;
+
+  const rows = [...view.seatOrder].sort((a, b) => points(view, b) - points(view, a));
+  const races = Array.from({ length: RACE_COUNT }, (_, i) => (i + 1) as RaceNumber);
+
+  return (
+    <>
+      <main className="page">
+        <section className="card winner" aria-live="polite">
+          <p className="section-title">Game over</p>
+          <h1 style={{ fontSize: '2rem', marginTop: 6 }}>{headline}</h1>
+          {winners.length > 1 && <p className="muted" style={{ marginTop: 6 }}>No tiebreaker — celebrate together.</p>}
+        </section>
+
+        <section className="card" aria-labelledby="final-heading">
+          <h2 id="final-heading" className="section-title" style={{ marginBottom: 4 }}>
+            Final scores
+          </h2>
+          {rows.map((pid) => (
+            <div key={pid} className="player-row" style={{ alignItems: 'flex-start' }}>
+              <PlayerToken view={view} pid={pid} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="name">
+                  {rawName(view, pid)}
+                  {pid === view.you && <span className="muted"> (you)</span>}
+                  {winners.includes(pid) && <span className="tag tag-gold" style={{ marginLeft: 8 }}>winner</span>}
+                </div>
+                <div className="muted num" style={{ fontSize: '0.82rem' }}>
+                  {races
+                    .map((r) => `R${r}: ${totalPoints((view.scores[pid] ?? []).filter((t) => t.raceNo === r))}`)
+                    .join(' · ')}
+                </div>
+              </div>
+              <span className="big-points num">{points(view, pid)}</span>
+            </div>
+          ))}
+        </section>
+      </main>
+
+      <ActionBar>
+        <button type="button" className="btn btn-primary btn-lg btn-block" onClick={() => navigate('/')}>
+          Play again
+        </button>
+      </ActionBar>
+    </>
+  );
+}

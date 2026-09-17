@@ -15,8 +15,20 @@
   // without a migration, so get it right here.
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomDO"] }],
 
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
 
-  // Phase 4 adds "assets" here, pointing at apps/web/dist, so one Worker serves both the
-  // SPA and the API from the same origin — which is what lets the client skip CORS.
+  // One Worker serves both the SPA and the API from the same origin, which is what lets the
+  // client skip CORS and never need a configurable API URL.
+  //
+  // run_worker_first sends only /api/* to the Worker; everything else is served straight
+  // from the static assets without invoking it, so page loads never count against the
+  // 100k/day dynamic request limit. single-page-application falls back to index.html, so a
+  // shared /r/K3PQ link loads the app directly.
+  //
+  // Build the web app first: npm run build -w @mr/web
+  "assets": {
+    "directory": "../web/dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  }
 }

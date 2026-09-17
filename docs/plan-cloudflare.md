@@ -5,7 +5,7 @@ turn-based, running at zero cost on Cloudflare's free plan.
 
 - **Stack:** Vite + React + TypeScript (static) · Cloudflare Worker + Durable Objects · WebSockets
 - **Cost:** $0/month, enforced by hard limits rather than overage billing
-- **Status:** phases 0–3 complete; phase 4 is next. See **[STATUS.md](./STATUS.md)** for the
+- **Status:** phases 0–4 complete — the game is playable end to end in a browser. Phase 5 is next. See **[STATUS.md](./STATUS.md)** for the
   handoff note — where things stand, how to verify, and what to do next. That file is the
   place to start in a new session; this one is the design it is following.
 
@@ -154,7 +154,23 @@ mythical-runner/
       env.ts                # bindings
     test/
       e2e.mjs               # real WebSocket clients against wrangler dev
-  apps/web/                 # (phase 4) Vite + React SPA
+  apps/web/                 # Vite + React SPA
+    src/
+      main.tsx, App.tsx     # entry, two-route router
+      styles.css            # tokens (light + dark), mobile-first layout
+      lib/
+        roomClient.ts       # WebSocket store: reconnect, events delivered exactly once
+        roomContext.ts      # connection shared with every screen; legalOf()
+        useBoardPositions.ts  # replays moves one hop at a time, resyncs to truth
+        useEventLog.ts      # race log built from events
+        present.ts          # names, seat colours, "waiting on", event -> log line
+        identity.ts, api.ts, router.ts
+      components/
+        Board.tsx           # SVG snake track
+        bits.tsx            # tokens, racer cards, standings, countdown, action bar
+      screens/              # Home, Room, Lobby, Draft, Commit, Race, Results, GameOver
+    test/
+      ui.mjs                # plays a full game through the UI on phone-sized screens
   docs/
 ```
 
@@ -414,18 +430,67 @@ auditing every payload.
 
 ### 5.8 Client
 
-Vite + React + TypeScript, built static. A single WS connection in a context provider, with
-a small store consumed through `useSyncExternalStore`.
+As built in phase 4. Code in [apps/web/src](../apps/web/src). Vite + React + TypeScript,
+built to static files and served by the same Worker as the API.
 
-- `/` — create room, or join by code
-- `/r/:code` — one page rendering per `phase.t`: Lobby → Draft → Commit → Race → Scoreboard
-- Board: SVG track, 30 spaces laid out along a path. Meeples are `<g>` elements with a CSS
-  `transform` transition. Animate the event stream **sequentially** through a queue, one hop
-  per ~180 ms, so ability chains read as cause-and-effect rather than teleporting.
-- Right rail: turn order, scores, and a plain-language event log ("Banana trips Centaur!").
-  The log is generated from `Event[]`, so it is free.
-- Card text always visible for the active racer and on hover for others. With 35
-  game-breaking abilities, hiding rules text is the main usability failure mode.
+**One connection, one store.** [roomClient.ts](../apps/web/src/lib/roomClient.ts) is a plain
+external store read through `useSyncExternalStore`, not React state. Two reasons: the
+socket's lifetime should not follow render cycles, and events must reach listeners exactly
+once and in order. Held in React state, two messages landing in one tick get batched and the
+first message's events are silently lost — and with them, the animation.
+
+It reconnects with backoff, treats the 4xxx close codes as final, hides stale-click
+rejections (normal in live multiplayer), and blocks controls between sending an action and
+hearing back, so a double tap cannot send a move twice.
+
+**Buttons come from `legal`.** Every control is enabled from the server-computed `legal`
+list and sends the entry back unchanged. The client never works out for itself what is
+allowed.
+
+**Anything that reads events lives above the phase switch.** Both the race log and the board
+animation subscribe for the life of the connection rather than inside the race screen. This
+was found by building it wrong first: the message that *switches* screens is the one carrying
+"race begins", the reveals and who goes first, and a screen subscribing on mount is always
+one message late.
+
+The same cause had a second symptom. The move that decides a race arrives in the same
+message that ends it, so going straight to results meant **nobody ever saw the winner cross
+the line**. When racing turns to scored, the race screen now stays up until the board has
+finished animating, then 1.6 s longer.
+
+**Animation replays events, then resyncs to truth.** `racer/moved` plays one hop per ~170 ms,
+faster when a burst of powers backs up. `racer/warped` snaps instead of hopping, because a
+warp "doesn't count as moving". When the queue empties, drawn positions reset to the real
+board. That catches relocations that deliberately emit no event (Huge Baby) and reconnect
+snapshots. `prefers-reduced-motion` skips the replay. The list of racers follows the
+*drawn* positions too, so it never says "1st" while the winner is still visibly mid-track.
+
+**Screens**, one per phase, each with a sticky action bar at thumb height:
+
+| Screen | Notes |
+|-|-|
+| Home | Name, turn timer (off / 30 s / 60 s / 2 min), create, or join by code |
+| Room gate | Checks the room over HTTP *before* opening a socket, since a browser cannot read why an upgrade failed. Auto-joins only with a name saved *before* arriving |
+| Lobby | Big room code, share sheet or copy link, seats with host and away tags |
+| Draft | Roll-off dice, then the face-up layout with full power text, your team, and every team |
+| Commit | Two taps — select, then lock in — because the choice is irrevocable and a stray tap while scrolling should not spend a racer |
+| Race | SVG board, racers with full power text, event log, standings; decisions appear in the action bar |
+| Results | Podium with cup values, points this race, standings |
+| Game over | Winner or tie, per-race breakdown |
+
+**The board** ([Board.tsx](../apps/web/src/components/Board.tsx)) is a 6 × 5 snake, so thirty
+spaces fit a phone held upright, with a line through the space centres showing the direction
+of travel. Tokens are sized by how crowded a space is — one racer gets nearly the whole
+space, six share it — because at phone width a space is only about 45 px across.
+
+**Colour and legibility.** Light and dark themes from `prefers-color-scheme`. Six seat
+colours chosen to stay distinguishable in both themes; every token also carries initials, so
+colour is never the only cue. Placeholder racers show their number instead of initials,
+since "Racer 13" and "Racer 15" would otherwise both read "R1".
+
+**Card text is never hidden.** It is on every racer card in the draft, commit and race
+screens. With thirty-six rule-breaking powers, not being able to see what a racer does is
+the single easiest way for this game to become unplayable.
 
 ---
 
@@ -437,8 +502,8 @@ a small store consumed through `useSyncExternalStore`.
 | 1 | Engine core, **no abilities**: draft, commit, turn loop, movement, trip/stand-up, top-2 finish, token scoring, 4-race loop | Hot-seat CLI plays a full 4-race game | **done** |
 | 2 | Hook pipeline + pending decisions + 9 racers covering every hook type (incl. Duelist for the interactive case) | Scripted scenario test per racer passes | **done** |
 | 3 | Worker + RoomDO: create/join, WS, authority, redaction, reconnect, alarm timer | Two browsers play a full game | **done** |
-| 4 | Web client end to end, SVG board, animation queue, mobile layout | Playable on a phone | next |
-| 5 | Remaining 27 racers — card text is available, so this is data entry | Each racer has a scenario test | |
+| 4 | Web client end to end, SVG board, animation queue, mobile layout | Playable on a phone | **done** |
+| 5 | Remaining 27 racers — card text is available, so this is data entry | Each racer has a scenario test | next |
 | 6 | Spectators, replay viewer, fill bots, sound | — | |
 
 Phases 1–2 are the real work. Phase 5 should be cheap if phase 2 is designed correctly.
@@ -536,6 +601,37 @@ Two things phase 3 turned up that were not in the plan:
   restart test would have "passed" against the still-running old process with the room still
   in memory. See the traps section of [STATUS.md](./STATUS.md).
 
+### Phase 4 — delivered
+
+The web client. A complete game is playable in a browser on a phone.
+
+**Verified by playing it through the UI.** [ui.mjs](../apps/web/test/ui.mjs) drives an
+installed Chrome as three people on 390 × 844 phone screens, one in dark mode. The host
+creates a room from the home page, two friends join from the link, and everyone taps
+whatever the UI offers until the game ends — no API calls, no state injection. It
+screenshots each phase and checks that the game reaches game over for every player, that all
+clients agree on the scores, and that there are no page errors, console errors, or horizontal
+overflow on any screen.
+
+Every screenshot was reviewed by eye, not just asserted on. That review found what no check
+would have:
+
+| Found | Fix |
+|-|-|
+| Tokens about 9 px across on a phone — unreadable | Sized by how crowded the space is, up to nearly the whole space |
+| "Racer 13" and "Racer 15" both labelled **R1** | Numbered racers show their number |
+| Racers waiting on Start covered the START label | Moved to the corner, like space numbers |
+| List said "1st" while the winner was still mid-track | List follows drawn positions |
+| "A tie between **You** & Cy" | Lowercase mid-sentence |
+
+Three more were found by driving it rather than by looking:
+
+- **Typing a name joined the room after the first keystroke.** The auto-join read the live
+  form field instead of a name saved before arriving, so "Bob" would be seated as "B". The
+  UI test now types names a key at a time and fails if the room is joined early.
+- **The race log and board animation missed the events that change screens** — see §5.8.
+- **Nobody saw the winning move** — see §5.8.
+
 ### Rules rework (after the rulebook arrived)
 
 The first pass at phase 2 was built from published reviews and got the three rules above
@@ -585,6 +681,9 @@ arrangement, so replacing it from the physical board is a one-file change.
   `6 x playerCount` consecutive turns with no forward progress the race is called and
   whoever has already finished keeps their cups.
 
+- **UI end-to-end** — *built (phase 4)*. `npm run test:ui -w @mr/web` against a running
+  `npm run start`. A full game through the real UI on phone-sized screens, in both themes.
+  Not part of `npm test`, because it needs a live server and a local Chrome.
 - **End-to-end** — *built (phase 3)*. `npm run e2e -w @mr/server` against a running
   `npm run dev -w @mr/server`. Real WebSocket clients, real Durable Object. Not part of
   `npm test`, because it needs a live server; `--fast` skips the 15-second clock scenario.

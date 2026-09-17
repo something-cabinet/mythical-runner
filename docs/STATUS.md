@@ -1,6 +1,6 @@
 # Status & Handoff
 
-**Last updated:** 2026-09-17 · **Phases 0–3 complete, phase 4 next.**
+**Last updated:** 2026-09-17 · **Phases 0–4 complete — playable in a browser. Phase 5 next.**
 
 Start here when picking this project back up. It is written to be read cold, without the
 conversation that produced it.
@@ -15,12 +15,12 @@ turn-based, running at **$0/month** on Cloudflare's free tier.
 | Document | Role |
 |-|-|
 | [magical-athlete-rules.md](./magical-athlete-rules.md) | **The rules authority.** Full rulebook, all 36 racers. Where the engine disagrees with this, the engine is wrong |
-| [plan-cloudflare.md](./plan-cloudflare.md) | The implementation plan being followed. §5.4–5.6 describe the server *as built* |
+| [plan-cloudflare.md](./plan-cloudflare.md) | The implementation plan. §5.4–5.8 describe the server and client *as built* |
 | [plan-vercel-supabase.md](./plan-vercel-supabase.md) | Rejected alternative, kept for comparison. Marked "Not used" |
 | `How-to-play-MAGICAL-ATHLETE_compressed.pdf` | Source PDF the rules came from |
 
-Stack: **Vite + React + TypeScript (static)** on Workers Static Assets, plus a
-**Cloudflare Worker + Durable Object** per room over WebSockets.
+Stack: **Vite + React + TypeScript (static)** and a **Cloudflare Worker + Durable Object** per
+room over WebSockets. One Worker serves both, from one origin.
 
 ---
 
@@ -28,35 +28,54 @@ Stack: **Vite + React + TypeScript (static)** on Workers Static Assets, plus a
 
 ```
 packages/engine/     COMPLETE — the whole game as a pure function, no runtime dependencies
-apps/server/         COMPLETE — Worker + RoomDO, runs locally under wrangler dev
-apps/web/            NOT STARTED (phase 4)
+apps/server/         COMPLETE — Worker + RoomDO; also serves the web app's static files
+apps/web/            COMPLETE — the playable client, mobile-first, light and dark
 ```
 
-A full game is playable over WebSockets against the real server. There is no UI yet.
-**Nothing has been deployed** — everything has only run locally.
+A full game is playable in a browser. **Nothing has been deployed** — everything has only run
+locally. 9 of the 36 racers have real powers; the other 27 are placeholders that just run.
+
+### Run it
+
+```bash
+npm install
+npm run start        # builds the web app, then serves app + API at http://127.0.0.1:8787
+```
+
+Open that URL in a few browser windows to play.
+
+**On real phones:** the dev server binds to `127.0.0.1` only, so other devices cannot reach
+it. That default is deliberate. To play across a home network, build and serve on all
+interfaces instead — `npm run build -w @mr/web`, then from `apps/server`,
+`npx wrangler dev --ip 0.0.0.0` — and open `http://<this machine's LAN IP>:8787` on each
+phone. That exposes the server to everything on the network, and Windows will likely ask to
+allow it through the firewall. Not yet tried on physical phones; the phone checks so far are
+phone-sized browser windows.
+
+**Frontend work with hot reload:** run `npm run dev:server` and `npm run dev:web` together and
+open http://localhost:5173. Vite proxies `/api`, WebSockets included, to wrangler — verified
+with a full room join through the proxy.
 
 ### Verify it still works
 
 ```bash
-npm install
-npm run typecheck                    # all workspaces
+npm run typecheck                    # all three workspaces
 npm test                             # engine: 51 scenario checks + 1000 fuzzed games
 
-# server end-to-end — needs two terminals
-npm run dev -w @mr/server            # terminal 1: wrangler dev on 127.0.0.1:8787
-npm run e2e -w @mr/server            # terminal 2: 38 checks, ~40 s
+# these need `npm run start` running in another terminal
+npm run e2e -w @mr/server            # 38 checks over real WebSockets, ~40 s
 npm run e2e -w @mr/server -- --fast  # skips the 15-second turn-clock scenario
+npm run test:ui -w @mr/web           # a full game through the UI on phone-sized screens
 ```
 
-Last run: **engine 51/51 + 1000 games clean; server e2e 38/38; cold-restart persistence
-test passed.**
-
-The cold-restart test is not in the repo — it was run by hand. See §4, "Proving persistence".
+Last run: **engine 51/51 + 1000 games; server e2e 38/38; UI test passed** — full game, three
+players, both themes, no errors, no overflow, clients agree. Screenshots land in
+`apps/web/test/screenshots/` (gitignored) and are worth opening after any UI change.
 
 ### Git
 
-Branch `main`, tracking `origin/main` on GitHub. Last commit `07cd1e1` (phases 0–2).
-**Phase 3 is uncommitted.** npm workspaces, not pnpm (pnpm is not installed on this machine).
+Branch `main`, tracking `origin/main` on GitHub. Last commit `cb4d976` (phase 3), pushed.
+**Phase 4 is uncommitted.** npm workspaces, not pnpm.
 
 ---
 
@@ -67,68 +86,58 @@ problem, not by preference.
 
 ### Engine
 
-**A pure function.** No I/O, no dependencies. The same module runs in the Durable Object as
-the authority and, in phase 4, can run in the browser.
+**A pure function** — `initGame`, `applyAction(state, action)`, `legalActions`, `redact`.
+No RNG parameter: randomness derives from `(seed, step)`, so every game replays
+byte-identically from its action log.
 
-```ts
-initGame(seed: number): GameState
-applyAction(state: GameState, action: Action): { state, events[] }
-legalActions(state, playerId): Action[]
-redact(state, playerId): PlayerView
-```
+**A turn is a job queue, not a call stack**, because a power can suspend mid-move to ask a
+player something and the Durable Object may hibernate before they answer. Jobs are popped
+before they run; the continuation lives on `pending.resume`.
 
-`applyAction` takes **no RNG parameter** — randomness derives from
-`makeRng(state.seed, state.step)`. A caller advancing the stream out of lockstep with `step`
-would desync replays. The fuzzer verifies every game replays byte-identically.
+**Three rules the pipeline is shaped around**, all got wrong on a first pass: passing is judged
+after the whole move; tripping doesn't end the current move; sharing a space requires both
+racers to be stopped there.
 
-**A turn is a job queue, not a call stack.** `GameState.queue` holds the turn as plain data
-([jobs.ts](../packages/engine/src/jobs.ts)), because a power can suspend mid-move to ask a
-player something, and the Durable Object may hibernate before they answer. Jobs are **popped
-before they run** (peeking made a suspended job re-run forever), and the continuation lives on
-**`pending.resume`**, not pre-queued. A scenario test asserts a suspended turn survives a JSON
-round trip — the hibernation case, tested directly.
+**Other settled points:** `START = 0`; points are a plain number; race 1 turn order by
+roll-off, races 2–4 by farthest-behind; warps are not moves; **balance is not a goal**.
 
-**Three rules the pipeline is shaped around**, all got wrong on a first pass built from
-reviews. Check these first if something feels off:
-
-- **Passing** is judged once a move completes, comparing start and end — never per step.
-- **Tripping** does not end the current move; it skips only the roll of the next main move,
-  and powers still fire.
-- **Sharing a space** requires both racers to be *stopped* there.
-
-**Other settled points:** `START = 0` (the Start space is a space); points are a plain number
-with no chip denominations; race 1 turn order by roll-off, races 2–4 by farthest-behind or
-first-eliminated; warps emit `racer/warped` not `racer/moved`; **balance is not a goal**.
+**Powers write prompts with `h.nameOf(racer)`**, never by interpolating `racerId` — players
+read these.
 
 ### Server
 
-**Persistence is per action, not debounced.** The original plan said debounce. That was
-wrong: a pending `setTimeout` *prevents* hibernation, and eviction mid-debounce loses moves
-clients already saw. One write per action is ~200 rows a game, so the 100k/day free budget
-still covers ~500 games a day. Do not "optimise" this back into a debounce.
+**Persistence is per action, not debounced.** A pending `setTimeout` prevents hibernation, and
+eviction mid-debounce loses moves clients already saw. ~500 games/day still fit the free
+budget. Don't "optimise" this.
 
-**The server tells each client what it may do.** Every `state` message carries `legal` — that
-player's permitted actions, computed server-side. The client must render buttons from it and
-**must not** call `legalActions` itself: that needs the full `GameState`, and a client only
-has a `PlayerView` with commits masked. It would silently give wrong answers during the
-commit phase.
+**The server tells each client what it may do** via `legal` in every state message.
+**`by` is stamped from the authenticated socket**, never read from the message.
 
-**`by` is stamped from the authenticated socket**, never read from the message. Clients may
-send only the eight types in `CLIENT_ACTION_TYPES`; joins, connection changes and timeouts
-are server-originated.
+**Identity is trust-on-first-use** — random `playerId` + `secret` per room in localStorage,
+SHA-256 of the secret stored server-side. **Rejections are close codes** 4000/4001/4003/4004.
+**An empty room pauses its clock** and deletes itself 6 hours after the last player leaves.
 
-**Identity is trust-on-first-use.** The browser invents a random `playerId` and `secret`,
-keeps them in localStorage per room, and the room stores a SHA-256 of the secret the first
-time it sees that id. `playerId` is public; the secret proves who you are.
+### Client
 
-**Reconnect sends a full snapshot**, not a replay of missed events.
+**Buttons are enabled from `legal` and send the entry back unchanged.** The client must never
+call `legalActions` — it only has a `PlayerView`, with commits masked, and would silently get
+the commit phase wrong.
 
-**Rejections are delivered as close codes** — 4000 bad request, 4001 bad credentials, 4003
-full or in progress, 4004 no such room — preceded by an `error` message. A browser cannot
-read the HTTP status of a failed upgrade, but it can read these.
+**The WebSocket client is an external store, not React state**, so events are delivered
+exactly once and in order. In React state, two messages in one tick are batched and the first
+message's events vanish.
 
-**An empty room pauses its clock** rather than auto-playing to the end, and deletes itself
-6 hours after the last player leaves.
+**Anything that reads events subscribes above the phase switch** (in `Connected`, in
+[Room.tsx](../apps/web/src/screens/Room.tsx)). The message that changes screens carries the
+events describing why. A screen that subscribes on mount is always one message late.
+
+**The race screen holds after the race ends** until the board finishes animating, because
+the deciding move arrives in the same message that ends the race.
+
+**Board animation resyncs to the true board** whenever its queue drains, so it can never drift
+for longer than one turn — some relocations deliberately emit no event.
+
+**Auto-join uses a name saved before arriving**, never the live form field.
 
 ---
 
@@ -138,20 +147,16 @@ Things that cost time once and will again.
 
 ### Engine
 
-- **`DeepMutable` must check primitives first.** Branded ids are `string & { [brand] }`,
-  structurally an object; without the early exit the brand is silently destroyed.
-- **Narrowing of `s.phase` is lost after any `ctx.emit(...)`.** Capture `const phase = s.phase`
-  once after the invariant, as `endTurn` does.
-- **The engine declares its own globals** in `globals.d.ts` rather than using `@types/node`
-  or the DOM lib. The server compiles the engine's source against `@cloudflare/workers-types`
-  without conflict *only because nothing imports `globals.d.ts`*. Keep it that way.
-- **Scenario tests force dice by searching seeds**, not by mocking the RNG.
+- **`DeepMutable` must check primitives first**, or branded ids silently lose their brand.
+- **Narrowing of `s.phase` is lost after any `ctx.emit(...)`.** Capture `const phase = s.phase`.
+- **The engine declares its own globals** in `globals.d.ts`. The server and web app both
+  compile the engine's source against their own runtime types without conflict *only because
+  nothing imports `globals.d.ts`*. Keep it that way.
 
 ### Server
 
 - **Stopping `wrangler dev` on Windows leaves `workerd.exe` running**, still serving the port
-  and still holding every room in memory. A "restart" that does not kill it tests nothing. To
-  stop it for real:
+  with every room in memory. Hit this on every single stop, not once. To stop it for real:
 
   ```powershell
   Get-CimInstance Win32_Process |
@@ -162,97 +167,67 @@ Things that cost time once and will again.
 
   Then confirm `http://127.0.0.1:8787/api/health` no longer answers.
 
-- **Proving persistence.** Start `wrangler dev`, get a game into race 2, disconnect everyone,
-  kill the process tree as above, start it again, reconnect with the same credentials.
-  Phase, active player, scores, used racers and board positions must all come back. Local
-  room storage lives in `apps/server/.wrangler/` (gitignored); deleting it wipes all local
-  rooms.
+- **The Worker serves `apps/web/dist`**, so `npm run dev:server` alone serves whatever was
+  last built — stale if the web app has changed since. `npm run start` rebuilds first.
+
+- **Proving persistence**: get a game into race 2, disconnect everyone, kill the process tree
+  as above, restart, reconnect with the same credentials. Everything must come back. Local
+  room storage is `apps/server/.wrangler/` (gitignored).
 
 - **Drafted hands are public.** A test that greps a player's frame for an opponent's committed
-  racer id will "find a leak" — it is in `hands`, because the draft is face-up. Check that
-  nothing *outside* `hands` reveals the choice.
+  racer will "find a leak" in `hands`. Check that nothing *outside* `hands` reveals the choice.
 
-- **Instance fields in `RoomDO` do not survive hibernation.** Anything that must persist goes
-  in storage; anything per-socket goes in `serializeAttachment` (16 KB limit).
+### Client
+
+- **Look at the screenshots.** The UI test passing proves the game completes; it does not
+  prove anything is readable. Five of the phase 4 fixes were found only by opening the images.
+- **Taps race in multiplayer.** Anyone may press "On to race N"; the first tap advances
+  everyone and the other players' buttons vanish mid-tap. Tests must tolerate that, and the
+  server already treats the resulting stale actions as harmless.
+- **Full-page screenshots draw the fixed action bar mid-page.** That is how Chrome renders
+  `position: fixed` into a tall capture, not a layout bug.
 
 ---
 
 ## 5. What is next
 
-### Phase 4 — the web client (the immediate task)
+### Phase 5 — the remaining 27 racers (the immediate task)
 
-`apps/web/` does not exist yet. Gate: **playable on a phone.**
-
-**Stack:** Vite + React + TypeScript, built to static files. Import types from `@mr/engine`,
-including everything in [protocol.ts](../packages/engine/src/protocol.ts).
-
-**Serving.** Add an `assets` block to [wrangler.jsonc](../apps/server/wrangler.jsonc) pointing
-at `../web/dist`, with `not_found_handling: "single-page-application"` and
-`run_worker_first: ["/api/*"]`, so one Worker serves the SPA and the API from the same origin.
-That same-origin arrangement is why there is no CORS code anywhere — keep it. In development,
-point Vite's dev-server proxy at `http://127.0.0.1:8787` for `/api` (with `ws: true`).
-
-**Talking to the server.**
-
-1. Create: `POST /api/rooms` with `{ turnSeconds }` → `{ code }`.
-2. Before joining, `GET /api/rooms/:code` to show "no such room" or "game in progress" without
-   opening a socket.
-3. Look up `{ playerId, secret }` in localStorage under the room code; generate if absent.
-   `playerId` must match `^[A-Za-z0-9_-]{8,64}$` and `secret` `^[A-Za-z0-9_-]{16,128}$` —
-   use `crypto.getRandomValues`.
-4. Open `/api/rooms/:code/ws?playerId=…&secret=…&name=…`.
-5. On every `state` message, replace the local view wholesale and render. Animate from
-   `events`; enable buttons from `legal`; send `{ t: 'action', action }` with an entry from
-   `legal` as-is.
-6. On close, read the close code: 4001/4003/4004 are final, show a message; anything else,
-   reconnect with backoff using the same credentials.
-
-**Rendering notes.**
-
-- `view.deadline` is a Unix-ms timestamp for the countdown; `turnSeconds` 0 means no clock.
-- Animate `racer/moved` one hop at a time (~180 ms). `racer/warped` should *snap*, not hop —
-  a warp is not a move, and animating it as one would mislead players about what happened.
-- `view.pending` non-null with `pending.player === view.you` means *you* must answer; show
-  its `prompt` and `options`. When it is someone else's, show who the table is waiting on.
-- Card text must always be visible. With 36 rule-breaking powers, hiding it is the main
-  usability failure mode. `racerName` and `racerText` are exported from the engine.
-- `racer/passed`, `racer/tripped` and `ability/triggered` are what make the chaos legible.
-  `ability/triggered` already carries a human-readable `text`.
-
-### Phase 5 — the remaining 27 racers
-
-**Not blocked.** Card text for all 36 is in the rules doc. 9 are implemented in
+Card text for all 36 is in the rules doc. 9 are implemented in
 [characters/defs/index.ts](../packages/engine/src/characters/defs/index.ts); the rest are
-vanilla padding. Each is: write the def, add a scenario test.
+vanilla padding in [registry.ts](../packages/engine/src/characters/registry.ts). Each one:
+write the def against the card text, add a scenario test in
+[scenarios.ts](../packages/engine/src/dev/scenarios.ts), confirm the fuzzer still passes.
 
 Several need hooks that do not exist yet — Skipper and Genius reorder turns, Copycat and Twin
-borrow another racer's power, Flip Flop and Hypnotist warp. **Extend `Hooks`** rather than
-special-casing inside the pipeline.
+borrow another racer's power, Flip Flop and Hypnotist warp, Dicemonger and Magician reroll,
+Mastermind ends the race early. **Extend `Hooks`** rather than special-casing inside the
+pipeline.
 
-Can be done before, after or alongside phase 4. Doing it first means the UI is built against
-the full range of decisions and events a real game produces.
+The UI needs no changes for most racers: prompts, options, log lines and power text all come
+from the engine. Check the UI test's screenshots after adding racers with new kinds of
+decision, in case a prompt is too long for the action bar.
 
 ### Phase 6 — polish
 
-Spectators, replay viewer, fill bots, sound. Possibly a shorter clock for disconnected
-players specifically — currently an absent player costs the table a full `turnSeconds` per
-turn.
+Spectators, replay viewer, fill bots, sound. A shorter clock specifically for disconnected
+players — an absent player currently costs the table a full `turnSeconds` per turn.
+"Play again" currently returns to the home page; a rematch with the same group would be nicer.
 
 ### Deploying
 
 Not done, and needs you: `wrangler deploy` requires `wrangler login`, an interactive browser
-OAuth flow. Once logged in, `npm run deploy -w @mr/server` from a Cloudflare account on the
-**free plan with no payment method**, which is what makes the free-tier limits hard stops
-rather than bills. Do this after phase 4, since there is nothing to look at before then.
+sign-in. Then `npm run build -w @mr/web && npm run deploy -w @mr/server`, from a Cloudflare
+account on the **free plan with no payment method** — which is what makes the free-tier
+limits hard stops rather than bills. The game is now worth deploying.
 
 ---
 
 ## 6. Open items
 
 - **The Wild Wilds space layout is invented.** The rulebook documents the space types but not
-  the board. Isolated in [tracks/wildWilds.ts](../packages/engine/src/tracks/wildWilds.ts);
-  replacing it from the physical board is a one-file change.
+  the board. Isolated in [tracks/wildWilds.ts](../packages/engine/src/tracks/wildWilds.ts).
 - **Credentials travel in the WebSocket URL's query string**, so they appear in any log that
-  records full URLs. Acceptable for a friends' game; revisit if that changes.
+  records full URLs. Acceptable for a friends' game.
 - **Legal:** a commercial, in-print game. Private play is fine; publishing with the real racer
-  names and artwork is not.
+  names and artwork is not. Worth remembering before deploying to a public URL.

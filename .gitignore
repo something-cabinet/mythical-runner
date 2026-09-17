@@ -8,3 +8,5 @@ dist/
 .wrangler/
 .dev.vars
 coverage/
+# UI test output
+apps/web/test/screenshots/

@@ -9,12 +9,12 @@ import { START } from '../../tracks/index.js';
  * Power text is taken verbatim from `docs/magical-athlete-rules.md`, which is the
  * authority. Where a power is quoted in a comment, that quote is the card.
  *
- * These eight were chosen to cover every hook between them: a replaced main move, a
+ * These nine were chosen to cover every hook between them: a replaced main move, a
  * modified main move, a pass trigger on the passer, a pass trigger on the passed, a
  * stop trigger on self, a stop trigger on others, spatial displacement, and one power
  * that questions a player who is not taking the turn.
  *
- * The remaining 28 racers are vanilla padding until they are written. See the registry.
+ * The remaining 27 racers are vanilla padding until they are written. See the registry.
  */
 
 function def(id: string, name: string, text: string, hooks: Hooks): RacerDef {
@@ -64,7 +64,7 @@ const legs = def('legs', 'Legs', 'I can skip rolling for my main move and move 5
 /** THE SLIP — "I trip any racer that passes me." */
 const banana = def('banana', 'Banana', 'I trip any racer that passes me.', {
   onPassed: (h, passer) => {
-    h.log(`${passer.racerId} slips on Banana!`);
+    h.log(`${h.nameOf(passer)} slips on Banana!`);
     h.trip(passer);
   },
 });
@@ -79,7 +79,7 @@ const banana = def('banana', 'Banana', 'I trip any racer that passes me.', {
 const centaur = def('centaur', 'Centaur', 'When I pass a racer, they move -2.', {
   onPass: (h, passed) => {
     if (!isRunning(passed)) return;
-    h.log(`Centaur hoofwhacks ${passed.racerId} back 2!`);
+    h.log(`Centaur hoofwhacks ${h.nameOf(passed)} back 2!`);
     h.move(passed, -2);
   },
 });
@@ -118,7 +118,7 @@ const mouth = def(
       if (sharing.length !== 1) return;
       const victim = sharing[0];
       if (!victim) return;
-      h.log(`M.O.U.T.H. chomps ${victim.racerId}!`);
+      h.log(`M.O.U.T.H. chomps ${h.nameOf(victim)}!`);
       h.eliminate(victim);
     },
   },
@@ -137,13 +137,13 @@ const babaYaga = def(
   {
     onOtherStops: (h, other) => {
       if (other.pos !== h.self.pos || !isRunning(other)) return;
-      h.log(`${other.racerId} gets legged by Baba Yaga!`);
+      h.log(`${h.nameOf(other)} gets legged by Baba Yaga!`);
       h.trip(other);
     },
     onStop: (h) => {
       for (const other of h.sharing()) {
         if (!isRunning(other)) continue;
-        h.log(`Baba Yaga legs it onto ${other.racerId}!`);
+        h.log(`Baba Yaga legs it onto ${h.nameOf(other)}!`);
         h.trip(other);
       }
     },
@@ -192,7 +192,7 @@ const duelist = def(
       if (other.pos !== h.self.pos || !isRunning(other) || !isRunning(h.self)) return;
       h.ask({
         player: h.self.owner,
-        prompt: `${other.racerId} is sharing your space. Shout DUEL?`,
+        prompt: `${h.nameOf(other)} is sharing your space. Shout DUEL?`,
         options: [
           option('duel', 'DUEL!', racerTarget(other.racerId)),
           option('pass', 'Let them by'),
@@ -208,7 +208,7 @@ const duelist = def(
       if (!target || !isRunning(h.self)) return;
       h.ask({
         player: h.self.owner,
-        prompt: `You've landed on ${target.racerId}. Shout DUEL?`,
+        prompt: `You've landed on ${h.nameOf(target)}. Shout DUEL?`,
         options: [
           option('duel', 'DUEL!', racerTarget(target.racerId)),
           option('pass', 'Sheathe your rapier'),
@@ -227,14 +227,14 @@ const duelist = def(
 
       const mine = h.rng.rollD6();
       const theirs = h.rng.rollD6();
-      h.log(`DUEL! Duelist rolls ${mine}, ${targetId} rolls ${theirs}.`);
+      h.log(`DUEL! Duelist rolls ${mine}, ${h.nameOf(target)} rolls ${theirs}.`);
 
       // "I win ties."
       if (mine >= theirs) {
         h.log('Duelist wins the duel and advances 2.');
         h.move(h.self, 2);
       } else {
-        h.log(`${targetId} wins the duel and advances 2.`);
+        h.log(`${h.nameOf(target)} wins the duel and advances 2.`);
         h.move(target, 2);
       }
     },

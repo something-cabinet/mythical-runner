@@ -48,7 +48,8 @@ export default {
       return json(await room.info());
     }
 
-    // Phase 4 serves the SPA from static assets for everything outside /api.
+    // Only /api/* reaches the Worker (see run_worker_first); anything else here is an
+    // unknown API route.
     return json({ error: 'Not found' }, 404);
   },
 } satisfies ExportedHandler<Env>;

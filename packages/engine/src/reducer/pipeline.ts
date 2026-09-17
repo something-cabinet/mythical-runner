@@ -421,6 +421,8 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
       return field.filter((r) => r.pos === worst);
     },
 
+    nameOf: (racer) => racerName(typeof racer === 'string' ? racer : racer.racerId),
+
     emit: (event) => ctx.emit(event),
     log: (text) =>
       ctx.emit({ t: 'ability/triggered', racerId: self.racerId, hook: 'power', text }),

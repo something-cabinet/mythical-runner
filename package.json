@@ -10,7 +10,10 @@
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "build": "npm run build --workspaces --if-present"
+    "build": "npm run build --workspaces --if-present",
+    "dev:server": "npm run dev -w @mr/server",
+    "dev:web": "npm run dev -w @mr/web",
+    "start": "npm run build -w @mr/web && npm run dev -w @mr/server"
   },
   "devDependencies": {
     "typescript": "^5.7.2"

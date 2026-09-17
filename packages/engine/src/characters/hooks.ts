@@ -36,6 +36,14 @@ export interface HookCtx {
   /** Racers closest to Start. */
   lastPlace(): MutableRacer[];
 
+  /**
+   * A racer's display name, for prompts and log lines.
+   *
+   * Always use this rather than interpolating `racerId` — ids are identifiers like
+   * `vanilla-01` or `baba-yaga`, and prompts are read by players.
+   */
+  nameOf(racer: MutableRacer | RacerId): string;
+
   emit(event: GameEvent): void;
   /** Adds a line to the game log, attributed to `self`. */
   log(text: string): void;
