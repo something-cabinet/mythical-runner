@@ -5,7 +5,7 @@ turn-based, running at zero cost on Cloudflare's free plan.
 
 - **Stack:** Vite + React + TypeScript (static) · Cloudflare Worker + Durable Objects · WebSockets
 - **Cost:** $0/month, enforced by hard limits rather than overage billing
-- **Status:** phases 0–2 complete; phase 3 is next. See **[STATUS.md](./STATUS.md)** for the
+- **Status:** phases 0–3 complete; phase 4 is next. See **[STATUS.md](./STATUS.md)** for the
   handoff note — where things stand, how to verify, and what to do next. That file is the
   place to start in a new session; this one is the design it is following.
 
@@ -88,7 +88,7 @@ Two conditions:
 |-|-|-|
 | DO requests | 100,000 | Inbound WS messages bill at **20:1** → ~2M messages/day. A 6-player game is a few hundred messages ≈ 25 request-equivalents. Thousands of games/day |
 | DO duration | 13,000 GB-s | ~29 h of *active compute* at 128 MB. With hibernation, time is only burned while processing a message |
-| SQL rows written | 100,000 | **Tightest limit** — see §5.5 |
+| SQL rows written | 100,000 | **Tightest limit.** One per action, ~200/game, so ~500 games/day. See §5.5 |
 | SQL rows read | 5,000,000 | Irrelevant at this scale |
 | Storage | 5 GB total | Irrelevant; finished rooms are deleted |
 | Static assets | unlimited, free | The entire frontend |
@@ -109,7 +109,7 @@ served from Workers Static Assets is free and unlimited, and never touches the r
 
 ## 4. Repository layout
 
-As built through phase 2. Items marked `(phase N)` do not exist yet.
+As built through phase 3. Items marked `(phase N)` do not exist yet.
 
 ```
 mythical-runner/
@@ -123,6 +123,7 @@ mythical-runner/
       scoring.ts            # Token, RACE_AWARDS
       errors.ts             # IllegalActionError, EngineError, invariant
       redact.ts             # GameState -> PlayerView
+      protocol.ts           # wire message types, shared by server and client
       globals.d.ts          # structuredClone / console / process declarations
       jobs.ts               # Job union — a turn as serializable data
       tracks/               # types.ts, mildMile.ts, wildWilds.ts, index.ts
@@ -143,7 +144,16 @@ mythical-runner/
         hotseat.ts          # scripted full game + replay check
         fuzz.ts             # randomised games, crash and determinism hunt
         scenarios.ts        # per-racer ability tests
-  apps/server/              # (phase 3) Cloudflare Worker + RoomDO
+  apps/server/              # Cloudflare Worker + RoomDO
+    wrangler.jsonc          # DO binding, new_sqlite_classes migration
+    src/
+      index.ts              # Worker router
+      room.ts               # RoomDO: auth, hibernation, persistence, alarm
+      auth.ts               # credential validation, secret hashing
+      codes.ts              # join code generation
+      env.ts                # bindings
+    test/
+      e2e.mjs               # real WebSocket clients against wrangler dev
   apps/web/                 # (phase 4) Vite + React SPA
   docs/
 ```
@@ -278,41 +288,121 @@ switch statement.
 
 ### 5.4 Server — Worker + Durable Object
 
-- `POST /api/rooms` → Worker mints a 4-character join code and creates `RoomDO` by that name.
-- `GET /r/:code` → static SPA; client opens a WS to
-  `/api/rooms/:code/ws?playerId=…&token=…`.
-- `RoomDO` holds `GameState` in memory, mirrored to DO storage (see §5.5).
-- Every inbound message: verify token → check the action against `legalActions(state, playerId)`
-  → `applyAction` → broadcast `redact(state, p)` plus new events to each connected player
-  individually.
-- **The client never receives the seed**, or players precompute rolls.
-- **WebSocket Hibernation API is mandatory**, not an optimisation. A non-hibernating DO
-  holding open sockets accrues duration continuously and would chew through 13,000 GB-s.
-  Use `acceptWebSocket()` plus the handler methods (`webSocketMessage`, `webSocketClose`)
-  rather than `addEventListener`. Consequence: the DO must rebuild everything it needs from
-  storage on wake and must not rely on instance fields surviving hibernation.
-- Reconnect: client sends its last known `step`; the DO replays events since then, or ships a
-  full snapshot.
-- Turn timer via `storage.setAlarm()`. On expiry, auto-roll for the active player and
-  auto-resolve any `pending`.
-- Disconnect ≠ drop. Players stay in the game; the timer carries them.
+As built in phase 3. Code in [apps/server/src](../apps/server/src).
+
+**The Worker** ([index.ts](../apps/server/src/index.ts)) is a thin router. The room code *is*
+the Durable Object's name, so every Worker instance routes a code to the same object with no
+lookup table.
+
+| Route | Does |
+|-|-|
+| `POST /api/rooms` | Mints a 4-char code, calls `init()` on that object. Body: `{ turnSeconds? }` |
+| `GET /api/rooms/:code` | Room info for the join screen: exists, phase, player count, joinable |
+| `GET /api/rooms/:code/ws` | WebSocket upgrade, forwarded to the room |
+| `GET /api/health` | Liveness |
+
+Codes use an alphabet without 0/O/1/I, since they are read aloud and typed on phones.
+`init()` refuses an object that already holds a room, which is how a code collision surfaces;
+the Worker retries with a fresh code.
+
+**The Durable Object** ([room.ts](../apps/server/src/room.ts)), one per room, is the sole
+authority. Durable Objects are single-threaded, so two players acting at once simply queue —
+there is no concurrency control to write.
+
+- Every inbound message: stamp `by` from the **authenticated socket** (never from the
+  message) → `applyAction` → persist → send each socket `redact(state, itsPlayer)`.
+- Clients may only send the eight gameplay action types in `CLIENT_ACTION_TYPES`.
+  `lobby/join` and `lobby/setConnected` are dispatched by the server as sockets open and
+  close; `system/timeout` only ever comes from the alarm. Accepting those from a client would
+  let a player impersonate the clock.
+- **The client never receives the seed**, the job queue, or suspended-power continuations.
+  The e2e test asserts all three against raw wire bytes.
+- **WebSocket Hibernation API** — `acceptWebSocket()` and the `webSocketMessage` /
+  `webSocketClose` handlers. Instance fields do not survive hibernation, so the constructor
+  reloads from storage under `blockConcurrencyWhile`, and per-socket identity lives in the
+  socket's serialized attachment rather than a Map. Sockets are tagged with their player id,
+  so one player may have several tabs open; closing one tab does not disconnect them.
+- `compatibility_date` is 2026-09-01, which is at or after 2026-04-07 and so enables
+  `web_socket_auto_reply_to_close`: the runtime completes the close handshake itself.
+
+**Messages** ([protocol.ts](../packages/engine/src/protocol.ts)). Every server message to a
+player is a full `state` snapshot: their redacted view, the events the last action produced,
+and — importantly — **`legal`, the actions that player may take right now, computed
+server-side.** The client renders its buttons from `legal` rather than re-deriving
+legality, so there is exactly one implementation of the rules deciding what is allowed.
+
+This replaced a plan to let the client call `legalActions` itself, which turned out not to
+work: `legalActions` needs the full `GameState`, and a client only ever has a `PlayerView`
+with the commit phase masked.
+
+**Reconnect** ships a full snapshot rather than replaying missed events. Always correct,
+far simpler, and the cost is only that a returning client snaps to the current position
+instead of animating what it missed.
+
+**Rejected connections** are accepted, sent an `error` message, then closed with a 4xxx code
+(4000 bad request, 4001 bad credentials, 4003 full or in progress, 4004 no such room). A
+browser's WebSocket API cannot read the HTTP status of a failed upgrade, but it can read a
+close code.
+
+**Turn clock and expiry** share the one alarm a Durable Object gets:
+
+- The deadline resets on every gameplay action, but **not** on connect/disconnect
+  bookkeeping, so a flapping connection cannot buy extra time. A reconnect mid-game *does*
+  reset it, so a player returning to a nearly-expired turn gets a fair chance.
+- When the alarm fires it dispatches `system/timeout`, which the engine already handles for
+  every phase — auto-roll, auto-commit, auto-pick, auto-answer a pending decision.
+- **An empty room does not auto-play.** If nobody is connected the clock waits rather than
+  playing the game to its end unwatched.
+- When the last socket leaves, the room is marked to expire in 6 hours. Rejoining cancels it;
+  otherwise the alarm deletes all storage, which frees the code.
+- A timeout that throws is an engine bug. The deadline is cleared rather than letting the
+  alarm retry into the same exception forever.
+
+`turnSeconds` is set at room creation: 0 disables the clock, otherwise clamped to 15–600,
+default 60.
 
 ### 5.5 Persistence
 
-100k row-writes/day is the real ceiling. Writing a snapshot after every action is ~500
-writes/game → about 200 games/day. Plenty for friends, but easily improved:
+**Written once per action — not debounced.** This reverses the original plan, which called
+for holding state in memory and snapshotting on a ~2 s timer. That was wrong twice over:
 
-The DO holds authoritative state **in memory** and writes to storage only on a timer
-(~every 2 s) and at phase boundaries. Durable Objects guarantee the in-memory copy is the
-single source of truth while the object is alive, so storage is purely crash/eviction
-insurance. This drops to a handful of writes per game and removes the ceiling entirely. It
-also happens to be exactly what hibernation-safety requires.
+- **A pending `setTimeout` prevents hibernation.** The Cloudflare docs are explicit. A
+  debounce timer would keep the object awake — and billed — for two seconds after every
+  single move, defeating the point of hibernating at all. (An earlier version of this section
+  claimed the debounce was "exactly what hibernation-safety requires". It is the opposite.)
+- **Eviction during the debounce window loses moves clients have already seen.** Every
+  client would then hold a state the server no longer agrees with.
+
+Per-action writes are correct under both. Durable Objects' output gate holds outgoing
+messages until the write commits, so a client never sees a state that was not persisted.
+
+The budget still holds comfortably: a game is ~200 actions, each one row write, so the
+100,000/day free allowance covers roughly **500 games a day**.
+
+| Key | Contents | Written |
+|-|-|-|
+| `meta` | code, createdAt, turnSeconds | once, at creation |
+| `state` | `GameState` | every action |
+| `secrets` | playerId to SHA-256 of their secret | when a new player registers |
+| `expiresAt` | timestamp | when the room empties |
+
+Verified by killing the runtime process mid-game — in race 2, with race 1's scores already
+awarded — restarting it cold, and reconnecting: phase, active player, scores, used racers
+and every board position came back exactly, and the restored game played to the end.
 
 ### 5.6 Identity
 
-No accounts. An anonymous `playerId` plus a per-player secret token in `localStorage`; the
-room join code lives in the URL (`/r/ABCD`). The secret token is what stops someone
-submitting turns as another player.
+No accounts. On first joining a room, the browser generates a random `playerId` and
+`secret` and keeps them in localStorage. The room stores a **SHA-256 of the secret** on first
+use and requires the same secret on every reconnect.
+
+`playerId` is public — it appears in every broadcast — so it cannot be what proves identity.
+The secret is what stops one player submitting turns as another.
+
+Credentials travel in the upgrade URL's query string. Acceptable for a friends' game, but
+they will appear in any access log that records full URLs. The alternative — authenticating
+in a first message — needs an unauthenticated-socket state with its own timeout, which is
+more machinery than the threat justifies here.
 
 ### 5.7 Redaction
 
@@ -346,8 +436,8 @@ a small store consumed through `useSyncExternalStore`.
 | 0 | Types, both 30-space tracks as data, seeded RNG, action/event unions | `npm run typecheck` clean | **done** |
 | 1 | Engine core, **no abilities**: draft, commit, turn loop, movement, trip/stand-up, top-2 finish, token scoring, 4-race loop | Hot-seat CLI plays a full 4-race game | **done** |
 | 2 | Hook pipeline + pending decisions + 9 racers covering every hook type (incl. Duelist for the interactive case) | Scripted scenario test per racer passes | **done** |
-| 3 | Worker + RoomDO: create/join, WS, authority, redaction, reconnect, alarm timer | Two browsers play a full game | next |
-| 4 | Web client end to end, SVG board, animation queue, mobile layout | Playable on a phone | |
+| 3 | Worker + RoomDO: create/join, WS, authority, redaction, reconnect, alarm timer | Two browsers play a full game | **done** |
+| 4 | Web client end to end, SVG board, animation queue, mobile layout | Playable on a phone | next |
 | 5 | Remaining 27 racers — card text is available, so this is data entry | Each racer has a scenario test | |
 | 6 | Spectators, replay viewer, fill bots, sound | — | |
 
@@ -414,6 +504,38 @@ the queue drained to empty at the end of every single game. A scenario test asse
 suspended turn survives a JSON round trip and resumes identically — the hibernation case,
 tested directly.
 
+### Phase 3 — delivered
+
+The server. A room is a Durable Object; players connect over WebSockets and play a full game.
+
+The gate was "two browsers play a full game", but there is no browser client until phase 4.
+So [e2e.mjs](../apps/server/test/e2e.mjs) drives **real WebSocket clients over the exact
+protocol a browser will use**, against the real Worker and Durable Object running in workerd
+via `wrangler dev`. It imports nothing from the engine — it knows only what a client knows.
+
+38 checks across six scenarios:
+
+| Scenario | Proves |
+|-|-|
+| Four clients play a full game | ~190 steps in 2–3 s; all clients end on the same step with the same scores; the seed, job queue and continuations never appear in raw wire bytes |
+| Commit secrecy | B sees *that* A committed but nothing reveals *which* racer; no event is emitted |
+| Credentials and limits | Wrong secret 4001, no room 4004, malformed 4000, seventh player 4003, joining a game in progress 4003 |
+| Impersonation | A client-supplied `by` is ignored; `system/timeout` and `lobby/join` are refused; malformed JSON is rejected without killing the socket |
+| Reconnect | Drop mid-race and return to the same seat and live game; closing a second tab does not disconnect the player |
+| Turn clock | An idle player's turn is auto-rolled by the alarm after ~15 s |
+
+Plus the cold-restart persistence test described in §5.5.
+
+Two things phase 3 turned up that were not in the plan:
+
+- **A commit-secrecy failure that was not a leak.** The first version asserted A's racer id
+  appeared nowhere in B's frame, and it failed. The id was in `hands` — A's drafted team,
+  which is public by design because the draft is face-up. The assertion was tightened to
+  what actually matters: nothing *outside* the public hands reveals which of them A chose.
+- **Stopping `wrangler dev` on Windows leaves `workerd` running.** The first attempt at the
+  restart test would have "passed" against the still-running old process with the room still
+  in memory. See the traps section of [STATUS.md](./STATUS.md).
+
 ### Rules rework (after the rulebook arrived)
 
 The first pass at phase 2 was built from published reviews and got the three rules above
@@ -462,6 +584,10 @@ arrangement, so replacing it from the physical board is a one-file change.
   plus backward movement can genuinely deadlock a race; after
   `6 x playerCount` consecutive turns with no forward progress the race is called and
   whoever has already finished keeps their cups.
+
+- **End-to-end** — *built (phase 3)*. `npm run e2e -w @mr/server` against a running
+  `npm run dev -w @mr/server`. Real WebSocket clients, real Durable Object. Not part of
+  `npm test`, because it needs a live server; `--fast` skips the 15-second clock scenario.
 
 The fuzzer also reports the win distribution by seat. That is a **bug detector, not a
 balance metric** — a seat winning too rarely usually means it is being skipped, not that

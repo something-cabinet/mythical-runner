@@ -164,8 +164,8 @@ export interface GameState {
    * So the turn is an explicit queue of jobs held in serializable state: the engine drains
    * it, and suspending simply means stopping with jobs still in it.
    *
-   * Empty except while a turn is resolving. Never sent to clients in a meaningful way —
-   * it is drained to empty before any broadcast.
+   * Empty except while a turn is resolving or suspended on a decision. Never sent to
+   * clients: `redact` strips it.
    */
   readonly queue: readonly Job[];
 
@@ -186,11 +186,17 @@ export interface GameState {
 }
 
 /**
- * What a client actually receives. Differs from GameState in exactly three ways:
- * the seed is gone, other players' secret commits are masked, and pending decisions
- * carry no resume context.
+ * What a client actually receives. Differs from GameState in exactly these ways:
+ *
+ *  - `seed` is gone, or the client could precompute every future roll;
+ *  - other players' secret commits are masked;
+ *  - pending decisions carry no resume context;
+ *  - `queue` and `turnStartPos` are gone — they are the engine's working memory for a turn
+ *    in progress, carry nothing a player needs, and exposing them would couple the client
+ *    to the job model.
  */
-export interface PlayerView extends Omit<GameState, 'seed' | 'phase' | 'pending'> {
+export interface PlayerView
+  extends Omit<GameState, 'seed' | 'phase' | 'pending' | 'queue' | 'turnStartPos'> {
   readonly you: PlayerId;
   readonly phase: RedactedPhase;
   readonly pending: RedactedPending | null;

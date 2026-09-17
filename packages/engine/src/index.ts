@@ -32,3 +32,4 @@ export {
 export { initGame, applyAction, legalActions, type ApplyResult } from './reducer/index.js';
 export { currentDrafter } from './reducer/draft.js';
 export { redact } from './redact.js';
+export * from './protocol.js';

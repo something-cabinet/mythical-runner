@@ -1,0 +1,22 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "mythical-runner",
+  "main": "src/index.ts",
+  // >= 2026-04-07 enables web_socket_auto_reply_to_close, so the runtime completes the
+  // close handshake itself and webSocketClose need not call ws.close().
+  "compatibility_date": "2026-09-01",
+
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "RoomDO" }]
+  },
+
+  // new_sqlite_classes, NOT new_classes. KV-backed Durable Objects are paid-only; the
+  // SQLite backend is what makes this free. This cannot be changed after first deploy
+  // without a migration, so get it right here.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomDO"] }],
+
+  "observability": { "enabled": true }
+
+  // Phase 4 adds "assets" here, pointing at apps/web/dist, so one Worker serves both the
+  // SPA and the API from the same origin — which is what lets the client skip CORS.
+}
