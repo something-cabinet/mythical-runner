@@ -10,4 +10,5 @@ export const mildMile: Track = assertValidTrack({
   id: 'mildMile',
   name: 'Mild Mile',
   spaces: Array.from({ length: TRACK_LENGTH }, (_, i) => plain(i)),
+  secondCorner: 15,
 });

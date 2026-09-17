@@ -69,6 +69,7 @@ function raceState(placements: readonly Placement[], active: string, raceNo: 1 |
       finished: [],
       stalledTurns: 0,
       claimedSpaces: [],
+      nextUp: null,
     },
     board,
     queue: [],
@@ -489,6 +490,285 @@ scenario('Racers crossing the line are placed', () => {
   check(posOf(state, 'vanilla-01') === FINISH, 'reached the finish');
   check(has(events, 'racer/finished'), 'finish recorded');
   check(racerAt(state, 'vanilla-01')?.finishedRank === 1, 'placed first');
+});
+
+scenario('Coach — "Everyone on my space gets +1 to their main move, including me"', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: 5 },
+      { player: 'p2', racer: 'coach', pos: 5 },
+    ],
+    'p1',
+  );
+  const { state, events } = rollFor(s, 'p1', 4);
+  const rolled = events.find((e) => e.t === 'dice/rolled') as { modifiedBy?: string };
+  check(rolled.modifiedBy === racerId('coach'), 'Coach hustles a racer sharing his space');
+  check(posOf(state, 'vanilla-01') === 9, 'moved the boosted amount', `pos ${posOf(state, 'vanilla-01')}`);
+
+  const solo = raceState([{ player: 'p1', racer: 'coach', pos: 5 }], 'p1');
+  const soloRes = rollFor(solo, 'p1', 4);
+  const soloRolled = soloRes.events.find((e) => e.t === 'dice/rolled') as { modifiedBy?: string };
+  check(soloRolled.modifiedBy === racerId('coach'), 'and hustles himself too');
+});
+
+scenario('Cheerleader — "last place move 2. If I do, I move 1"', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'cheerleader', pos: 5 },
+      { player: 'p2', racer: 'vanilla-01', pos: 1 },
+    ],
+    'p1',
+  );
+  const { state } = rollFor(s, 'p1', 3, { by: 'p1', choice: 'cheer' });
+  check(posOf(state, 'vanilla-01') === 3, 'last place moved 2', `pos ${posOf(state, 'vanilla-01')}`);
+  check(posOf(state, 'cheerleader') === 9, 'Cheerleader got her main move plus the +1 bonus', `pos ${posOf(state, 'cheerleader')}`);
+});
+
+scenario('Cheerleader — cheering for herself: move 2, then move 1, in that order', () => {
+  const s = raceState([{ player: 'p1', racer: 'cheerleader', pos: 1 }], 'p1');
+  const asked = applyAction(s, roll('p1'));
+  const cheered = applyAction(asked.state, decide('p1', 'cheer'));
+  const moves = cheered.events.filter((e) => e.t === 'racer/moved') as { to: number }[];
+  check(
+    moves[0]?.to === 2 && moves[1]?.to === 3,
+    'the +2 cheer resolves before the +1 bonus',
+    JSON.stringify(moves.map((m) => m.to)),
+  );
+});
+
+scenario('Hare — "+2 to my main move", skips it alone in the lead', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'hare', pos: 5 },
+      { player: 'p2', racer: 'vanilla-01', pos: 1 },
+      { player: 'p3', racer: 'vanilla-02', pos: 10 },
+    ],
+    'p1',
+  );
+  const { events } = rollFor(s, 'p1', 4);
+  const rolled = events.find((e) => e.t === 'dice/rolled') as { modifiedBy?: string };
+  check(rolled.modifiedBy === racerId('hare'), 'Hare gets +2');
+
+  const alone = raceState(
+    [
+      { player: 'p1', racer: 'hare', pos: 10 },
+      { player: 'p2', racer: 'vanilla-01', pos: 1 },
+    ],
+    'p1',
+  );
+  const res = applyAction(alone, roll('p1'));
+  check(!has(res.events, 'dice/rolled'), 'no roll at all — alone in the lead');
+  check(posOf(res.state, 'hare') === 10, 'did not move');
+});
+
+scenario('Heckler — "ends their turn within 1 space of where they started"', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: 5, tripped: true },
+      { player: 'p2', racer: 'heckler', pos: 20 },
+    ],
+    'p1',
+  );
+  const res = applyAction(s, roll('p1'));
+  check(posOf(res.state, 'heckler') === 22, 'a barely-moved (tripped) turn earns Heckler +2', `pos ${posOf(res.state, 'heckler')}`);
+});
+
+scenario('Inchworm — "rolls a 1... they skip that move and I move 1"', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: 5 },
+      { player: 'p2', racer: 'inchworm', pos: 10 },
+    ],
+    'p1',
+  );
+  // A natural roll is never 0 — the only way to reach a final value of 0 is Inchworm
+  // cancelling a roll of 1.
+  const { state, events } = rollFor(s, 'p1', 0);
+  check(posOf(state, 'vanilla-01') === 5, 'the roll of 1 was skipped entirely', `pos ${posOf(state, 'vanilla-01')}`);
+  check(posOf(state, 'inchworm') === 11, 'Inchworm wriggles 1', `pos ${posOf(state, 'inchworm')}`);
+  check(logLines(events).includes('wriggles'), 'logged');
+});
+
+scenario('Lackey — "rolls a 6... I move 2 before they move"', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: 5 },
+      { player: 'p2', racer: 'lackey', pos: 10 },
+    ],
+    'p1',
+  );
+  const { state, events } = rollFor(s, 'p1', 6);
+  check(posOf(state, 'vanilla-01') === 11, 'the roller still moves the full 6', `pos ${posOf(state, 'vanilla-01')}`);
+  check(posOf(state, 'lackey') === 12, 'Lackey moves 2', `pos ${posOf(state, 'lackey')}`);
+  const moves = events.filter((e) => e.t === 'racer/moved') as { racerId: string }[];
+  check(moves[0]?.racerId === racerId('lackey'), 'Lackey moves before the roller', JSON.stringify(moves));
+});
+
+scenario('Skipper — "anyone rolls a 1... I go next in turn order"', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: 5 },
+      { player: 'p2', racer: 'skipper', pos: 8 },
+      { player: 'p3', racer: 'vanilla-02', pos: 2 },
+    ],
+    'p1',
+  );
+  const { state } = rollFor(s, 'p1', 1);
+  check(
+    state.phase.t === 'racing' && state.phase.active === playerId('p2'),
+    'Skipper cuts in front of p3',
+    `active ${state.phase.t === 'racing' ? String(state.phase.active) : '?'}`,
+  );
+});
+
+scenario('Leaptoad — "skip spaces with other racers on them"', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'leaptoad', pos: 1 },
+      { player: 'p2', racer: 'vanilla-01', pos: 2 },
+      { player: 'p3', racer: 'vanilla-02', pos: 3 },
+    ],
+    'p1',
+  );
+  const { state } = rollFor(s, 'p1', 2);
+  check(posOf(state, 'leaptoad') === 5, 'hopped clean over both occupied spaces', `pos ${posOf(state, 'leaptoad')}`);
+});
+
+scenario('Party Animal — pulls everyone 1 toward him', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'party-animal', pos: 10 },
+      { player: 'p2', racer: 'vanilla-01', pos: 5 },
+      { player: 'p3', racer: 'vanilla-02', pos: 15 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(s, roll('p1'));
+  check(posOf(asked.state, 'vanilla-01') === 6, 'pulled 1 toward Party Animal', `pos ${posOf(asked.state, 'vanilla-01')}`);
+  check(posOf(asked.state, 'vanilla-02') === 14, 'pulled 1 toward Party Animal', `pos ${posOf(asked.state, 'vanilla-02')}`);
+});
+
+scenario('Party Animal — sharing his space after the pull gives +1', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'party-animal', pos: 10 },
+      { player: 'p2', racer: 'vanilla-01', pos: 9 },
+    ],
+    'p1',
+  );
+  const { events } = rollFor(s, 'p1', 3);
+  const rolled = events.find((e) => e.t === 'dice/rolled') as { modifiedBy?: string };
+  check(rolled.modifiedBy === racerId('party-animal'), 'the pulled racer now shares his space, giving +1');
+});
+
+scenario('Romantic — "anyone stops on a space with exactly one other racer"', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: 5 },
+      { player: 'p2', racer: 'vanilla-02', pos: 8 },
+      { player: 'p3', racer: 'romantic', pos: 20 },
+    ],
+    'p1',
+  );
+  const { state } = rollFor(s, 'p1', 3);
+  check(posOf(state, 'romantic') === 22, 'Romantic swoons at a pair forming elsewhere', `pos ${posOf(state, 'romantic')}`);
+});
+
+scenario('Suckerfish — "when a racer on my space moves, I can move to their new space"', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: 5 },
+      { player: 'p2', racer: 'suckerfish', pos: 5 },
+    ],
+    'p1',
+  );
+  const { state } = rollFor(s, 'p1', 4, { by: 'p2', choice: 'follow' });
+  check(posOf(state, 'suckerfish') === 9, 'latched on and followed to the new space', `pos ${posOf(state, 'suckerfish')}`);
+});
+
+scenario('Stickler — "can only cross by the exact number... overshoot, they don\'t move"', () => {
+  const overshoot = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: FINISH - 2 },
+      { player: 'p2', racer: 'stickler', pos: 1 },
+    ],
+    'p1',
+  );
+  const { state } = rollFor(overshoot, 'p1', 5);
+  check(posOf(state, 'vanilla-01') === FINISH - 2, 'overshooting: no movement at all', `pos ${posOf(state, 'vanilla-01')}`);
+
+  const exact = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: FINISH - 5 },
+      { player: 'p2', racer: 'stickler', pos: 1 },
+    ],
+    'p1',
+  );
+  const e = rollFor(exact, 'p1', 5);
+  check(posOf(e.state, 'vanilla-01') === FINISH, 'the exact amount still crosses', `pos ${posOf(e.state, 'vanilla-01')}`);
+});
+
+scenario('Hypnotist — "before my main move, I can warp a racer to my space"', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'hypnotist', pos: 10 },
+      { player: 'p2', racer: 'vanilla-01', pos: 3 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(s, roll('p1'));
+  check(asked.state.pending !== null, 'asks before rolling');
+  const res = applyAction(asked.state, decide('p1', 'warp:vanilla-01'));
+  check(posOf(res.state, 'vanilla-01') === 10, 'warped to Hypnotist’s space', `pos ${posOf(res.state, 'vanilla-01')}`);
+  check(has(res.events, 'racer/warped'), 'a warp, not a move');
+});
+
+scenario('Third Wheel — "warp to any space with exactly 2 racers on it"', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'third-wheel', pos: 1 },
+      { player: 'p2', racer: 'vanilla-01', pos: 12 },
+      { player: 'p3', racer: 'vanilla-02', pos: 12 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(s, roll('p1'));
+  check(asked.state.pending !== null, 'asks before rolling');
+  const res = applyAction(asked.state, decide('p1', 'warp:12'));
+  const warped = res.events.find((e) => e.t === 'racer/warped') as { to: number } | undefined;
+  check(warped?.to === 12, 'warped to the pair', `warped to ${String(warped?.to)}`);
+  check(has(res.events, 'dice/rolled'), 'still gets the main move after warping');
+});
+
+scenario('Flip Flop — "swap spaces with another racer instead of rolling"', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'flip-flop', pos: 3 },
+      { player: 'p2', racer: 'vanilla-01', pos: 15 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(s, roll('p1'));
+  check(asked.state.pending !== null, 'asks before rolling');
+  const res = applyAction(asked.state, decide('p1', 'swap:vanilla-01'));
+  check(posOf(res.state, 'flip-flop') === 15, 'flip flopped to their space', `pos ${posOf(res.state, 'flip-flop')}`);
+  check(posOf(res.state, 'vanilla-01') === 3, 'and they land on Flip Flop’s old space', `pos ${posOf(res.state, 'vanilla-01')}`);
+
+  const declined = applyAction(asked.state, decide('p1', 'roll'));
+  const d = declined.events.find((e) => e.t === 'dice/rolled') as { value: number };
+  check(d.value >= 1 && d.value <= 6, 'declining rolls normally', `got ${d.value}`);
+});
+
+scenario('Blimp — "+3 before the second corner, -1 on or after it"', () => {
+  const before = raceState([{ player: 'p1', racer: 'blimp', pos: 5 }], 'p1');
+  const b = rollFor(before, 'p1', 6);
+  const rolledBefore = b.events.find((e) => e.t === 'dice/rolled') as { modifiedBy?: string };
+  check(rolledBefore.modifiedBy === racerId('blimp'), 'gets +3 before the corner');
+
+  const after = raceState([{ player: 'p1', racer: 'blimp', pos: 20 }], 'p1');
+  const a = rollFor(after, 'p1', 1);
+  const rolledAfter = a.events.find((e) => e.t === 'dice/rolled') as { modifiedBy?: string };
+  check(rolledAfter.modifiedBy === racerId('blimp'), 'gets -1 on or after the corner');
 });
 
 // --- Report -----------------------------------------------------------------

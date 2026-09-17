@@ -72,6 +72,12 @@ export interface HookCtx {
   award(player: PlayerId, value: number): void;
 
   /**
+   * Skipper: "I go next in turn order." Takes effect the next time the current turn hands
+   * off; turn order then continues clockwise from `self` as normal.
+   */
+  cutInLine(): void;
+
+  /**
    * Suspends this power and asks `player` to choose.
    *
    * The engine stops draining the queue and resumes by calling this character's `resume`
@@ -124,14 +130,47 @@ export interface Hooks {
    */
   replaceMainMove?(h: HookCtx): number | null;
 
-  /** Adjusts the main move distance: Gunk's −1, Coach's +1, Hare's +2. */
-  modifyMainMove?(h: HookCtx, value: number): number;
+  /**
+   * Adjusts the main move distance: Gunk's −1, Coach's +1, Hare's +2. `mover` is whose
+   * main move this is — always `self` when a racer modifies its own roll, but a different
+   * racer when reacting to someone else's, which is how Coach tells whether the roller is
+   * sharing his space.
+   */
+  modifyMainMove?(h: HookCtx, value: number, mover: MutableRacer): number;
+
+  /**
+   * Hare: "When I start my turn alone in the lead, I skip my main move." Checked before the
+   * roll, alongside the trip check — no roll happens at all, same as a trip, except the
+   * racer isn't laid down.
+   */
+  skipsMainMove?(h: HookCtx): boolean;
+
+  /**
+   * Fires for every racer once a main move's raw value is known — the die roll, or
+   * whatever `replaceMainMove` produced — before `modifyMainMove` runs. Lackey, Inchworm
+   * and Skipper all react to someone else rolling a specific number; returning a number
+   * overrides the value that modifiers and movement will use (Inchworm's cancel to 0).
+   * `mover` may be `self`, for powers like Skipper's that don't care whose roll it was.
+   */
+  onAnyMainMoveRolled?(h: HookCtx, mover: MutableRacer, rolled: number): number | void;
 
   /** `self` stopped on a space, after any space effect resolved. */
   onStop?(h: HookCtx): void;
 
   /** Another racer stopped on a space. Fires for every racer, not just nearby ones. */
   onOtherStops?(h: HookCtx, other: MutableRacer): void;
+
+  /**
+   * Leaptoad: "While moving, I skip spaces with other racers on them." Checked per step;
+   * an occupied space is passed over without being counted against the move.
+   */
+  skipsOccupiedSpaces?(h: HookCtx): boolean;
+
+  /**
+   * Suckerfish: fires when another racer sharing `self`'s space begins a move, before any
+   * of its steps happen.
+   */
+  onOtherMoveStart?(h: HookCtx, mover: MutableRacer, distance: number, dir: 1 | -1): void;
 
   /** `self` passed `passed` during a move. */
   onPass?(h: HookCtx, passed: MutableRacer): void;
@@ -145,8 +184,23 @@ export interface Hooks {
    */
   blocksSpace?(h: HookCtx, mover: MutableRacer): boolean;
 
+  /**
+   * Stickler: "Other racers can only cross the finish line by moving the exact number of
+   * spaces they need." Checked against every other racer's move; true voids the whole move
+   * rather than clamping it at the finish line.
+   */
+  blocksOvershoot?(h: HookCtx): boolean;
+
   /** End of `self`'s own turn. */
   onTurnEnd?(h: HookCtx): void;
+
+  /**
+   * Heckler: fires when another racer's turn ends. `startPos` is where they stood when
+   * that turn began, so `Math.abs(other.pos - startPos) <= 1` is the rulebook's "within 1
+   * space of where they started" — recovering from a trip included, since a tripped turn
+   * still runs the whole pipeline down to this point.
+   */
+  onOtherTurnEnd?(h: HookCtx, other: MutableRacer, startPos: number): void;
 
   /** Re-entry point after `ask`. Must handle every `key` the character uses. */
   resume?(h: HookCtx, key: string, choice: ChoiceId, data: unknown): void;

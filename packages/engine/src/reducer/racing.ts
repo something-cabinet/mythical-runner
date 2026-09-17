@@ -30,6 +30,7 @@ export function beginRacing(ctx: Ctx, raceNo: RaceNumber, rng: Rng): void {
     finished: [],
     stalledTurns: 0,
     claimedSpaces: [],
+    nextUp: null,
   };
   s.queue = [];
   s.turnStartPos = START;
@@ -115,7 +116,7 @@ export function takeTurn(ctx: Ctx, rng: Rng): void {
   s.queue.push(
     { t: 'beforeMove', racer: racer.racerId },
     { t: 'mainMove', racer: racer.racerId },
-    { t: 'turnEnd', racer: racer.racerId },
+    { t: 'turnEnd', racer: racer.racerId, done: [] },
     { t: 'endTurn' },
   );
 
@@ -164,6 +165,19 @@ export function endTurn(ctx: Ctx): void {
   if (phase.stalledTurns >= s.seatOrder.length * STALL_LIMIT_PER_PLAYER) {
     endRace(ctx, true);
     return;
+  }
+
+  // Skipper: "I go next in turn order." A one-shot override, consumed here; turn order
+  // then continues clockwise from Skipper as normal.
+  const nextUp = phase.nextUp;
+  phase.nextUp = null;
+  if (nextUp && nextUp !== phase.active) {
+    const racer = s.board.find((r) => r.owner === nextUp);
+    if (racer && racer.finishedRank === null && !racer.eliminated) {
+      phase.active = nextUp;
+      announceTurn(ctx);
+      return;
+    }
   }
 
   // Advance to the next seat that still has a racer running.

@@ -49,8 +49,8 @@ export type Job =
   | { t: 'spaceEffect'; racer: RacerId }
   /** Fire `onStop` for the racer, and `onOtherStops` for everyone else. */
   | { t: 'stopHooks'; racer: RacerId; done: RacerId[] }
-  /** Fire `onTurnEnd`. */
-  | { t: 'turnEnd'; racer: RacerId }
+  /** Fire `onTurnEnd` for the racer, and `onOtherTurnEnd` for everyone else. */
+  | { t: 'turnEnd'; racer: RacerId; done: RacerId[] }
   /** Check finishers, then hand the turn on or end the race. */
   | { t: 'endTurn' }
   /** Re-enter a suspended power once its question has been answered. */

@@ -45,6 +45,13 @@ export interface Track {
   readonly name: string;
   /** Exactly TRACK_LENGTH entries, index i at position i. */
   readonly spaces: readonly Space[];
+  /**
+   * The index of the physical board's second corner, for Blimp's "before/on or after the
+   * second corner". The rulebook doesn't give coordinates for the corners, so — like the
+   * Wild Wilds space layout — this is invented. Roughly the far corner of an oval, i.e.
+   * about half way round.
+   */
+  readonly secondCorner: number;
 }
 
 export function plain(index: number): Space {

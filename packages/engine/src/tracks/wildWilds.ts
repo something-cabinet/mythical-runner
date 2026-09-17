@@ -52,4 +52,5 @@ export const wildWilds: Track = assertValidTrack({
     plain(28),
     star(29),
   ],
+  secondCorner: 15,
 });

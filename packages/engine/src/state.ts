@@ -121,6 +121,12 @@ export type Phase =
        * forth over a star space would farm it indefinitely.
        */
       readonly claimedSpaces: readonly number[];
+      /**
+       * Skipper's "I go next in turn order": set when triggered, consumed the next time a
+       * turn hands off, then cleared. Turn order then continues clockwise from Skipper as
+       * normal, so no further bookkeeping is needed after it is consumed.
+       */
+      readonly nextUp: PlayerId | null;
     }
   /** Awards resolved; waiting for players to acknowledge before the next race. */
   | { readonly t: 'scored'; readonly raceNo: RaceNumber }
