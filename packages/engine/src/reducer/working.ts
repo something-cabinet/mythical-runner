@@ -1,6 +1,7 @@
 import type { GameEvent } from '../events.js';
 import type { PlayerId, RacerId } from '../ids.js';
 import { invariant } from '../errors.js';
+import type { Rng } from '../rng.js';
 import type { GameState, RacerState } from '../state.js';
 
 /**
@@ -45,7 +46,7 @@ export interface Ctx {
    * turn jobs and `racing.ts` owns turn-order rules — importing either direction would
    * make the two modules circular.
    */
-  onEndTurn: () => void;
+  onEndTurn: (rng: Rng) => void;
 }
 
 export function makeCtx(state: GameState): Ctx {

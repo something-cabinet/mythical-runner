@@ -772,10 +772,11 @@ select {
   text-align: center;
 }
 
+/* Wraps rather than squeezing every option onto one row: Genius offers seven, and a
+   crowded board can give Hypnotist or Mastermind six. */
 .actionbar .options {
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
   gap: 10px;
 }
 

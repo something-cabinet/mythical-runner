@@ -13,7 +13,12 @@ export function ResultsScreen() {
 
   const byRank = (rank: number) => view.board.find((r) => r.finishedRank === rank);
   const first = byRank(1);
-  const second = byRank(2);
+  // A Mastermind that predicted its own win takes both places but keeps rank 1, so fall
+  // back to whoever holds this race's silver.
+  const silverOwner = view.seatOrder.find((pid) =>
+    (view.scores[pid] ?? []).some((t) => t.kind === 'silver' && t.raceNo === raceNo),
+  );
+  const second = byRank(2) ?? view.board.find((r) => r.owner === silverOwner);
 
   const earned = view.seatOrder
     .map((pid) => ({

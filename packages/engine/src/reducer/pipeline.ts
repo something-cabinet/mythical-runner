@@ -1,10 +1,12 @@
-import { getHooks, racerName } from '../characters/registry.js';
+import { ALL_RACER_IDS, racerName } from '../characters/registry.js';
 import type { AskRequest, HookCtx, MutableRacer } from '../characters/hooks.js';
+import { BORROWED, COPY_CAT, copyTarget, hooksFor, powerOf } from '../characters/powers.js';
 import { invariant } from '../errors.js';
 import type { ChoiceId, PlayerId, RacerId } from '../ids.js';
 import type { Job, MoveReason, ResumeDescriptor } from '../jobs.js';
 import type { Rng } from '../rng.js';
 import { pointsToken } from '../scoring.js';
+import { FINISHERS_PER_RACE } from '../state.js';
 import { FINISH, START, trackForRace, type RaceNumber } from '../tracks/index.js';
 import { type Ctx, findRacer, scoreOf } from './working.js';
 
@@ -29,23 +31,27 @@ export function runQueue(ctx: Ctx, rng: Rng): void {
 
 function runJob(ctx: Ctx, job: Job, rng: Rng): void {
   switch (job.t) {
+    case 'raceStart':
+      return doRaceStart(ctx, job, rng);
     case 'beforeMove':
       return fireSelf(ctx, rng, job.racer, 'beforeMainMove');
     case 'mainMove':
       return doMainMove(ctx, job.racer, rng);
+    case 'roll':
+      return doRoll(ctx, job, rng);
     case 'move':
       return doMoveStep(ctx, job, rng);
     case 'passCheck':
       return doPassCheck(ctx, job, rng);
     case 'spaceEffect':
-      return doSpaceEffect(ctx, job, rng);
+      return doSpaceEffect(ctx, job);
     case 'stopHooks':
       return doStopHooks(ctx, job, rng);
     case 'turnEnd':
       return doTurnEnd(ctx, job, rng);
     case 'endTurn':
       // Owned by racing.ts, injected on Ctx to avoid a circular import.
-      return ctx.onEndTurn();
+      return ctx.onEndTurn(rng);
     case 'resume':
       return doResume(ctx, job, rng);
   }
@@ -61,17 +67,18 @@ function behindOf(ctx: Ctx, racer: MutableRacer): RacerId[] {
 }
 
 /**
- * Queues a move, capturing what is needed to judge passing when it completes.
+ * Queues a move. What is needed to judge passing is captured when its first step runs.
  *
  * Every move in the game goes through here, so the pass rule is applied uniformly whether
  * the movement came from a die, a power or an arrow.
+ *
+ * Never suspends, so any hook may call it.
  */
 export function queueMove(
   ctx: Ctx,
   racer: MutableRacer,
   distance: number,
   reason: MoveReason,
-  rng: Rng,
   opts: { isMainMove?: boolean; resolveStop?: boolean; front?: boolean } = {},
 ): void {
   // "Moving 0 doesn't count as moving" — not even enough to trigger a pass check.
@@ -92,32 +99,74 @@ export function queueMove(
     startBehind: behindOf(ctx, racer),
     isMainMove: opts.isMainMove ?? false,
     resolveStop: opts.resolveStop ?? true,
+    started: null,
   };
 
   if (opts.front === false) ctx.s.queue.push(job);
   else ctx.s.queue.unshift(job);
+}
 
-  // Suckerfish: "When a racer on my space moves, I can move to their new space." Fired
-  // once per move, at the moment it's queued — before any of its steps happen — for every
-  // racer sharing the mover's origin.
-  if (!ctx.s.pending) {
-    for (const other of ctx.s.board) {
-      if (other.racerId === racer.racerId || other.eliminated || other.pos !== job.origin) continue;
-      getHooks(other.racerId).onOtherMoveStart?.(
-        makeHookCtx(ctx, rng, other),
-        racer,
-        job.remaining * job.dir,
-        job.dir,
-      );
-      // If a power suspended (e.g. Suckerfish asked a question), stop iterating — the move
-      // job is already queued and will process after the suspension resolves. Continuing
-      // would risk a second suspension from another racer on the same origin.
-      if (ctx.s.pending) break;
-    }
+/**
+ * Suckerfish: "When a racer on my space moves, I can move to their new space." Fired once
+ * per move, as its first step is about to run, for every racer sharing the mover's space.
+ *
+ * Deliberately not at queue time. Moves are queued from inside hooks that must not suspend
+ * — Lackey moving from `onAnyMainMoveRolled`, Scoocher scooching off a `modifyMainMove`
+ * log — and only a running job can suspend safely, by putting itself back.
+ *
+ * Returns false if a question is now pending; the caller re-queues the move.
+ */
+function announceMoveStart(
+  ctx: Ctx,
+  job: Extract<Job, { t: 'move' }>,
+  racer: MutableRacer,
+  rng: Rng,
+): boolean {
+  if (job.started === null) {
+    job.started = [];
+    job.origin = racer.pos;
+    job.startBehind = behindOf(ctx, racer);
   }
+  for (const other of ctx.s.board) {
+    if (other.racerId === racer.racerId || other.eliminated || other.pos !== job.origin) continue;
+    if (job.started.includes(other.racerId)) continue;
+    job.started.push(other.racerId);
+    hooksFor(ctx.s, other).onOtherMoveStart?.(
+      makeHookCtx(ctx, rng, other),
+      racer,
+      job.remaining * job.dir,
+      job.dir,
+    );
+    if (ctx.s.pending) return false;
+  }
+  return true;
 }
 
 // --- Jobs -------------------------------------------------------------------
+
+/**
+ * Fires "before my race" powers for everyone, in board order.
+ *
+ * A job rather than a loop, because Egg and Twin ask a question here. Keyed by racer and
+ * power, so a racer that picks up a new power along the way gets that power's "before
+ * race" effect too — and can't get the same one twice.
+ */
+function doRaceStart(ctx: Ctx, job: Extract<Job, { t: 'raceStart' }>, rng: Rng): void {
+  const key = (r: MutableRacer): string => `${r.racerId}:${powerOf(r)}`;
+  for (let guard = 0; ; guard++) {
+    invariant(guard < 1000, 'race start did not settle');
+    const next = ctx.s.board.find((r) => !r.eliminated && !job.done.includes(key(r)));
+    if (!next) return;
+    job.done.push(key(next));
+
+    const fn = hooksFor(ctx.s, next).onRaceStart;
+    if (!fn) continue;
+    ctx.s.queue.unshift(job);
+    fn(makeHookCtx(ctx, rng, next));
+    if (ctx.s.pending || ctx.s.queue[0] !== job) return;
+    ctx.s.queue.shift();
+  }
+}
 
 function doMainMove(ctx: Ctx, racerId: RacerId, rng: Rng): void {
   const racer = findRacer(ctx.s, racerId);
@@ -132,84 +181,130 @@ function doMainMove(ctx: Ctx, racerId: RacerId, rng: Rng): void {
     return;
   }
 
-  const hooks = getHooks(racerId);
+  const hooks = hooksFor(ctx.s, racer);
   const h = makeHookCtx(ctx, rng, racer);
 
   if (hooks.skipsMainMove?.(h) === true) return;
 
-  let value: number;
-  let modifiedBy: RacerId | undefined;
-
   const replaced = hooks.replaceMainMove?.(h) ?? null;
-  if (replaced !== null) {
-    value = replaced;
-    modifiedBy = racerId;
-  } else {
-    value = rng.rollD6();
+  ctx.s.queue.unshift({
+    t: 'roll',
+    racer: racerId,
+    value: replaced ?? rng.rollD6(),
+    die: replaced === null,
+    stage: 'reroll',
+    done: [],
+    distance: null,
+    cancelled: false,
+    rerolls: 0,
+    tags: [],
+    modifiedBy: replaced === null ? null : racerId,
+  });
+}
+
+/** Racers in power trigger order for `mover`'s roll: "current player → other players". */
+function triggerOrder(ctx: Ctx, mover: MutableRacer): MutableRacer[] {
+  return [mover, ...ctx.s.board.filter((r) => r.racerId !== mover.racerId)].filter(
+    (r) => !r.eliminated,
+  );
+}
+
+/**
+ * Settles a main move roll, then queues the move.
+ *
+ * The job stays at the head of the queue while each hook runs, so it is its own
+ * continuation: if a hook asks a question or queues work of its own — Dicemonger moving
+ * "before they move", Sisyphus warping — this returns and picks up where it left off once
+ * that work is done. `done` makes re-entering safe.
+ */
+function doRoll(ctx: Ctx, job: Extract<Job, { t: 'roll' }>, rng: Rng): void {
+  const racer = findRacer(ctx.s, job.racer);
+  if (!racer || racer.eliminated || racer.finishedRank !== null) return;
+
+  if (job.die) {
+    for (let guard = 0; ; guard++) {
+      invariant(guard < 1000, 'main move roll did not settle');
+      const next = triggerOrder(ctx, racer).find((r) => !job.done.includes(r.racerId));
+      if (!next) {
+        if (job.stage === 'final') break;
+        job.stage = 'final';
+        job.done = [];
+        continue;
+      }
+      job.done.push(next.racerId);
+
+      const hooks = hooksFor(ctx.s, next);
+      const fn = job.stage === 'reroll' ? hooks.onMainRoll : hooks.onMainRollFinal;
+      if (!fn) continue;
+
+      // A reroll inside `fn` resets `stage` and `done`, which the loop simply follows.
+      ctx.s.queue.unshift(job);
+      fn(makeHookCtx(ctx, rng, next), racer, job.value);
+      if (ctx.s.pending || ctx.s.queue[0] !== job) return;
+      ctx.s.queue.shift();
+    }
   }
 
-  // Lackey, Inchworm and Skipper react to the raw roll before any modifiers apply — and
-  // may react by queueing their own move. Track the queue length so that reaction jobs
+  let value = job.distance ?? job.value;
+  let cancelled = job.cancelled;
+  let modifiedBy: RacerId | undefined = job.modifiedBy ?? undefined;
+
+  // Lackey, Inchworm and Skipper react to the die before any modifiers apply — and may
+  // react by queueing their own move. Track the queue length so that reaction jobs
   // (unshifted here) end up ahead of the main move itself once it's queued below, matching
-  // "before they move".
+  // "before they move". Only a real roll counts: Legs jogging 5 did not roll anything.
   const beforeReactions = ctx.s.queue.length;
-  for (const other of ctx.s.board) {
-    if (other.eliminated) continue;
-    const fn = getHooks(other.racerId).onAnyMainMoveRolled;
-    if (!fn) continue;
-    const override = fn(makeHookCtx(ctx, rng, other), racer, value);
-    if (typeof override === 'number') {
-      value = override;
-      modifiedBy ??= other.racerId;
+  if (job.die) {
+    for (const other of ctx.s.board) {
+      if (other.eliminated) continue;
+      const fn = hooksFor(ctx.s, other).onAnyMainMoveRolled;
+      if (!fn) continue;
+      const override = fn(makeHookCtx(ctx, rng, other), racer, job.value);
+      invariant(!ctx.s.pending, `${other.racerId} asked a question from onAnyMainMoveRolled`);
+      if (typeof override === 'number' && !cancelled) {
+        if (override === 0) cancelled = true;
+        else value = override;
+        modifiedBy ??= other.racerId;
+      }
     }
   }
   const reactionJobs = ctx.s.queue.splice(0, ctx.s.queue.length - beforeReactions);
 
-  // If a power suspended inside onAnyMainMoveRolled, re-queue the main move and bail
-  // out. No dice event or main-move queue has happened yet, so re-running from scratch
-  // later (with a fresh RNG at the next action step) is correct. The reaction jobs are
-  // discarded — they were created in response to a roll value that was cancelled, and the
-  // next run will roll fresh and create the right reactions.
-  if (ctx.s.pending) {
-    ctx.s.queue.unshift({ t: 'mainMove', racer: racerId });
-    return;
-  }
-
-  // Every racer on the board may adjust the main move — Gunk goops opponents, Coach
-  // hustles anyone sharing his space. Self applies last so its own bonus is not lost.
-  // `modifiedBy` names whichever racer's hook actually changed the value, not the mover.
-  for (const other of ctx.s.board) {
-    if (other.eliminated) continue;
-    const fn = getHooks(other.racerId).modifyMainMove;
-    if (!fn) continue;
-    if (other.racerId === racerId) continue;
-    const next = fn(makeHookCtx(ctx, rng, other), value, racer);
-    if (next !== value) modifiedBy ??= other.racerId;
-    value = next;
-    if (ctx.s.pending) break;
-  }
-  const selfNext = hooks.modifyMainMove?.(h, value, racer) ?? value;
-  if (selfNext !== value) modifiedBy ??= racerId;
-  value = selfNext;
-
-  // If a modifier suspended the turn, re-queue the main move and bail out — no dice
-  // event or main-move queue has happened yet.
-  if (ctx.s.pending) {
-    ctx.s.queue.unshift({ t: 'mainMove', racer: racerId });
-    return;
+  if (cancelled) {
+    // A skipped move is not a move of 0 that Coach could hustle back into a move of 1.
+    value = 0;
+  } else {
+    // Every racer on the board may adjust the main move — Gunk goops opponents, Coach
+    // hustles anyone sharing his space. Self applies last so its own bonus is not lost.
+    // `modifiedBy` names whichever racer's hook actually changed the value, not the mover.
+    const others = ctx.s.board.filter((r) => r.racerId !== racer.racerId);
+    for (const other of [...others, racer]) {
+      if (other.eliminated) continue;
+      const fn = hooksFor(ctx.s, other).modifyMainMove;
+      if (!fn) continue;
+      const next = fn(makeHookCtx(ctx, rng, other), value, racer);
+      invariant(!ctx.s.pending, `${other.racerId} asked a question from modifyMainMove`);
+      if (next !== value) modifiedBy ??= other.racerId;
+      value = next;
+    }
   }
 
   ctx.emit({
     t: 'dice/rolled',
     player: racer.owner,
-    racerId,
+    racerId: racer.racerId,
     value,
     ...(modifiedBy ? { modifiedBy } : {}),
   });
 
-  queueMove(ctx, racer, value, 'main', rng, { isMainMove: true });
+  if (!cancelled) queueMove(ctx, racer, value, 'main', { isMainMove: true });
   // Re-insert the reactions now, ahead of the main move job just queued.
   ctx.s.queue.unshift(...reactionJobs);
+}
+
+/** The roll currently being decided. At most one exists: a turn has one main move. */
+function currentRoll(ctx: Ctx): Extract<Job, { t: 'roll' }> | undefined {
+  return ctx.s.queue.find((j): j is Extract<Job, { t: 'roll' }> => j.t === 'roll');
 }
 
 /**
@@ -223,39 +318,67 @@ function doMoveStep(ctx: Ctx, job: Extract<Job, { t: 'move' }>, rng: Rng): void 
   const racer = findRacer(ctx.s, job.racer);
   invariant(racer, `move for missing racer ${job.racer}`);
 
-const settle = (): void => {
-      // Order matters: passing is judged first, then the space's own effect, then the stop
-      // hooks — matching the rulebook's racetrack → current player → other players ordering.
-      const tail: Job[] = [];
-      if (job.startBehind.length > 0) {
-        tail.push({ t: 'passCheck', racer: job.racer, startBehind: job.startBehind, done: [] });
-      }
-      if (job.resolveStop) {
-        tail.push({ t: 'spaceEffect', racer: job.racer, pos: racer.pos });
-        tail.push({ t: 'stopHooks', racer: job.racer, done: [], pos: racer.pos });
-      }
-      if (tail.length > 0) ctx.s.queue.unshift(...tail);
-    };
+  const settle = (): void => {
+    // Order matters: passing is judged first, then the space's own effect, then the stop
+    // hooks — matching the rulebook's racetrack → current player → other players ordering.
+    const tail: Job[] = [];
+    if (job.startBehind.length > 0) {
+      tail.push({ t: 'passCheck', racer: job.racer, startBehind: job.startBehind, done: [] });
+    }
+    // A move that ends where it began never happened, so nothing stopped: no space
+    // effect, no `onStop`, no `onOtherStops`. This is "moving 0 doesn't count as moving"
+    // from `queueMove`, applied to the moves that are only voided once under way —
+    // Stickler's overshoot block, a clamp at Start, or a Huge Baby bounce straight back.
+    //
+    // It is also what stops position-keyed powers looping. Re-firing `onStop` at an
+    // unchanged position re-tests an unchanged condition, so Romantic pinned on the last
+    // space by Stickler would swoon forever — re-collecting that space's star on every
+    // pass — until the queue guard tripped.
+    if (job.resolveStop && racer.pos !== job.origin) {
+      tail.push({ t: 'spaceEffect', racer: job.racer, pos: racer.pos });
+      tail.push({ t: 'stopHooks', racer: job.racer, done: [], pos: racer.pos });
+    }
+    if (tail.length > 0) ctx.s.queue.unshift(...tail);
+  };
 
   if (job.remaining <= 0 || racer.eliminated || racer.pos === FINISH) return settle();
+
+  if (job.started === null || racer.pos === job.origin) {
+    const len = ctx.s.queue.length;
+    if (!announceMoveStart(ctx, job, racer, rng)) {
+      ctx.s.queue.splice(ctx.s.queue.length - len, 0, job);
+      return;
+    }
+    // Suckerfish latching on queues its own move ahead of this one; let it go first, as
+    // it did when the question was answered.
+    if (ctx.s.queue.length !== len) {
+      ctx.s.queue.splice(ctx.s.queue.length - len, 0, job);
+      return;
+    }
+  }
 
   // Stickler: "Other racers can only cross the finish line by moving the exact number of
   // spaces they need. If they overshoot, they don't move." Checked only at the very start
   // of the move — `origin` is unchanged from `queueMove` — since the whole move is voided,
   // not just the excess.
-  if (
-    job.dir === 1 &&
-    racer.pos === job.origin &&
-    racer.pos + job.remaining > FINISH &&
-    ctx.s.board.some(
+  if (job.dir === 1 && racer.pos === job.origin && racer.pos + job.remaining > FINISH) {
+    const stickler = ctx.s.board.find(
       (o) =>
         o.racerId !== racer.racerId &&
         !o.eliminated &&
-        getHooks(o.racerId).blocksOvershoot?.(makeHookCtx(ctx, rng, o)) === true,
-    )
-  ) {
-    job.remaining = 0;
-    return settle();
+        hooksFor(ctx.s, o).blocksOvershoot?.(makeHookCtx(ctx, rng, o)) === true,
+    );
+    if (stickler) {
+      job.remaining = 0;
+      powerHappened(
+        ctx,
+        rng,
+        stickler,
+        'blocksOvershoot',
+        `Actually… ${racerName(racer.racerId)} would overshoot the finish, so they don't move.`,
+      );
+      return settle();
+    }
   }
 
   let next = racer.pos + job.dir;
@@ -271,12 +394,21 @@ const settle = (): void => {
 
   // Leaptoad: "While moving, I skip spaces with other racers on them." An occupied space
   // is passed over without counting against the move — even backwards.
-  if (getHooks(racer.racerId).skipsOccupiedSpaces?.(makeHookCtx(ctx, rng, racer)) === true) {
+  if (hooksFor(ctx.s, racer).skipsOccupiedSpaces?.(makeHookCtx(ctx, rng, racer)) === true) {
     while (
       next > START &&
       next < FINISH &&
       ctx.s.board.some((o) => o.racerId !== racer.racerId && !o.eliminated && o.pos === next)
     ) {
+      // One happening per space jumped: "if they jumpfrog over 2 consecutive occupied
+      // spaces, I move 1 twice."
+      powerHappened(
+        ctx,
+        rng,
+        racer,
+        'skipsOccupiedSpaces',
+        `${racerName(racer.racerId)} jumpfrogs over space ${next}.`,
+      );
       next += job.dir;
     }
     next = Math.max(START, Math.min(FINISH, next));
@@ -298,7 +430,7 @@ const settle = (): void => {
   }
 
   // The move is over. Huge Baby may bounce the racer off its space before it truly stops.
-  applyDisplacement(ctx, racer, job.dir, rng);
+  applyDisplacement(ctx, racer, rng);
   settle();
 }
 
@@ -309,7 +441,7 @@ const settle = (): void => {
  * Explicitly not a move — "it's like they just stopped on that space instead" — so it
  * emits no `racer/moved` and cannot trigger movement-based powers.
  */
-function applyDisplacement(ctx: Ctx, racer: MutableRacer, dir: 1 | -1, rng: Rng): void {
+function applyDisplacement(ctx: Ctx, racer: MutableRacer, rng: Rng): void {
   let guard = 0;
   for (;;) {
     invariant(guard++ < 64, 'displacement did not settle');
@@ -320,20 +452,20 @@ function applyDisplacement(ctx: Ctx, racer: MutableRacer, dir: 1 | -1, rng: Rng)
         o.racerId !== racer.racerId &&
         !o.eliminated &&
         o.pos === racer.pos &&
-        getHooks(o.racerId).blocksSpace?.(makeHookCtx(ctx, rng, o), racer) === true,
+        hooksFor(ctx.s, o).blocksSpace?.(makeHookCtx(ctx, rng, o), racer) === true,
     );
     if (!blocker) return;
 
     const to = Math.max(START, blocker.pos - 1);
     if (to === racer.pos) return;
-    ctx.emit({
-      t: 'ability/triggered',
-      racerId: blocker.racerId,
-      hook: 'blocksSpace',
-      text: `${racerName(racer.racerId)} can't fit past ${racerName(blocker.racerId)} and settles behind them.`,
-    });
     racer.pos = to;
-    void dir;
+    powerHappened(
+      ctx,
+      rng,
+      blocker,
+      'blocksSpace',
+      `${racerName(racer.racerId)} can't fit past ${racerName(blocker.racerId)} and settles behind them.`,
+    );
   }
 }
 
@@ -364,13 +496,13 @@ function doPassCheck(ctx: Ctx, job: Extract<Job, { t: 'passCheck' }>, rng: Rng):
       passed: other.racerId,
     });
 
-    getHooks(racer.racerId).onPass?.(makeHookCtx(ctx, rng, racer), other);
+    hooksFor(ctx.s, racer).onPass?.(makeHookCtx(ctx, rng, racer), other);
     if (ctx.s.pending) {
       ctx.s.queue.unshift(job);
       return;
     }
 
-    getHooks(other.racerId).onPassed?.(makeHookCtx(ctx, rng, other), racer);
+    hooksFor(ctx.s, other).onPassed?.(makeHookCtx(ctx, rng, other), racer);
     if (ctx.s.pending) {
       ctx.s.queue.unshift(job);
       return;
@@ -378,7 +510,7 @@ function doPassCheck(ctx: Ctx, job: Extract<Job, { t: 'passCheck' }>, rng: Rng):
   }
 }
 
-function doSpaceEffect(ctx: Ctx, job: Extract<Job, { t: 'spaceEffect' }>, rng: Rng): void {
+function doSpaceEffect(ctx: Ctx, job: Extract<Job, { t: 'spaceEffect' }>): void {
   const racer = findRacer(ctx.s, job.racer);
   if (!racer || racer.eliminated || job.pos === FINISH) return;
 
@@ -406,7 +538,7 @@ function doSpaceEffect(ctx: Ctx, job: Extract<Job, { t: 'spaceEffect' }>, rng: R
       });
       // "A separate move than how you got there, and never part of your main move."
       // resolveStop false, or two arrows facing each other would loop forever.
-      queueMove(ctx, racer, amount, 'space', rng, { resolveStop: false });
+      queueMove(ctx, racer, amount, 'space', { resolveStop: false });
       return;
     }
 
@@ -450,7 +582,7 @@ function doStopHooks(ctx: Ctx, job: Extract<Job, { t: 'stopHooks' }>, rng: Rng):
 
   if (!job.done.includes(racer.racerId)) {
     job.done.push(racer.racerId);
-    getHooks(racer.racerId).onStop?.(makeHookCtx(ctx, rng, racer));
+    hooksFor(ctx.s, racer).onStop?.(makeHookCtx(ctx, rng, racer));
     racer.pos = savedPos;
     if (ctx.s.pending) {
       ctx.s.queue.unshift(job);
@@ -464,7 +596,7 @@ function doStopHooks(ctx: Ctx, job: Extract<Job, { t: 'stopHooks' }>, rng: Rng):
     if (job.done.includes(other.racerId)) continue;
     job.done.push(other.racerId);
 
-    getHooks(other.racerId).onOtherStops?.(makeHookCtx(ctx, rng, other), racer);
+    hooksFor(ctx.s, other).onOtherStops?.(makeHookCtx(ctx, rng, other), racer);
     racer.pos = savedPos;
     if (ctx.s.pending) {
       ctx.s.queue.unshift(job);
@@ -487,7 +619,7 @@ function doTurnEnd(ctx: Ctx, job: Extract<Job, { t: 'turnEnd' }>, rng: Rng): voi
 
   if (!job.done.includes(racer.racerId)) {
     job.done.push(racer.racerId);
-    getHooks(racer.racerId).onTurnEnd?.(makeHookCtx(ctx, rng, racer));
+    hooksFor(ctx.s, racer).onTurnEnd?.(makeHookCtx(ctx, rng, racer));
     if (ctx.s.pending) {
       ctx.s.queue.unshift(job);
       return;
@@ -500,7 +632,7 @@ function doTurnEnd(ctx: Ctx, job: Extract<Job, { t: 'turnEnd' }>, rng: Rng): voi
     if (job.done.includes(other.racerId)) continue;
     job.done.push(other.racerId);
 
-    getHooks(other.racerId).onOtherTurnEnd?.(makeHookCtx(ctx, rng, other), racer, startPos);
+    hooksFor(ctx.s, other).onOtherTurnEnd?.(makeHookCtx(ctx, rng, other), racer, startPos);
     if (ctx.s.pending) {
       ctx.s.queue.unshift(job);
       return;
@@ -512,30 +644,36 @@ function doResume(ctx: Ctx, job: Extract<Job, { t: 'resume' }>, rng: Rng): void 
   const racer = findRacer(ctx.s, job.racer);
   if (!racer) return; // the power's owner left the board while we waited
 
-  const hooks = getHooks(job.racer);
+  const hooks = hooksFor(ctx.s, racer, job.copy);
   invariant(hooks.resume, `${job.racer} suspended but defines no resume handler`);
   hooks.resume(makeHookCtx(ctx, rng, racer), job.key, job.choice, job.data);
 }
 
 // --- Hook dispatch ----------------------------------------------------------
 
-function fireSelf(
-  ctx: Ctx,
-  rng: Rng,
-  racerId: RacerId,
-  name: 'onRaceStart' | 'beforeMainMove' | 'onStop' | 'onTurnEnd',
-): void {
+function fireSelf(ctx: Ctx, rng: Rng, racerId: RacerId, name: 'beforeMainMove'): void {
   const racer = findRacer(ctx.s, racerId);
   if (!racer || racer.eliminated) return;
-  const fn = getHooks(racerId)[name] as ((h: HookCtx) => void) | undefined;
+  const fn = hooksFor(ctx.s, racer)[name] as ((h: HookCtx) => void) | undefined;
   fn?.(makeHookCtx(ctx, rng, racer));
 }
 
-/** Fires "before my race" powers for everyone, in board order. */
-export function fireRaceStart(ctx: Ctx, rng: Rng): void {
-  for (const racer of [...ctx.s.board]) {
-    fireSelf(ctx, rng, racer.racerId, 'onRaceStart');
-    if (ctx.s.pending) break;
+/**
+ * Records that `source`'s power just happened: logs it, and tells everyone else.
+ *
+ * Scoocher is the only listener — "when another racer's power happens, I move 1".
+ */
+export function powerHappened(
+  ctx: Ctx,
+  rng: Rng,
+  source: MutableRacer,
+  hook: string,
+  text: string,
+): void {
+  ctx.emit({ t: 'ability/triggered', racerId: source.racerId, hook, text });
+  for (const other of ctx.s.board) {
+    if (other.racerId === source.racerId || other.eliminated) continue;
+    hooksFor(ctx.s, other).onOtherPower?.(makeHookCtx(ctx, rng, other), source, text);
   }
 }
 
@@ -574,15 +712,14 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
     nameOf: (racer) => racerName(typeof racer === 'string' ? racer : racer.racerId),
 
     emit: (event) => ctx.emit(event),
-    log: (text) =>
-      ctx.emit({ t: 'ability/triggered', racerId: self.racerId, hook: 'power', text }),
+    log: (text) => powerHappened(ctx, rng, self, 'power', text),
 
     next: (...jobs: Job[]) => {
       ctx.s.queue.unshift(...jobs);
     },
 
     move: (target, distance, reason: MoveReason = 'power') => {
-      queueMove(ctx, target, distance, reason, rng, { resolveStop: true });
+      queueMove(ctx, target, distance, reason, { resolveStop: true });
     },
 
     warp: (target, pos) => {
@@ -618,10 +755,105 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
       ctx.emit({ t: 'token/awarded', player, token });
     },
 
+    forfeit: (player: PlayerId, value: number) => {
+      const tokens = scoreOf(ctx.s, player);
+      let owed = value;
+      // Newest chips first, so a loss comes out of this race's chips before older ones.
+      for (let i = tokens.length - 1; i >= 0 && owed > 0; i--) {
+        const token = tokens[i];
+        if (!token || token.kind !== 'points') continue;
+        const taken = Math.min(token.value, owed);
+        owed -= taken;
+        if (taken === token.value) tokens.splice(i, 1);
+        else tokens[i] = { ...token, value: token.value - taken };
+      }
+      const lost = value - owed;
+      if (lost > 0) ctx.emit({ t: 'token/lost', player, value: lost });
+    },
+
     cutInLine: () => {
       const phase = ctx.s.phase;
       if (phase.t !== 'racing') return;
-      phase.nextUp = self.owner;
+      phase.nextUp.push(self.owner);
+    },
+
+    takePlace: () => {
+      const phase = ctx.s.phase;
+      if (phase.t !== 'racing' || phase.finished.length >= FINISHERS_PER_RACE) return;
+      phase.finished.push(self.owner);
+      const rank = phase.finished.length;
+      self.finishedRank ??= rank;
+      ctx.emit({ t: 'racer/finished', racerId: self.racerId, player: self.owner, rank });
+    },
+
+    mainRoll: () => {
+      const roll = currentRoll(ctx);
+      return roll
+        ? { mover: roll.racer, value: roll.value, rerolls: roll.rerolls, tags: [...roll.tags] }
+        : null;
+    },
+
+    rerollMainMove: () => {
+      const roll = currentRoll(ctx);
+      if (!roll || !roll.die) return;
+      const was = roll.value;
+      roll.value = rng.rollD6();
+      roll.rerolls += 1;
+      roll.stage = 'reroll';
+      roll.done = [];
+      roll.distance = null;
+      roll.cancelled = false;
+      roll.modifiedBy = null;
+      // Not `powerHappened`: the power that caused the reroll has already logged it, and
+      // one reroll is one happening.
+      ctx.emit({
+        t: 'ability/triggered',
+        racerId: roll.racer,
+        hook: 'reroll',
+        text: `${racerName(roll.racer)} rerolls the ${was}… and gets ${roll.value}.`,
+      });
+    },
+
+    setMainMove: (distance) => {
+      const roll = currentRoll(ctx);
+      if (!roll) return;
+      roll.distance = distance;
+      roll.modifiedBy = self.racerId;
+    },
+
+    cancelMainMove: () => {
+      const roll = currentRoll(ctx);
+      if (!roll) return;
+      roll.cancelled = true;
+      roll.modifiedBy = self.racerId;
+    },
+
+    tagMainRoll: (tag) => {
+      const roll = currentRoll(ctx);
+      if (roll && !roll.tags.includes(tag)) roll.tags.push(tag);
+    },
+
+    borrowPower: (power) => {
+      self.memo[BORROWED] = power;
+    },
+
+    undrafted: () => {
+      const drafted = new Set(Object.values(ctx.s.hands).flat());
+      return ALL_RACER_IDS.filter((id) => !drafted.has(id));
+    },
+
+    previousWinners: () => {
+      // The gold cup for race N went to whoever's racer won it, and a player's Nth used
+      // racer is the one they raced in race N.
+      const winners: { raceNo: number; racer: RacerId }[] = [];
+      for (const [player, tokens] of Object.entries(ctx.s.scores)) {
+        for (const token of tokens) {
+          if (token.kind !== 'gold') continue;
+          const racer = ctx.s.used[player as PlayerId]?.[token.raceNo - 1];
+          if (racer) winners.push({ raceNo: token.raceNo, racer });
+        }
+      }
+      return winners.sort((a, b) => a.raceNo - b.raceNo).map((w) => w.racer);
     },
 
     ask: (req: AskRequest) => ask(ctx, self, req),
@@ -647,6 +879,7 @@ function ask(ctx: Ctx, self: MutableRacer, req: AskRequest): void {
     racer: self.racerId,
     key: req.key,
     data: req.data ?? null,
+    ...(powerOf(self) === COPY_CAT ? { copy: copyTarget(ctx.s, self) } : {}),
   };
 
   ctx.s.pending = {
@@ -682,6 +915,7 @@ export function answerPending(ctx: Ctx, choice: ChoiceId, auto: boolean): void {
     key: descriptor.key,
     data: descriptor.data as never,
     choice,
+    ...(descriptor.copy !== undefined ? { copy: descriptor.copy } : {}),
   });
 
   ctx.emit({

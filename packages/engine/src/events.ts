@@ -180,6 +180,13 @@ export interface TokenAwarded {
   readonly token: Token;
 }
 
+/** Point chips handed back, e.g. Sisyphus rolling a 6. Never takes a cup. */
+export interface TokenLost {
+  readonly t: 'token/lost';
+  readonly player: PlayerId;
+  readonly value: number;
+}
+
 export interface RacerFinished {
   readonly t: 'racer/finished';
   readonly racerId: RacerId;
@@ -224,6 +231,7 @@ export type GameEvent =
   | DecisionRequested
   | DecisionMade
   | TokenAwarded
+  | TokenLost
   | RacerFinished
   | RaceEnded
   | GameEnded;

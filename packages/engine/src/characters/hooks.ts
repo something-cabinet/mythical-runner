@@ -45,7 +45,11 @@ export interface HookCtx {
   nameOf(racer: MutableRacer | RacerId): string;
 
   emit(event: GameEvent): void;
-  /** Adds a line to the game log, attributed to `self`. */
+  /**
+   * Adds a line to the game log, attributed to `self` — and announces that `self`'s power
+   * just happened, which Scoocher reacts to. So log once per happening: two lines for one
+   * power would scooch twice.
+   */
   log(text: string): void;
 
   /** Queues work to run next, nested under whatever is currently running. */
@@ -70,12 +74,47 @@ export interface HookCtx {
   trip(target: MutableRacer): void;
   eliminate(target: MutableRacer): void;
   award(player: PlayerId, value: number): void;
+  /** Takes back up to `value` points from a player's point chips. Cups are never touched. */
+  forfeit(player: PlayerId, value: number): void;
 
   /**
-   * Skipper: "I go next in turn order." Takes effect the next time the current turn hands
-   * off; turn order then continues clockwise from `self` as normal.
+   * Skipper: "I go next in turn order." Genius: "I take another turn after this one."
+   * The same thing — `self` takes the next turn, then turn order continues clockwise from
+   * `self`. Several calls in one turn queue up in the order they were made.
    */
   cutInLine(): void;
+
+  /**
+   * Mastermind: puts `self` into the next finishing place right now, whether or not it has
+   * crossed the line — and even if it already holds a place, for "if I predict myself, I
+   * can win both 1st and 2nd".
+   */
+  takePlace(): void;
+
+  // --- The main move roll ----------------------------------------------------
+  //
+  // These act on the roll currently being decided, and are no-ops outside that window —
+  // which is `onMainRoll`, `onMainRollFinal`, and any `resume` for a question asked there.
+
+  /** The roll being decided, or null when no roll is in progress. */
+  mainRoll(): MainRollView | null;
+  /** Rolls the die again. The old number never happened, so every roll power re-fires. */
+  rerollMainMove(): void;
+  /** Replaces how far the main move goes. Still the main move, so still modified. */
+  setMainMove(distance: number): void;
+  /** The main move does not happen at all, and nothing may modify it back into one. */
+  cancelMainMove(): void;
+  /** Marks the roll, for once-per-turn powers. Cleared by nothing: one roll, one turn. */
+  tagMainRoll(tag: string): void;
+
+  // --- Borrowed powers -------------------------------------------------------
+
+  /** Egg and Twin: from now until the race ends, `self` has `power`'s powers. */
+  borrowPower(power: RacerId): void;
+  /** Racers in no player's hand — the rest of the deck, for Egg's draw. */
+  undrafted(): RacerId[];
+  /** Racers that won an earlier race this game, oldest first — Twin's choices. */
+  previousWinners(): RacerId[];
 
   /**
    * Suspends this power and asks `player` to choose.
@@ -85,6 +124,14 @@ export interface HookCtx {
    * player — Duelist can be declared on someone else's turn.
    */
   ask(request: AskRequest): void;
+}
+
+export interface MainRollView {
+  readonly mover: RacerId;
+  /** The die face as it stands now, after any rerolls. */
+  readonly value: number;
+  readonly rerolls: number;
+  readonly tags: readonly string[];
 }
 
 export interface AskRequest {
@@ -146,11 +193,27 @@ export interface Hooks {
   skipsMainMove?(h: HookCtx): boolean;
 
   /**
-   * Fires for every racer once a main move's raw value is known — the die roll, or
-   * whatever `replaceMainMove` produced — before `modifyMainMove` runs. Lackey, Inchworm
-   * and Skipper all react to someone else rolling a specific number; returning a number
-   * overrides the value that modifiers and movement will use (Inchworm's cancel to 0).
-   * `mover` may be `self`, for powers like Skipper's that don't care whose roll it was.
+   * A die has just been rolled for a main move, and may yet be rerolled. Fires for the
+   * mover, then everyone else in board order — and again from the top after every reroll.
+   * Magician and Dicemonger offer rerolls here. Only for real rolls, never for a replaced
+   * main move.
+   */
+  onMainRoll?(h: HookCtx, mover: MutableRacer, value: number): void;
+
+  /**
+   * The die for a main move is final: every reroll is spent. Powers that act on the number
+   * itself fire here — Alchemist, Rocket Scientist, Sisyphus, and Genius checking its
+   * prediction. Same order as `onMainRoll`; a reroll from here starts over at `onMainRoll`.
+   */
+  onMainRollFinal?(h: HookCtx, mover: MutableRacer, value: number): void;
+
+  /**
+   * Fires for every racer once a main move's die is final, before `modifyMainMove` runs.
+   * Lackey, Inchworm and Skipper react to a specific number here. Returning 0 cancels the
+   * main move (Inchworm's "they skip that move"); any other number overrides it. `mover`
+   * may be `self`, for powers like Skipper's that don't care whose roll it was.
+   *
+   * May queue movement but must not `ask`: the roll is already committed at this point.
    */
   onAnyMainMoveRolled?(h: HookCtx, mover: MutableRacer, rolled: number): number | void;
 
@@ -201,6 +264,20 @@ export interface Hooks {
    * still runs the whole pipeline down to this point.
    */
   onOtherTurnEnd?(h: HookCtx, other: MutableRacer, startPos: number): void;
+
+  /**
+   * Scoocher: another racer's power just happened. `text` is its log line. A power
+   * "happens" when it logs through `HookCtx.log` or the pipeline acts on its behalf
+   * (Huge Baby's displacement, Stickler's block, Leaptoad's jump), so one log line should
+   * mean one happening.
+   */
+  onOtherPower?(h: HookCtx, source: MutableRacer, text: string): void;
+
+  /**
+   * A racer has just been placed. Fires for every racer still in the race, plus the
+   * finisher itself. Must not `ask`: placements are settled at the end of a turn.
+   */
+  onRacerFinished?(h: HookCtx, finisher: MutableRacer, rank: number): void;
 
   /** Re-entry point after `ask`. Must handle every `key` the character uses. */
   resume?(h: HookCtx, key: string, choice: ChoiceId, data: unknown): void;

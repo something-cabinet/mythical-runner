@@ -1,7 +1,7 @@
 import { racerId, type ChoiceId } from '../../ids.js';
-import { option, racerTarget, type Hooks, type MutableRacer } from '../hooks.js';
+import { option, racerTarget, type HookCtx, type Hooks, type MutableRacer } from '../hooks.js';
 import type { RacerDef } from '../types.js';
-import { START, trackForRace, type RaceNumber } from '../../tracks/index.js';
+import { FINISH, START, trackForRace, type RaceNumber } from '../../tracks/index.js';
 
 /**
  * Implemented racers.
@@ -9,12 +9,13 @@ import { START, trackForRace, type RaceNumber } from '../../tracks/index.js';
  * Power text is taken verbatim from `docs/magical-athlete-rules.md`, which is the
  * authority. Where a power is quoted in a comment, that quote is the card.
  *
- * These nine were chosen to cover every hook between them: a replaced main move, a
- * modified main move, a pass trigger on the passer, a pass trigger on the passed, a
- * stop trigger on self, a stop trigger on others, spatial displacement, and one power
- * that questions a player who is not taking the turn.
+ * All 36. The first nine were chosen to cover every hook between them: a replaced main
+ * move, a modified main move, a pass trigger on the passer, a pass trigger on the passed,
+ * a stop trigger on self, a stop trigger on others, spatial displacement, and one power
+ * that questions a player who is not taking the turn. Phase 5 added the rest in two waves.
  *
- * The remaining 27 racers are vanilla padding until they are written. See the registry.
+ * Log lines name the racer with `h.nameOf(h.self)` rather than a literal, because Copy
+ * Cat, Egg and Twin run these same hooks under their own names.
  */
 
 function def(id: string, name: string, text: string, hooks: Hooks): RacerDef {
@@ -22,6 +23,32 @@ function def(id: string, name: string, text: string, hooks: Hooks): RacerDef {
 }
 
 const isRunning = (r: MutableRacer): boolean => !r.eliminated && r.finishedRank === null;
+
+/**
+ * Rule 8: "If you run into an infinite loop, e.g. Scoocher stopping on the Huge Baby,
+ * complete the loop once in the order it takes place, then end it."
+ *
+ * A loop is the same trigger firing again with every racer exactly where they were last
+ * time. Returns false for such a repeat within the current turn, so a power that reacts
+ * to its own consequences runs each lap once and then stops.
+ *
+ * The same turn, not the same action: a loop through Suckerfish asks a question on every
+ * lap, and each answer is a new action.
+ */
+function firstLap(h: HookCtx, trigger: string): boolean {
+  const phase = h.state.phase;
+  if (phase.t !== 'racing') return true;
+  const board = h
+    .racers()
+    .map((r) => (r.eliminated ? 'x' : String(r.pos)))
+    .join(',');
+  const cause = `${trigger}|${board}`;
+  const prior = h.self.memo['loopCauses'] as { turn: number; causes: string[] } | undefined;
+  const seen = prior?.turn === phase.turn ? prior.causes : [];
+  if (seen.includes(cause)) return false;
+  h.self.memo['loopCauses'] = { turn: phase.turn, causes: [...seen, cause] };
+  return true;
+}
 
 // ---------------------------------------------------------------------------
 
@@ -51,7 +78,7 @@ const legs = def('legs', 'Legs', 'I can skip rolling for my main move and move 5
     const jogging = h.self.memo['jog'] === true;
     h.self.memo['jog'] = false;
     if (!jogging) return null;
-    h.log('Legs skips the die and jogs exactly 5.');
+    h.log(`${h.nameOf(h.self)} skips the die and jogs exactly 5.`);
     return 5;
   },
 
@@ -64,7 +91,7 @@ const legs = def('legs', 'Legs', 'I can skip rolling for my main move and move 5
 /** THE SLIP — "I trip any racer that passes me." */
 const banana = def('banana', 'Banana', 'I trip any racer that passes me.', {
   onPassed: (h, passer) => {
-    h.log(`${h.nameOf(passer)} slips on Banana!`);
+    h.log(`${h.nameOf(passer)} slips on ${h.nameOf(h.self)}!`);
     h.trip(passer);
   },
 });
@@ -79,7 +106,7 @@ const banana = def('banana', 'Banana', 'I trip any racer that passes me.', {
 const centaur = def('centaur', 'Centaur', 'When I pass a racer, they move -2.', {
   onPass: (h, passed) => {
     if (!isRunning(passed)) return;
-    h.log(`Centaur hoofwhacks ${h.nameOf(passed)} back 2!`);
+    h.log(`${h.nameOf(h.self)} hoofwhacks ${h.nameOf(passed)} back 2!`);
     h.move(passed, -2);
   },
 });
@@ -118,7 +145,7 @@ const mouth = def(
       if (sharing.length !== 1) return;
       const victim = sharing[0];
       if (!victim) return;
-      h.log(`M.O.U.T.H. chomps ${h.nameOf(victim)}!`);
+      h.log(`${h.nameOf(h.self)} chomps ${h.nameOf(victim)}!`);
       h.eliminate(victim);
     },
   },
@@ -137,13 +164,13 @@ const babaYaga = def(
   {
     onOtherStops: (h, other) => {
       if (other.pos !== h.self.pos || !isRunning(other)) return;
-      h.log(`${h.nameOf(other)} gets legged by Baba Yaga!`);
+      h.log(`${h.nameOf(other)} gets legged by ${h.nameOf(h.self)}!`);
       h.trip(other);
     },
     onStop: (h) => {
       for (const other of h.sharing()) {
         if (!isRunning(other)) continue;
-        h.log(`Baba Yaga legs it onto ${h.nameOf(other)}!`);
+        h.log(`${h.nameOf(h.self)} legs it onto ${h.nameOf(other)}!`);
         h.trip(other);
       }
     },
@@ -165,7 +192,7 @@ const lovableLoser = def(
       const last = h.lastPlace();
       if (last.length !== 1 || last[0]?.racerId !== h.self.racerId) return;
       if (!h.alone()) return;
-      h.log("Lovable Loser is alone in last place, and proud of it. +1 point.");
+      h.log(`${h.nameOf(h.self)} is alone in last place, and proud of it. +1 point.`);
       h.award(h.self.owner, 1);
     },
   },
@@ -227,29 +254,26 @@ const duelist = def(
 
       const mine = h.rng.rollD6();
       const theirs = h.rng.rollD6();
-      h.log(`DUEL! Duelist rolls ${mine}, ${h.nameOf(target)} rolls ${theirs}.`);
-
       // "I win ties."
-      if (mine >= theirs) {
-        h.log('Duelist wins the duel and advances 2.');
-        h.move(h.self, 2);
-      } else {
-        h.log(`${h.nameOf(target)} wins the duel and advances 2.`);
-        h.move(target, 2);
-      }
+      const winner = mine >= theirs ? h.self : target;
+      h.log(
+        `DUEL! ${h.nameOf(h.self)} rolls ${mine}, ${h.nameOf(target)} rolls ${theirs}. ` +
+          `${h.nameOf(winner)} wins and advances 2.`,
+      );
+      h.move(winner, 2);
     },
   },
 );
 
 /** GOOP 'EM — "Other racers get -1 to their main move." */
 const gunk = def('gunk', 'Gunk', 'Other racers get -1 to their main move.', {
-  modifyMainMove: (h, value) => {
+  modifyMainMove: (h, value, mover) => {
     // The card is explicit that the goop "reduces the move amount, not the die roll
     // number", so it applies after the roll and can take a move below zero conceptually —
     // clamped at 0, since a negative main move is not a thing.
     if (!isRunning(h.self)) return value;
     const gooped = Math.max(0, value - 1);
-    if (gooped !== value) h.log(`Gunk goops the track: -1.`);
+    if (gooped !== value) h.log(`${h.nameOf(h.self)} goops ${h.nameOf(mover)}: -1.`);
     return gooped;
   },
 });
@@ -260,19 +284,13 @@ const gunk = def('gunk', 'Gunk', 'Other racers get -1 to their main move.', {
  * Skipper), `onOtherTurnEnd` (Heckler), `skipsOccupiedSpaces` (Leaptoad), `onOtherMoveStart`
  * (Suckerfish), and `blocksOvershoot` (Stickler). `modifyMainMove` also grew a `mover`
  * parameter, since Coach and Blimp need to know whose roll they're adjusting.
- *
- * Wave 2 (not yet written) needs real engine additions: reroll (Dicemonger, Magician),
- * a postponed/extra turn (Genius), power-copying (Copy Cat, Egg, Twin), a race-ending
- * override (Mastermind), and a global "an ability just happened" counter (Scoocher).
- * Alchemist, Rocket Scientist and Sisyphus also want a post-roll decision point that
- * doesn't exist yet. See docs/STATUS.md.
  */
 
 /** COACH — "Everyone on my space gets +1 to their main move, including me." */
 const coach = def('coach', 'Coach', 'Everyone on my space gets +1 to their main move, including me.', {
   modifyMainMove: (h, value, mover) => {
     if (!isRunning(h.self) || mover.pos !== h.self.pos) return value;
-    h.log(`Coach hustles ${h.nameOf(mover)}: +1.`);
+    h.log(`${h.nameOf(h.self)} hustles ${h.nameOf(mover)}: +1.`);
     return value + 1;
   },
 });
@@ -302,7 +320,7 @@ const cheerleader = def(
     },
     resume: (h, key, choice) => {
       if (key !== 'cheer' || choice !== ('cheer' as ChoiceId)) return;
-      h.log('Cheerleader rallies the back of the pack!');
+      h.log(`${h.nameOf(h.self)} rallies the back of the pack!`);
       h.move(h.self, 1);
       for (const r of h.lastPlace()) h.move(r, 2);
     },
@@ -318,11 +336,12 @@ const hare = def('hare', 'Hare', 'I get +2 to my main move. When I start my turn
     if (!isRunning(h.self)) return false;
     const lead = h.lead();
     if (lead.length !== 1 || lead[0]?.racerId !== h.self.racerId) return false;
-    h.log('Hare is alone in the lead and struts past this turn.');
+    h.log(`${h.nameOf(h.self)} is alone in the lead and struts past this turn.`);
     return true;
   },
   modifyMainMove: (h, value, mover) => {
     if (mover.racerId !== h.self.racerId) return value;
+    h.log(`${h.nameOf(h.self)} bounds ahead: +2.`);
     return value + 2;
   },
 });
@@ -341,13 +360,13 @@ const heckler = def(
     onTurnEnd: (h) => {
       if (!isRunning(h.self)) return;
       if (Math.abs(h.self.pos - h.state.turnStartPos) > 1) return;
-      h.log('Heckler heckles himself for barely moving: +2.');
+      h.log(`${h.nameOf(h.self)} heckles themself for barely moving: +2.`);
       h.move(h.self, 2);
     },
     onOtherTurnEnd: (h, other, startPos) => {
       if (!isRunning(h.self) || !isRunning(other)) return;
       if (Math.abs(other.pos - startPos) > 1) return;
-      h.log(`Heckler heckles ${h.nameOf(other)} for barely moving: +2.`);
+      h.log(`${h.nameOf(h.self)} heckles ${h.nameOf(other)} for barely moving: +2.`);
       h.move(h.self, 2);
     },
   },
@@ -361,7 +380,7 @@ const inchworm = def(
   {
     onAnyMainMoveRolled: (h, mover, rolled) => {
       if (!isRunning(h.self) || mover.racerId === h.self.racerId || rolled !== 1) return;
-      h.log(`${h.nameOf(mover)} rolls a 1 — Inchworm wriggles 1 and they skip it!`);
+      h.log(`${h.nameOf(mover)} rolls a 1 — ${h.nameOf(h.self)} wriggles 1 and they skip it!`);
       h.move(h.self, 1);
       return 0;
     },
@@ -376,7 +395,7 @@ const lackey = def(
   {
     onAnyMainMoveRolled: (h, mover, rolled) => {
       if (!isRunning(h.self) || mover.racerId === h.self.racerId || rolled !== 6) return;
-      h.log(`${h.nameOf(mover)} rolls a 6 — Lackey cheers and moves 2!`);
+      h.log(`${h.nameOf(mover)} rolls a 6 — ${h.nameOf(h.self)} cheers and moves 2!`);
       h.move(h.self, 2);
     },
   },
@@ -385,12 +404,13 @@ const lackey = def(
 /**
  * SALTY DOG — "When anyone rolls a 1 for their main move, I go next in turn order."
  *
- * Doesn't fire on Skipper's own roll — he's already going.
+ * "Anyone" includes Skipper: "After I go, turn order continues to my left. (Unless I roll a
+ * 1 and go again!)"
  */
 const skipper = def('skipper', 'Skipper', 'When anyone rolls a 1 for their main move, I go next in turn order.', {
-  onAnyMainMoveRolled: (h, mover, rolled) => {
-    if (!isRunning(h.self) || mover.racerId === h.self.racerId || rolled !== 1) return;
-    h.log('Skipper cuts in line!');
+  onAnyMainMoveRolled: (h, _mover, rolled) => {
+    if (!isRunning(h.self) || rolled !== 1) return;
+    h.log(`${h.nameOf(h.self)} cuts in line!`);
     h.cutInLine();
   },
 });
@@ -411,6 +431,7 @@ const partyAnimal = def(
   {
     beforeMainMove: (h) => {
       if (!isRunning(h.self)) return;
+      h.log(`${h.nameOf(h.self)} throws a party — everyone moves 1 closer.`);
       for (const r of h.running()) {
         if (r.racerId === h.self.racerId) continue;
         if (r.pos < h.self.pos) h.move(r, 1);
@@ -420,7 +441,7 @@ const partyAnimal = def(
     modifyMainMove: (h, value, mover) => {
       if (!isRunning(h.self) || mover.racerId !== h.self.racerId) return value;
       const bonus = h.sharing().filter(isRunning).length;
-      if (bonus > 0) h.log(`Party Animal draws a crowd: +${bonus}.`);
+      if (bonus > 0) h.log(`${h.nameOf(h.self)} draws a crowd: +${bonus}.`);
       return value + bonus;
     },
   },
@@ -432,16 +453,20 @@ const romantic = def(
   'Romantic',
   'When anyone stops on a space with exactly one other racer, I move 2.',
   {
+    // Both hooks guard against rule 8 loops: Romantic swooning onto an arrow that knocks it
+    // straight back beside the same pair would otherwise swoon forever.
     onStop: (h) => {
       if (!isRunning(h.self)) return;
       if (h.at(h.self.pos).filter(isRunning).length !== 2) return;
-      h.log('Romantic swoons at the sight of a pair: +2.');
+      if (!firstLap(h, `${h.self.racerId}@${h.self.pos}`)) return;
+      h.log(`${h.nameOf(h.self)} swoons at the sight of a pair: +2.`);
       h.move(h.self, 2);
     },
     onOtherStops: (h, other) => {
       if (!isRunning(h.self) || !isRunning(other)) return;
       if (h.at(other.pos).filter(isRunning).length !== 2) return;
-      h.log(`Romantic swoons watching ${h.nameOf(other)} pair up: +2.`);
+      if (!firstLap(h, `${other.racerId}@${other.pos}`)) return;
+      h.log(`${h.nameOf(h.self)} swoons watching ${h.nameOf(other)} pair up: +2.`);
       h.move(h.self, 2);
     },
   },
@@ -472,7 +497,7 @@ const suckerfish = def('suckerfish', 'Suckerfish', 'When a racer on my space mov
   resume: (h, key, choice, data) => {
     if (key !== 'follow' || choice !== ('follow' as ChoiceId)) return;
     const { distance } = data as { distance: number };
-    h.log('Suckerfish latches on and follows!');
+    h.log(`${h.nameOf(h.self)} latches on and follows!`);
     h.move(h.self, distance);
   },
 });
@@ -513,7 +538,7 @@ const hypnotist = def('hypnotist', 'Hypnotist', 'Before my main move, I can warp
       .running()
       .find((r) => choice === (`warp:${r.racerId}` as ChoiceId));
     if (!target) return;
-    h.log(`Hypnotist hssssts ${h.nameOf(target)} over!`);
+    h.log(`${h.nameOf(h.self)} hssssts ${h.nameOf(target)} over!`);
     h.warp(target, h.self.pos);
   },
 });
@@ -546,7 +571,7 @@ const thirdWheel = def(
     resume: (h, key, choice) => {
       if (key !== 'thirdWheel' || choice === ('pass' as ChoiceId)) return;
       const pos = Number(String(choice).slice('warp:'.length));
-      h.log('Third Wheel rolls through and warps in!');
+      h.log(`${h.nameOf(h.self)} rolls through and warps in!`);
       h.warp(h.self, pos);
     },
   },
@@ -590,7 +615,7 @@ const flipFlop = def(
       const theirs = partner.pos;
       h.warp(h.self, theirs);
       h.warp(partner, mine);
-      h.log(`Flip Flop and ${h.nameOf(partner)} flop flip!`);
+      h.log(`${h.nameOf(h.self)} and ${h.nameOf(partner)} flop flip!`);
       return 0;
     },
     resume: (h, key, choice) => {
@@ -619,8 +644,345 @@ const blimp = def(
       if (phase.t !== 'racing') return value;
       const track = trackForRace(phase.raceNo as RaceNumber);
       const bonus = h.self.pos < track.secondCorner ? 3 : -1;
-      h.log(bonus > 0 ? 'Blimp is cruising: +3.' : 'Blimp is past the corner and losing altitude: -1.');
+      h.log(bonus > 0 ? `${h.nameOf(h.self)} is cruising: +3.` : `${h.nameOf(h.self)} is past the corner and losing altitude: -1.`);
       return value + bonus;
+    },
+  },
+);
+
+/**
+ * Phase 5, wave 2 — the racers that needed engine work first:
+ *
+ *  - a `roll` job holding a main move between the die and the move, with `onMainRoll`
+ *    for rerolls (Magician, Dicemonger) and `onMainRollFinal` for acting on the final
+ *    number (Alchemist, Rocket Scientist, Sisyphus, Genius);
+ *  - borrowed powers, resolved in `characters/powers.ts` (Copy Cat, Egg, Twin);
+ *  - "before my race" as a job, so it can ask (Egg, Twin);
+ *  - `onOtherPower`, fired by every `h.log` (Scoocher);
+ *  - `onRacerFinished` and `takePlace` (Mastermind), and a turn-order queue shared by
+ *    Skipper and Genius.
+ */
+
+/** TRANSMUTE 'N' SCOOT — "When I roll a 1 or 2 for my main move, I can move 4 instead." */
+const alchemist = def(
+  'alchemist',
+  'Alchemist',
+  'When I roll a 1 or 2 for my main move, I can move 4 instead.',
+  {
+    onMainRollFinal: (h, mover, value) => {
+      if (mover.racerId !== h.self.racerId || (value !== 1 && value !== 2)) return;
+      h.ask({
+        player: h.self.owner,
+        prompt: `You rolled a ${value}. Transmute it into a move of 4?`,
+        options: [option('transmute', 'Move 4'), option('keep', `Move ${value}`)],
+        key: 'transmute',
+        defaultChoice: 'keep' as ChoiceId,
+      });
+    },
+    resume: (h, key, choice) => {
+      if (key !== 'transmute' || choice !== ('transmute' as ChoiceId)) return;
+      h.log(`${h.nameOf(h.self)} transmutes the roll into a move of 4.`);
+      h.setMainMove(4);
+    },
+  },
+);
+
+/**
+ * COPY THAT — "I have the power of the racer currently in the lead. If there's a tie, I
+ * pick."
+ *
+ * No hooks of its own here: its power is whoever leads, which only the board can say, so
+ * `hooksFor` in `characters/powers.ts` builds its hooks on the fly.
+ */
+const copyCat = def(
+  'copy-cat',
+  'Copy Cat',
+  "I have the power of the racer currently in the lead. If there's a tie, I pick.",
+  {},
+);
+
+/**
+ * DICEY DEALS — "Anyone can reroll their main move once per turn. When another racer does
+ * it, I move 1."
+ *
+ * The roller decides, not Dicemonger, so the question goes to the mover's owner. The move
+ * is queued before the reroll resolves: "If someone else rerolls, I move before they move."
+ */
+const dicemonger = def(
+  'dicemonger',
+  'Dicemonger',
+  'Anyone can reroll their main move once per turn. When another racer does it, I move 1.',
+  {
+    onMainRoll: (h, mover, value) => {
+      if (!isRunning(h.self) || h.mainRoll()?.tags.includes('dicey')) return;
+      h.ask({
+        player: mover.owner,
+        prompt: `You rolled a ${value}. Reroll it with ${h.nameOf(h.self)}'s Dicey Deals?`,
+        options: [option('reroll', 'Reroll'), option('keep', `Keep the ${value}`)],
+        key: 'dicey',
+        data: { mover: mover.racerId },
+        defaultChoice: 'keep' as ChoiceId,
+      });
+    },
+    resume: (h, key, choice, data) => {
+      if (key !== 'dicey' || choice !== ('reroll' as ChoiceId)) return;
+      const moverId = (data as { mover: string }).mover;
+      const mover = h.racers().find((r) => r.racerId === moverId);
+      if (!mover) return;
+      h.tagMainRoll('dicey');
+      h.log(`${h.nameOf(mover)} makes a dicey deal with ${h.nameOf(h.self)}.`);
+      if (mover.racerId !== h.self.racerId) h.move(h.self, 1);
+      h.rerollMainMove();
+    },
+  },
+);
+
+/**
+ * THINK GOOD — "I can predict what number I'll roll for my main move. If I'm right, I take
+ * another turn after this one."
+ *
+ * Predicted before the roll and checked against the final die, after any rerolls: the
+ * number "I'll roll" is the one that sticks.
+ */
+const genius = def(
+  'genius',
+  'Genius',
+  "I can predict what number I'll roll for my main move. If I'm right, I take another turn after this one.",
+  {
+    beforeMainMove: (h) => {
+      h.self.memo['prediction'] = null;
+      // A tripped Genius won't roll, so there is nothing to predict.
+      if (!isRunning(h.self) || h.self.tripped) return;
+      h.ask({
+        player: h.self.owner,
+        prompt: 'Predict your roll. Get it right and you go again.',
+        options: [
+          ...[1, 2, 3, 4, 5, 6].map((n) => option(`predict:${n}`, String(n))),
+          option('none', 'No guess'),
+        ],
+        key: 'predict',
+        defaultChoice: 'none' as ChoiceId,
+      });
+    },
+    resume: (h, key, choice) => {
+      if (key !== 'predict' || choice === ('none' as ChoiceId)) return;
+      const n = Number(String(choice).slice('predict:'.length));
+      h.self.memo['prediction'] = n;
+      h.log(`${h.nameOf(h.self)} predicts a ${n}.`);
+    },
+    onMainRollFinal: (h, mover, value) => {
+      if (mover.racerId !== h.self.racerId || h.self.memo['prediction'] !== value) return;
+      h.log(`${h.nameOf(h.self)} called it — a ${value}! Another turn after this one.`);
+      h.cutInLine();
+    },
+  },
+);
+
+/**
+ * SCRAMBLE — "Before my race, draw 3 new racers from the deck and pick one. I have its
+ * powers."
+ *
+ * "The deck" is every racer nobody drafted. Taking the power's own "before race" effect
+ * too ("I still get any 'before race' powers") is handled by the race start job, which
+ * notices Egg's power changed.
+ */
+const egg = def(
+  'egg',
+  'Egg',
+  'Before my race, draw 3 new racers from the deck and pick one. I have its powers.',
+  {
+    onRaceStart: (h) => {
+      const draw = h.rng.shuffle(h.undrafted()).slice(0, 3);
+      if (draw.length === 0) return;
+      h.ask({
+        player: h.self.owner,
+        prompt: 'Scramble! Hatch with which power?',
+        options: draw.map((id) => option(`power:${id}`, h.nameOf(id))),
+        key: 'scramble',
+      });
+    },
+    resume: (h, key, choice) => {
+      if (key !== 'scramble') return;
+      const power = racerId(String(choice).slice('power:'.length));
+      h.log(`${h.nameOf(h.self)} hatches with ${h.nameOf(power)}'s power.`);
+      h.borrowPower(power);
+    },
+  },
+);
+
+/**
+ * KNOW-IT-ALL — "At the start of my first turn, I predict which racer will win. If I'm
+ * right, the race ends immediately and I finish 2nd."
+ *
+ * "If I predict myself, I can win both 1st and 2nd" — `takePlace` gives a second place
+ * even to a Mastermind that already holds the first.
+ */
+const mastermind = def(
+  'mastermind',
+  'Mastermind',
+  "At the start of my first turn, I predict which racer will win. If I'm right, the race ends immediately and I finish 2nd.",
+  {
+    beforeMainMove: (h) => {
+      if (h.self.memo['predicted'] !== undefined || !isRunning(h.self)) return;
+      h.self.memo['predicted'] = null;
+      const field = h.racers().filter(isRunning);
+      h.ask({
+        player: h.self.owner,
+        prompt: 'Who will win this race?',
+        options: field.map((r) => option(`win:${r.racerId}`, h.nameOf(r), racerTarget(r.racerId))),
+        key: 'predict',
+      });
+    },
+    resume: (h, key, choice) => {
+      if (key !== 'predict') return;
+      const pick = String(choice).slice('win:'.length);
+      h.self.memo['predicted'] = pick;
+      h.log(`${h.nameOf(h.self)} predicts ${h.nameOf(racerId(pick))} will win.`);
+    },
+    onRacerFinished: (h, finisher, rank) => {
+      if (rank !== 1 || h.self.memo['predicted'] !== finisher.racerId) return;
+      h.log(`${h.nameOf(h.self)} knew it all along! The race ends, and they take 2nd.`);
+      h.takePlace();
+    },
+  },
+);
+
+/**
+ * POOF — "I can reroll my main move up to two times."
+ *
+ * "I must use whatever my last roll is", so no going back to an earlier number. Each reroll
+ * is tagged on the roll, which is what counts them.
+ */
+const magician = def('magician', 'Magician', 'I can reroll my main move up to two times.', {
+  onMainRoll: (h, mover, value) => {
+    if (mover.racerId !== h.self.racerId) return;
+    const left = 2 - (h.mainRoll()?.tags.filter((t) => t.startsWith('poof:')).length ?? 0);
+    if (left <= 0) return;
+    h.ask({
+      player: h.self.owner,
+      prompt: `You rolled a ${value}. Poof — reroll? (${left} left)`,
+      options: [option('reroll', 'Poof!'), option('keep', `Keep the ${value}`)],
+      key: 'poof',
+      defaultChoice: 'keep' as ChoiceId,
+    });
+  },
+  resume: (h, key, choice) => {
+    if (key !== 'poof' || choice !== ('reroll' as ChoiceId)) return;
+    const used = h.mainRoll()?.tags.filter((t) => t.startsWith('poof:')).length ?? 0;
+    h.tagMainRoll(`poof:${used + 1}`);
+    h.log(`${h.nameOf(h.self)} waves a wand… poof!`);
+    h.rerollMainMove();
+  },
+});
+
+/**
+ * KABLOOEY — "When I roll for my main move, I can have double that number. If I do, I
+ * trip."
+ *
+ * "I roll THEN decide whether to kablooey." Tripping doesn't end the current move, so the
+ * doubled move still happens in full; it's the next main move that's lost.
+ */
+const rocketScientist = def(
+  'rocket-scientist',
+  'Rocket Scientist',
+  'When I roll for my main move, I can have double that number. If I do, I trip.',
+  {
+    onMainRollFinal: (h, mover, value) => {
+      if (mover.racerId !== h.self.racerId) return;
+      h.ask({
+        player: h.self.owner,
+        prompt: `You rolled a ${value}. Kablooey: move ${value * 2}, then trip?`,
+        options: [option('kablooey', `Move ${value * 2} and trip`), option('keep', `Move ${value}`)],
+        key: 'kablooey',
+        defaultChoice: 'keep' as ChoiceId,
+      });
+    },
+    resume: (h, key, choice) => {
+      if (key !== 'kablooey' || choice !== ('kablooey' as ChoiceId)) return;
+      const value = h.mainRoll()?.value;
+      if (value === undefined) return;
+      h.log(`KABLOOEY! ${h.nameOf(h.self)} doubles the ${value} and trips.`);
+      h.setMainMove(value * 2);
+      h.trip(h.self);
+    },
+  },
+);
+
+/**
+ * KEEP ROLLIN' — "Before my race, I take 4 point chips. When I roll a 6 for my main move,
+ * instead of moving, I warp to the Start and lose 1 point chip."
+ *
+ * "I don't get my main move after warping", so the move is cancelled, not zeroed —
+ * nothing can modify it back into a move.
+ */
+const sisyphus = def(
+  'sisyphus',
+  'Sisyphus',
+  'Before my race, I take 4 point chips. When I roll a 6 for my main move, instead of moving, I warp to the Start and lose 1 point chip.',
+  {
+    onRaceStart: (h) => {
+      h.log(`${h.nameOf(h.self)} shoulders 4 point chips.`);
+      h.award(h.self.owner, 4);
+    },
+    onMainRollFinal: (h, mover, value) => {
+      if (mover.racerId !== h.self.racerId || value !== 6) return;
+      h.log(`${h.nameOf(h.self)} rolls a 6, and the boulder rolls back to the Start.`);
+      h.cancelMainMove();
+      h.warp(h.self, START);
+      h.forfeit(h.self.owner, 1);
+    },
+  },
+);
+
+/**
+ * SCOOCH SCOOCH — "When another racer's power happens, I move 1."
+ *
+ * Every `h.log` is a power happening, so this fires a lot — by design: "I scooch 1 for
+ * every -1 that affects a racer's main move", "for each space skipped", "on each Magician
+ * reroll, even if it's not used".
+ *
+ * Scoocher on Huge Baby is rule 8's own example of a loop, hence `firstLap`.
+ */
+const scoocher = def('scoocher', 'Scoocher', "When another racer's power happens, I move 1.", {
+  onOtherPower: (h, source, text) => {
+    if (!isRunning(h.self) || h.self.pos === FINISH) return;
+    if (!firstLap(h, `${source.racerId}|${text}`)) return;
+
+    h.log(`${h.nameOf(h.self)} scooches 1.`);
+    h.move(h.self, 1);
+  },
+});
+
+/**
+ * DOUBLE DIP — "Before my race, I can pick a racer who won a previous race and race with
+ * their powers."
+ */
+const twin = def(
+  'twin',
+  'Twin',
+  'Before my race, I can pick a racer who won a previous race and race with their powers.',
+  {
+    onRaceStart: (h) => {
+      const winners = [...new Set(h.previousWinners())].filter(
+        (id) => id !== h.self.racerId && id !== racerId('twin'),
+      );
+      if (winners.length === 0) return;
+      h.ask({
+        player: h.self.owner,
+        prompt: "Race with a past winner's powers?",
+        options: [
+          ...winners.map((id) => option(`power:${id}`, h.nameOf(id))),
+          option('none', 'Keep my own'),
+        ],
+        key: 'doubleDip',
+        defaultChoice: 'none' as ChoiceId,
+      });
+    },
+    resume: (h, key, choice) => {
+      if (key !== 'doubleDip' || choice === ('none' as ChoiceId)) return;
+      const power = racerId(String(choice).slice('power:'.length));
+      h.log(`${h.nameOf(h.self)} double dips on ${h.nameOf(power)}'s power.`);
+      h.borrowPower(power);
     },
   },
 );
@@ -651,4 +1013,15 @@ export const SLICE_RACERS: readonly RacerDef[] = [
   thirdWheel,
   flipFlop,
   blimp,
+  alchemist,
+  copyCat,
+  dicemonger,
+  genius,
+  egg,
+  mastermind,
+  magician,
+  rocketScientist,
+  sisyphus,
+  scoocher,
+  twin,
 ];

@@ -11,10 +11,48 @@ import type { ChoiceId, PlayerId, RacerId } from './ids.js';
  * So the turn is not a call stack — it is this queue, held in serializable state.
  */
 export type Job =
+  /**
+   * "Before my race" powers, for every racer on the board. `done` holds `racer:power`
+   * keys rather than racer ids, so a racer whose power changes mid-setup — Twin borrowing
+   * Egg — still gets the new power's "before race" effect: "I still get any 'before race'
+   * powers."
+   */
+  | { t: 'raceStart'; done: string[] }
   /** "Before my main move" powers. */
   | { t: 'beforeMove'; racer: RacerId }
-  /** Determine the main move: `replaceMainMove`, else d6, then `modifyMainMove`. */
+  /** Determine the main move: `replaceMainMove`, else d6, then hand off to `roll`. */
   | { t: 'mainMove'; racer: RacerId }
+  /**
+   * A main move whose raw value is known but not yet final.
+   *
+   * The window where powers decide about a roll — rerolling it (Magician, Dicemonger),
+   * transforming it (Alchemist, Rocket Scientist), or refusing it (Sisyphus). It is a job
+   * rather than a local because those decisions suspend: the roll has to survive until
+   * the answer arrives. Powers reach it through `HookCtx.mainRoll` and friends.
+   *
+   * Runs in two stages. `reroll` goes first so that nobody commits to a transformation
+   * of a number that is about to be rerolled; a reroll sends it back to `reroll` with
+   * `done` cleared, since "treat the previous number you rolled as if it never happened."
+   */
+  | {
+      t: 'roll';
+      racer: RacerId;
+      /** The die face, or the replacement from `replaceMainMove`. */
+      value: number;
+      /** False for a replaced main move — nothing was rolled, so nothing can be rerolled. */
+      die: boolean;
+      stage: 'reroll' | 'final';
+      /** Racers whose hook for the current stage has already fired. */
+      done: RacerId[];
+      /** A power's replacement distance for this main move, or null to use `value`. */
+      distance: number | null;
+      /** The main move will not happen at all — Sisyphus, or Inchworm's wriggle. */
+      cancelled: boolean;
+      rerolls: number;
+      /** Once-per-roll markers, e.g. Dicemonger's "once per turn". */
+      tags: string[];
+      modifiedBy: RacerId | null;
+    }
   /**
    * Step-by-step movement.
    *
@@ -32,6 +70,12 @@ export type Job =
       origin: number;
       /** Racers this racer was behind when the move began. */
       startBehind: RacerId[];
+      /**
+       * Null until the first step runs, then the racers already told the move is starting
+       * (Suckerfish). `origin` and `startBehind` are re-captured at that point, because a
+       * move can sit in the queue while other moves resolve ahead of it.
+       */
+      started: RacerId[] | null;
       /** True if this move is the racer's main move, which some powers key off. */
       isMainMove: boolean;
       /** False for moves caused by a space effect, so arrows do not chain forever. */
@@ -60,6 +104,8 @@ export type Job =
       key: string;
       data: unknown;
       choice: ChoiceId;
+      /** See `ResumeDescriptor.copy`. */
+      copy?: RacerId | null;
     };
 
 export type MoveReason = 'main' | 'power' | 'space';
@@ -77,6 +123,12 @@ export interface ResumeDescriptor {
   readonly racer: RacerId;
   readonly key: string;
   readonly data: unknown;
+  /**
+   * For a Copy Cat, whose power it had when it asked. The lead can change while a
+   * question waits, but "I can't switch my power mid-action", so the answer goes back to
+   * the power that asked. Absent for everyone else.
+   */
+  readonly copy?: RacerId | null;
 }
 
 /** Describes who a decision belongs to, for the server's turn timer. */

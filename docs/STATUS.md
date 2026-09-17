@@ -1,6 +1,6 @@
 # Status & Handoff
 
-**Last updated:** 2026-09-17 · **Phases 0–4 complete — playable in a browser. Phase 5 next.**
+**Last updated:** 2026-09-17 · **Phases 0–5 complete — all 36 racers playable. Phase 6 next.**
 
 Start here when picking this project back up. It is written to be read cold, without the
 conversation that produced it.
@@ -33,7 +33,7 @@ apps/web/            COMPLETE — the playable client, mobile-first, light and d
 ```
 
 A full game is playable in a browser. **Nothing has been deployed** — everything has only run
-locally. 9 of the 36 racers have real powers; the other 27 are placeholders that just run.
+locally. All 36 racers have their real powers.
 
 ### Run it
 
@@ -60,7 +60,7 @@ with a full room join through the proxy.
 
 ```bash
 npm run typecheck                    # all three workspaces
-npm test                             # engine: 51 scenario checks + 1000 fuzzed games
+npm test                             # engine: 136 scenario checks + 1000 fuzzed games
 
 # these need `npm run start` running in another terminal
 npm run e2e -w @mr/server            # 38 checks over real WebSockets, ~40 s
@@ -191,22 +191,29 @@ Things that cost time once and will again.
 
 ## 5. What is next
 
-### Phase 5 — the remaining 27 racers (the immediate task)
+### Phase 5 — done
 
-Card text for all 36 is in the rules doc. 9 are implemented in
-[characters/defs/index.ts](../packages/engine/src/characters/defs/index.ts); the rest are
-vanilla padding in [registry.ts](../packages/engine/src/characters/registry.ts). Each one:
-write the def against the card text, add a scenario test in
-[scenarios.ts](../packages/engine/src/dev/scenarios.ts), confirm the fuzzer still passes.
+All 36 racers are in [characters/defs/index.ts](../packages/engine/src/characters/defs/index.ts),
+each with scenario checks in [scenarios.ts](../packages/engine/src/dev/scenarios.ts). Engine
+pieces added for wave 2, worth knowing before touching a power:
 
-Several need hooks that do not exist yet — Skipper and Genius reorder turns, Copycat and Twin
-borrow another racer's power, Flip Flop and Hypnotist warp, Dicemonger and Magician reroll,
-Mastermind ends the race early. **Extend `Hooks`** rather than special-casing inside the
-pipeline.
+- **Every hook dispatch goes through `hooksFor`** in
+  [characters/powers.ts](../packages/engine/src/characters/powers.ts), never `getHooks`,
+  because Copy Cat, Egg and Twin have powers that aren't on their own card.
+- **A main move is a `roll` job** between the die and the move: `onMainRoll` (rerolls) then
+  `onMainRollFinal` (acting on the number). Hooks after that — `onAnyMainMoveRolled`,
+  `modifyMainMove`, `onRacerFinished` — must not `ask`; an invariant enforces it.
+- **`h.log` means "my power happened"** and moves Scoocher. Log once per happening.
+- **Suckerfish is asked when a move's first step runs, not when it's queued**, so any hook
+  may queue a move.
+- **"Before my race" is a job** (it can ask), and `phase.nextUp` is a queue shared by
+  Skipper and Genius; `phase.turn` counts turns.
 
-The UI needs no changes for most racers: prompts, options, log lines and power text all come
-from the engine. Check the UI test's screenshots after adding racers with new kinds of
-decision, in case a prompt is too long for the action bar.
+- **Rule 8 loops are cut by `firstLap`** in the defs: a power reacting to the same trigger
+  with every racer in the same place, twice in one turn, doesn't fire the second time.
+  Scoocher and Romantic use it; any new power that reacts to its own consequences should.
+- **Timeout defaults decline optional powers**, Alchemist included. Questions with no
+  "decline" (Egg, Mastermind, Copy Cat's tie) take the first option.
 
 ### Phase 6 — polish
 

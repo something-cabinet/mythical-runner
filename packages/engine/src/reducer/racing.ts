@@ -7,7 +7,8 @@ import { goldToken, silverToken, totalPoints } from '../scoring.js';
 import { FINISH, START, type RaceNumber } from '../tracks/index.js';
 import { FINISHERS_PER_RACE, RACE_COUNT } from '../state.js';
 import { beginCommit } from './commit.js';
-import { fireRaceStart, runQueue } from './pipeline.js';
+import { hooksFor } from '../characters/powers.js';
+import { makeHookCtx, runQueue } from './pipeline.js';
 import { activeRacers, type Ctx, racerOf, scoreOf, seatAt } from './working.js';
 
 /**
@@ -30,12 +31,15 @@ export function beginRacing(ctx: Ctx, raceNo: RaceNumber, rng: Rng): void {
     finished: [],
     stalledTurns: 0,
     claimedSpaces: [],
-    nextUp: null,
+    nextUp: [],
+    turn: 0,
   };
-  s.queue = [];
+  s.queue = [{ t: 'raceStart', done: [] }];
   s.turnStartPos = START;
 
-  fireRaceStart(ctx, rng);
+  // May suspend — Egg and Twin choose a power before the race. The turn is announced
+  // regardless; nobody can roll until the question is answered.
+  runQueue(ctx, rng);
   announceTurn(ctx);
 }
 
@@ -85,6 +89,7 @@ function rollOff(ctx: Ctx, raceNo: RaceNumber, rng: Rng): PlayerId {
 function announceTurn(ctx: Ctx): void {
   const { s } = ctx;
   invariant(s.phase.t === 'racing', 'announceTurn outside a race');
+  s.phase.turn += 1;
   const racer = racerOf(s, s.phase.active);
   ctx.emit({ t: 'turn/began', player: s.phase.active, racerId: racer.racerId });
 }
@@ -130,7 +135,7 @@ export function takeTurn(ctx: Ctx, rng: Rng): void {
  * ability the turn triggered has fully resolved — including ones that suspended for
  * minutes waiting on a player.
  */
-export function endTurn(ctx: Ctx): void {
+export function endTurn(ctx: Ctx, rng: Rng): void {
   const { s } = ctx;
   invariant(s.phase.t === 'racing', 'endTurn outside a race');
   // Captured once: emitting events invalidates TypeScript's narrowing of `s.phase`, and
@@ -140,11 +145,19 @@ export function endTurn(ctx: Ctx): void {
   // Anyone who crossed the line this turn is placed now, in board order. Abilities can
   // push more than one racer over at once, so this is a sweep, not a single check.
   for (const racer of s.board) {
-    if (racer.pos === FINISH && racer.finishedRank === null && !racer.eliminated) {
-      const rank = phase.finished.length + 1;
-      racer.finishedRank = rank;
-      phase.finished.push(racer.owner);
-      ctx.emit({ t: 'racer/finished', racerId: racer.racerId, player: racer.owner, rank });
+    // Mastermind can fill the podium from inside this loop.
+    if (phase.finished.length >= FINISHERS_PER_RACE) break;
+    if (racer.pos !== FINISH || racer.finishedRank !== null || racer.eliminated) continue;
+
+    const rank = phase.finished.length + 1;
+    racer.finishedRank = rank;
+    phase.finished.push(racer.owner);
+    ctx.emit({ t: 'racer/finished', racerId: racer.racerId, player: racer.owner, rank });
+
+    for (const other of s.board) {
+      if (other.eliminated || (other.finishedRank !== null && other !== racer)) continue;
+      hooksFor(s, other).onRacerFinished?.(makeHookCtx(ctx, rng, other), racer, rank);
+      invariant(!s.pending, `${other.racerId} asked a question from onRacerFinished`);
     }
   }
 
@@ -167,13 +180,13 @@ export function endTurn(ctx: Ctx): void {
     return;
   }
 
-  // Skipper: "I go next in turn order." A one-shot override, consumed here; turn order
-  // then continues clockwise from Skipper as normal.
-  const nextUp = phase.nextUp;
-  phase.nextUp = null;
-  if (nextUp && nextUp !== phase.active) {
+  // Skipper's "I go next in turn order" and Genius's extra turn. Consumed one per
+  // hand-off; turn order then continues clockwise from whoever took the turn. The active
+  // player may be next again — that is exactly what Genius's extra turn is.
+  while (phase.nextUp.length > 0) {
+    const nextUp = phase.nextUp.shift();
     const racer = s.board.find((r) => r.owner === nextUp);
-    if (racer && racer.finishedRank === null && !racer.eliminated) {
+    if (nextUp && racer && racer.finishedRank === null && !racer.eliminated) {
       phase.active = nextUp;
       announceTurn(ctx);
       return;

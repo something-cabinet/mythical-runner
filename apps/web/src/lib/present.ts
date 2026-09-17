@@ -197,6 +197,11 @@ export function describeEvent(e: GameEvent, view: PlayerView): LogLine | null {
             : `${who(e.player)} ${e.player === view.you ? 'take' : 'takes'} the ${e.token.kind} cup (${e.token.value})`,
         tone: 'good',
       };
+    case 'token/lost':
+      return {
+        text: `${who(e.player)} ${e.player === view.you ? 'lose' : 'loses'} ${e.value} point${e.value === 1 ? '' : 's'}`,
+        tone: 'bad',
+      };
     case 'racer/finished':
       return { text: `${racer(e.racerId)} crosses the line ${ordinal(e.rank)}!`, tone: 'good' };
     case 'race/ended':

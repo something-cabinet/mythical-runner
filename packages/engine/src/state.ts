@@ -122,11 +122,18 @@ export type Phase =
        */
       readonly claimedSpaces: readonly number[];
       /**
-       * Skipper's "I go next in turn order": set when triggered, consumed the next time a
-       * turn hands off, then cleared. Turn order then continues clockwise from Skipper as
-       * normal, so no further bookkeeping is needed after it is consumed.
+       * Players who take the next turns out of order, first to last: Skipper's "I go next
+       * in turn order" and Genius's "I take another turn after this one". Consumed one per
+       * hand-off; once empty, turn order continues clockwise from whoever went last, which
+       * is what "after I go, turn order continues to my left" asks for.
        */
-      readonly nextUp: PlayerId | null;
+      readonly nextUp: readonly PlayerId[];
+      /**
+       * Counts turns begun this race. A turn can span many actions while powers wait on
+       * questions, so this — not `step` — is what "this turn" means to a power that has to
+       * remember something for exactly one turn (Scoocher's loop guard).
+       */
+      readonly turn: number;
     }
   /** Awards resolved; waiting for players to acknowledge before the next race. */
   | { readonly t: 'scored'; readonly raceNo: RaceNumber }

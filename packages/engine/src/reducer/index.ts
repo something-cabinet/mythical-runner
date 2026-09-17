@@ -55,7 +55,7 @@ export function applyAction(state: GameState, action: Action): ApplyResult {
   const rng = makeRng(state.seed, state.step);
   // The pipeline runs turn jobs but racing.ts owns turn-order rules; injecting rather
   // than importing keeps the two modules from being circular.
-  ctx.onEndTurn = () => endTurn(ctx);
+  ctx.onEndTurn = (turnRng) => endTurn(ctx, turnRng);
 
   route(ctx, action, rng);
 

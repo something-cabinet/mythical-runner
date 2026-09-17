@@ -37,10 +37,11 @@ interface Placement {
   readonly racer: string;
   readonly pos: number;
   readonly tripped?: boolean;
+  readonly memo?: Record<string, unknown>;
 }
 
-/** Builds a mid-race state on the Mild Mile, whose spaces are all inert. */
-function raceState(placements: readonly Placement[], active: string, raceNo: 1 | 3 = 1): GameState {
+/** Builds a mid-race state — on the Mild Mile, whose spaces are all inert, unless `raceNo` says otherwise. */
+function raceState(placements: readonly Placement[], active: string, raceNo: 1 | 2 | 3 | 4 = 1): GameState {
   const base = initGame(4242);
   const players = placements.map((p) => playerId(p.player));
 
@@ -52,7 +53,7 @@ function raceState(placements: readonly Placement[], active: string, raceNo: 1 |
     eliminated: false,
     eliminationOrder: 0,
     finishedRank: null,
-    memo: {},
+    memo: p.memo ?? {},
   }));
 
   return {
@@ -69,7 +70,8 @@ function raceState(placements: readonly Placement[], active: string, raceNo: 1 |
       finished: [],
       stalledTurns: 0,
       claimedSpaces: [],
-      nextUp: null,
+      nextUp: [],
+      turn: 0,
     },
     board,
     queue: [],
@@ -133,6 +135,63 @@ function rollFor(
   }
   throw new Error(`could not find a seed producing a roll of ${want}`);
 }
+
+/**
+ * Rolls with seed after seed until `found` accepts the result.
+ *
+ * For powers that ask about the roll before the move happens, where `rollFor` can't help:
+ * the question arrives before any `dice/rolled`, so the test has to look at the die still
+ * waiting in the queue instead.
+ */
+function rollUntil(
+  state: GameState,
+  by: string,
+  found: (res: { state: GameState; events: readonly GameEvent[] }) => boolean,
+): { state: GameState; events: readonly GameEvent[] } {
+  for (let seed = 1; seed < 40000; seed++) {
+    const res = applyAction({ ...state, seed }, roll(by));
+    if (found(res)) return res;
+  }
+  throw new Error('could not find a seed producing the wanted roll');
+}
+
+/** The die of the main move being decided, if one is waiting on a question. */
+const pendingDie = (s: GameState): number | undefined => {
+  const job = s.queue.find((j) => j.t === 'roll');
+  return job?.t === 'roll' ? job.value : undefined;
+};
+
+const moverAt = (s: GameState): string =>
+  s.phase.t === 'racing' ? String(s.phase.active) : `(${s.phase.t})`;
+
+/** A commit-phase state for `raceNo`, so "before my race" powers can be tested for real. */
+function commitState(
+  hands: Record<string, readonly string[]>,
+  raceNo: 1 | 2 | 3 | 4,
+  extra: Partial<GameState> = {},
+): GameState {
+  const base = initGame(4242);
+  const players = Object.keys(hands).map((p) => playerId(p));
+  return {
+    ...base,
+    players: players.map((id, i) => ({ id, name: `P${i + 1}`, connected: true })),
+    seatOrder: players,
+    hands: Object.fromEntries(Object.entries(hands).map(([p, rs]) => [p, rs.map(racerId)])),
+    used: Object.fromEntries(players.map((p) => [p, []])),
+    scores: Object.fromEntries(players.map((p) => [p, []])),
+    phase: { t: 'commit', raceNo, committed: Object.fromEntries(players.map((p) => [p, null])) },
+    ...extra,
+  };
+}
+
+const commit = (by: string, racer: string): Action => ({
+  t: 'race/commit',
+  by: playerId(by),
+  racerId: racerId(racer),
+});
+
+const pointsOf = (s: GameState, player: string): number =>
+  (s.scores[playerId(player)] ?? []).reduce((sum, t) => sum + t.value, 0);
 
 function scenario(name: string, fn: () => void): void {
   console.log(`\n${name}`);
@@ -769,6 +828,353 @@ scenario('Blimp — "+3 before the second corner, -1 on or after it"', () => {
   const a = rollFor(after, 'p1', 1);
   const rolledAfter = a.events.find((e) => e.t === 'dice/rolled') as { modifiedBy?: string };
   check(rolledAfter.modifiedBy === racerId('blimp'), 'gets -1 on or after the corner');
+});
+
+// --- Phase 5, wave 2 ----------------------------------------------------------
+
+scenario('Alchemist — "When I roll a 1 or 2... I can move 4 instead"', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'alchemist', pos: 3 },
+      { player: 'p2', racer: 'vanilla-01', pos: 20 },
+    ],
+    'p1',
+  );
+  const asked = rollUntil(s, 'p1', (r) => pendingDie(r.state) === 2);
+  check(asked.state.pending?.player === playerId('p1'), 'asks after rolling a 2');
+
+  const transmuted = applyAction(asked.state, decide('p1', 'transmute'));
+  check(posOf(transmuted.state, 'alchemist') === 7, 'moves 4 instead', `pos ${posOf(transmuted.state, 'alchemist')}`);
+
+  const kept = applyAction(asked.state, decide('p1', 'keep'));
+  check(posOf(kept.state, 'alchemist') === 5, 'or keeps the 2', `pos ${posOf(kept.state, 'alchemist')}`);
+
+  const high = rollFor(s, 'p1', 5);
+  check(!has(high.events, 'decision/requested'), 'a 5 is not asked about');
+});
+
+scenario('Copy Cat — "I have the power of the racer currently in the lead"', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'copy-cat', pos: 1 },
+      { player: 'p2', racer: 'legs', pos: 10 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(s, roll('p1'));
+  check(asked.state.pending?.player === playerId('p1'), 'has Legs’ power, so is asked to jog');
+  const jogged = applyAction(asked.state, decide('p1', 'jog'));
+  check(posOf(jogged.state, 'copy-cat') === 6, 'and jogs 5', `pos ${posOf(jogged.state, 'copy-cat')}`);
+
+  const goop = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: 1 },
+      { player: 'p2', racer: 'copy-cat', pos: 5 },
+      { player: 'p3', racer: 'gunk', pos: 20 },
+    ],
+    'p1',
+  );
+  const gooped = rollUntil(goop, 'p1', (r) =>
+    r.events.some((e) => e.t === 'ability/triggered' && e.racerId === racerId('copy-cat')),
+  );
+  check(logLines(gooped.events).includes('Copy Cat goops'), 'copying Gunk, it goops too — under its own name', logLines(gooped.events));
+
+  const leading = raceState(
+    [
+      { player: 'p1', racer: 'copy-cat', pos: 12 },
+      { player: 'p2', racer: 'legs', pos: 3 },
+    ],
+    'p1',
+  );
+  check(applyAction(leading, roll('p1')).state.pending === null, 'alone in the lead, it copies nobody');
+});
+
+scenario('Copy Cat — "If there\'s a tie, I pick"', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'copy-cat', pos: 1 },
+      { player: 'p2', racer: 'legs', pos: 10 },
+      { player: 'p3', racer: 'coach', pos: 10 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(s, roll('p1'));
+  const ids = asked.state.pending?.options.map((o) => String(o.id)) ?? [];
+  check(ids.includes('copy:legs') && ids.includes('copy:coach'), 'offers both leaders', ids.join(','));
+
+  const picked = applyAction(asked.state, decide('p1', 'copy:legs'));
+  check(
+    picked.state.pending?.prompt.includes('Jog') === true,
+    'picking Legs goes straight on to Legs’ own question',
+    picked.state.pending?.prompt,
+  );
+  const jogged = applyAction(picked.state, decide('p1', 'jog'));
+  check(posOf(jogged.state, 'copy-cat') === 6, 'and the power is Legs’', `pos ${posOf(jogged.state, 'copy-cat')}`);
+});
+
+scenario('Dicemonger — "Anyone can reroll their main move once per turn"', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: 5 },
+      { player: 'p2', racer: 'dicemonger', pos: 10 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(s, roll('p1'));
+  check(asked.state.pending?.player === playerId('p1'), 'the roller decides, not Dicemonger');
+
+  const rerolled = applyAction(asked.state, decide('p1', 'reroll'));
+  check(rerolled.state.pending === null, 'only once per turn — no second offer');
+  check(posOf(rerolled.state, 'dicemonger') === 11, '"When another racer does it, I move 1"', `pos ${posOf(rerolled.state, 'dicemonger')}`);
+  const moves = rerolled.events.filter((e) => e.t === 'racer/moved') as { racerId: string }[];
+  check(moves[0]?.racerId === racerId('dicemonger'), '"I move before they move"');
+
+  const own = raceState([{ player: 'p1', racer: 'dicemonger', pos: 10 }], 'p1');
+  const ownAsked = applyAction(own, roll('p1'));
+  const ownRerolled = applyAction(ownAsked.state, decide('p1', 'reroll'));
+  const d = ownRerolled.events.find((e) => e.t === 'dice/rolled') as { value: number };
+  check(posOf(ownRerolled.state, 'dicemonger') === 10 + d.value, 'its own reroll earns no bonus move');
+});
+
+scenario('Genius — "If I\'m right, I take another turn after this one"', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'genius', pos: 1 },
+      { player: 'p2', racer: 'vanilla-01', pos: 1 },
+    ],
+    'p1',
+  );
+  const right = rollFor(s, 'p1', 3, { by: 'p1', choice: 'predict:3' });
+  check(moverAt(right.state) === 'p1', 'a correct prediction goes again', moverAt(right.state));
+
+  const wrong = rollFor(s, 'p1', 4, { by: 'p1', choice: 'predict:3' });
+  check(moverAt(wrong.state) === 'p2', 'a wrong one hands on', moverAt(wrong.state));
+});
+
+scenario('Egg — "draw 3 new racers from the deck and pick one. I have its powers"', () => {
+  const s = commitState({ p1: ['egg'], p2: ['coach'] }, 1);
+  const r1 = applyAction(s, commit('p1', 'egg'));
+  const r2 = applyAction(r1.state, commit('p2', 'coach'));
+  const options = r2.state.pending?.options.map((o) => String(o.id).slice('power:'.length)) ?? [];
+
+  check(r2.state.pending?.source === racerId('egg'), 'asks before the race starts');
+  check(options.length === 3 && new Set(options).size === 3, 'three different racers', options.join(','));
+  check(!options.includes('egg') && !options.includes('coach'), 'none of them drafted');
+
+  const picked = applyAction(r2.state, decide('p1', `power:${options[0] ?? ''}`));
+  check(racerAt(picked.state, 'egg')?.memo['borrowedPower'] === options[0], 'Egg has the chosen power');
+});
+
+scenario('Twin — "pick a racer who won a previous race and race with their powers"', () => {
+  // p1's Sisyphus won race 1. Twin borrowing it must also get Sisyphus' "before race"
+  // chips: "I still get any 'before race' powers."
+  const s = commitState({ p1: ['sisyphus', 'twin'], p2: ['coach', 'legs'] }, 2, {
+    used: { [playerId('p1')]: [racerId('sisyphus')], [playerId('p2')]: [racerId('coach')] },
+    scores: {
+      [playerId('p1')]: [{ kind: 'gold', value: 3, raceNo: 1 }],
+      [playerId('p2')]: [{ kind: 'silver', value: 1, raceNo: 1 }],
+    },
+  });
+  const r1 = applyAction(s, commit('p1', 'twin'));
+  const r2 = applyAction(r1.state, commit('p2', 'legs'));
+  const ids = r2.state.pending?.options.map((o) => String(o.id)) ?? [];
+  check(ids.includes('power:sisyphus') && !ids.includes('power:coach'), 'only past winners are offered', ids.join(','));
+
+  const picked = applyAction(r2.state, decide('p1', 'power:sisyphus'));
+  check(pointsOf(picked.state, 'p1') === 3 + 4, 'and gets Sisyphus’ 4 chips before the race', `points ${pointsOf(picked.state, 'p1')}`);
+});
+
+scenario('Mastermind — "I predict which racer will win"', () => {
+  const first = raceState(
+    [
+      { player: 'p1', racer: 'mastermind', pos: 1 },
+      { player: 'p2', racer: 'vanilla-01', pos: 3 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(first, roll('p1'));
+  check(asked.state.pending?.options.length === 2, 'asks at the start of the first turn, any racer', `${asked.state.pending?.options.length}`);
+
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: 27 },
+      { player: 'p2', racer: 'mastermind', pos: 5, memo: { predicted: 'vanilla-01' } },
+      { player: 'p3', racer: 'vanilla-02', pos: 1 },
+    ],
+    'p1',
+  );
+  const { state, events } = rollFor(s, 'p1', 5);
+  const ended = events.find((e) => e.t === 'race/ended') as { podium: string[] } | undefined;
+  check(
+    ended?.podium.join(',') === 'p1,p2',
+    '"the race ends immediately and I finish 2nd"',
+    ended ? ended.podium.join(',') : 'race did not end',
+  );
+  check(state.phase.t === 'scored', 'race is over');
+
+  const self = raceState(
+    [
+      { player: 'p1', racer: 'mastermind', pos: 27, memo: { predicted: 'mastermind' } },
+      { player: 'p2', racer: 'vanilla-01', pos: 1 },
+    ],
+    'p1',
+  );
+  const selfWin = rollFor(self, 'p1', 5);
+  check(pointsOf(selfWin.state, 'p1') === 3 + 1, '"If I predict myself, I can win both 1st and 2nd"', `points ${pointsOf(selfWin.state, 'p1')}`);
+});
+
+scenario('Magician — "I can reroll my main move up to two times"', () => {
+  const s = raceState([{ player: 'p1', racer: 'magician', pos: 1 }], 'p1');
+  const a = applyAction(s, roll('p1'));
+  check(a.state.pending?.prompt.includes('2 left') === true, 'offers a reroll', a.state.pending?.prompt);
+
+  const revived = JSON.parse(JSON.stringify(a.state)) as GameState;
+  const b = applyAction(revived, decide('p1', 'reroll'));
+  check(b.state.pending?.prompt.includes('1 left') === true, 'offers a second, from a JSON-revived state', b.state.pending?.prompt);
+
+  const c = applyAction(b.state, decide('p1', 'reroll'));
+  check(c.state.pending === null, 'no third reroll');
+  check(has(c.events, 'dice/rolled'), '"I must use whatever my last roll is"');
+});
+
+scenario('Rocket Scientist — "double that number. If I do, I trip"', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'rocket-scientist', pos: 1 },
+      { player: 'p2', racer: 'vanilla-01', pos: 20 },
+    ],
+    'p1',
+  );
+  const asked = rollUntil(s, 'p1', (r) => pendingDie(r.state) === 3);
+  const boom = applyAction(asked.state, decide('p1', 'kablooey'));
+  check(posOf(boom.state, 'rocket-scientist') === 7, 'moves double', `pos ${posOf(boom.state, 'rocket-scientist')}`);
+  check(racerAt(boom.state, 'rocket-scientist')?.tripped === true, 'and trips');
+});
+
+scenario('Sisyphus — "Before my race, I take 4 point chips"', () => {
+  const s = commitState({ p1: ['sisyphus'], p2: ['coach'] }, 1);
+  const r = applyAction(applyAction(s, commit('p1', 'sisyphus')).state, commit('p2', 'coach'));
+  check(pointsOf(r.state, 'p1') === 4, 'starts the race with 4 points', `points ${pointsOf(r.state, 'p1')}`);
+});
+
+scenario('Sisyphus — "roll a 6... warp to the Start and lose 1 point chip"', () => {
+  const base = raceState(
+    [
+      { player: 'p1', racer: 'sisyphus', pos: 12 },
+      { player: 'p2', racer: 'vanilla-01', pos: 1 },
+      { player: 'p3', racer: 'coach', pos: 12 },
+    ],
+    'p1',
+  );
+  const s: GameState = {
+    ...base,
+    scores: { ...base.scores, [playerId('p1')]: [{ kind: 'points', value: 4, raceNo: 1 }] },
+  };
+  const { state, events } = rollUntil(s, 'p1', (r) => has(r.events, 'token/lost'));
+  check(posOf(state, 'sisyphus') === START, 'back at the Start', `pos ${posOf(state, 'sisyphus')}`);
+  check(pointsOf(state, 'p1') === 3, 'one chip lighter', `points ${pointsOf(state, 'p1')}`);
+  check(
+    !events.some((e) => e.t === 'racer/moved' && e.racerId === racerId('sisyphus')),
+    '"I don\'t get my main move after warping" — not even Coach’s +1',
+  );
+});
+
+scenario('Scoocher — "When another racer\'s power happens, I move 1"', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: 1 },
+      { player: 'p2', racer: 'gunk', pos: 20 },
+      { player: 'p3', racer: 'scoocher', pos: 10 },
+    ],
+    'p1',
+  );
+  const { state } = rollFor(s, 'p1', 3);
+  check(posOf(state, 'scoocher') === 11, 'Gunk’s goop scooches 1', `pos ${posOf(state, 'scoocher')}`);
+});
+
+scenario('Scoocher — the Huge Baby loop runs once, then ends (rule 8)', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: 1 },
+      { player: 'p2', racer: 'huge-baby', pos: 5 },
+      { player: 'p3', racer: 'scoocher', pos: 4 },
+      { player: 'p4', racer: 'gunk', pos: 20 },
+    ],
+    'p1',
+  );
+  const { state, events } = rollFor(s, 'p1', 1);
+  const bounces = events.filter((e) => e.t === 'ability/triggered' && e.text.includes("can't fit past")).length;
+  check(posOf(state, 'scoocher') === 4, 'Scoocher ends behind Huge Baby', `pos ${posOf(state, 'scoocher')}`);
+  check(bounces === 2, 'bounced once for the goop, once more for the loop, then stopped', `${bounces} bounces`);
+});
+
+scenario('Scoocher — a loop that asks a question every lap still ends', () => {
+  // Found by the fuzzer: each scooch off Suckerfish's space asks Suckerfish, and each
+  // answer is a new action, so a guard scoped to one action never saw the loop repeat.
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: 1 },
+      { player: 'p2', racer: 'gunk', pos: 20 },
+      { player: 'p3', racer: 'huge-baby', pos: 6 },
+      { player: 'p4', racer: 'scoocher', pos: 5 },
+      { player: 'p5', racer: 'suckerfish', pos: 5 },
+    ],
+    'p1',
+  );
+  let state = rollFor(s, 'p1', 1).state;
+  let answers = 0;
+  while (state.pending && answers < 50) {
+    state = applyAction(state, decide(String(state.pending.player), 'stay')).state;
+    answers++;
+  }
+  check(answers >= 2, 'Suckerfish really is asked on more than one lap', `${answers} answers`);
+  check(state.pending === null && moverAt(state) === 'p2', 'the turn finishes', `${answers} answers`);
+  check(posOf(state, 'scoocher') === 5, 'with Scoocher back behind Huge Baby', `pos ${posOf(state, 'scoocher')}`);
+});
+
+scenario('Romantic — swooning onto an arrow that knocks it back to the pair ends (rule 8)', () => {
+  // Found by the fuzzer. Wild Wilds: space 27 is a -4 arrow. Romantic stops beside a pair
+  // at 25, swoons to 27 beside another racer, is knocked back to 23, swoons to 25 again...
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'romantic', pos: 23 },
+      { player: 'p2', racer: 'vanilla-01', pos: 25 },
+      { player: 'p3', racer: 'vanilla-02', pos: 27 },
+    ],
+    'p1',
+    2,
+  );
+  const { state, events } = rollFor(s, 'p1', 2);
+  const swoons = events.filter((e) => e.t === 'ability/triggered' && e.text.includes('swoons')).length;
+  check(moverAt(state) === 'p2', 'the turn finishes', moverAt(state));
+  check(swoons >= 2 && swoons <= 4, 'the loop ran, but only once round', `${swoons} swoons`);
+});
+
+scenario('Skipper — "(Unless I roll a 1 and go again!)"', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'skipper', pos: 5 },
+      { player: 'p2', racer: 'vanilla-01', pos: 8 },
+    ],
+    'p1',
+  );
+  const { state } = rollFor(s, 'p1', 1);
+  check(moverAt(state) === 'p1', 'Skipper goes again', moverAt(state));
+});
+
+scenario('Suckerfish can latch on to a move queued by a power that may not ask (Lackey)', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: 5 },
+      { player: 'p2', racer: 'lackey', pos: 10 },
+      { player: 'p3', racer: 'suckerfish', pos: 10 },
+    ],
+    'p1',
+  );
+  const { state } = rollFor(s, 'p1', 6, { by: 'p3', choice: 'follow' });
+  check(posOf(state, 'lackey') === 12, 'Lackey moves 2', `pos ${posOf(state, 'lackey')}`);
+  check(posOf(state, 'suckerfish') === 12, 'Suckerfish follows', `pos ${posOf(state, 'suckerfish')}`);
+  check(posOf(state, 'vanilla-01') === 11, 'the roller still moves', `pos ${posOf(state, 'vanilla-01')}`);
 });
 
 // --- Report -----------------------------------------------------------------
