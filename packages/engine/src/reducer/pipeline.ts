@@ -38,7 +38,7 @@ function runJob(ctx: Ctx, job: Job, rng: Rng): void {
     case 'passCheck':
       return doPassCheck(ctx, job, rng);
     case 'spaceEffect':
-      return doSpaceEffect(ctx, job.racer, rng);
+      return doSpaceEffect(ctx, job, rng);
     case 'stopHooks':
       return doStopHooks(ctx, job, rng);
     case 'turnEnd':
@@ -77,6 +77,11 @@ export function queueMove(
   // "Moving 0 doesn't count as moving" — not even enough to trigger a pass check.
   if (distance === 0) return;
 
+  // A forward move from the finish line goes nowhere and would loop any power that fires
+  // onStop based on position — the clamped zero-distance move settles, re-fires the same
+  // hook, and the condition is unchanged.
+  if (racer.pos === FINISH && distance > 0) return;
+
   const job: Job = {
     t: 'move',
     racer: racer.racerId,
@@ -95,14 +100,20 @@ export function queueMove(
   // Suckerfish: "When a racer on my space moves, I can move to their new space." Fired
   // once per move, at the moment it's queued — before any of its steps happen — for every
   // racer sharing the mover's origin.
-  for (const other of ctx.s.board) {
-    if (other.racerId === racer.racerId || other.eliminated || other.pos !== job.origin) continue;
-    getHooks(other.racerId).onOtherMoveStart?.(
-      makeHookCtx(ctx, rng, other),
-      racer,
-      job.remaining * job.dir,
-      job.dir,
-    );
+  if (!ctx.s.pending) {
+    for (const other of ctx.s.board) {
+      if (other.racerId === racer.racerId || other.eliminated || other.pos !== job.origin) continue;
+      getHooks(other.racerId).onOtherMoveStart?.(
+        makeHookCtx(ctx, rng, other),
+        racer,
+        job.remaining * job.dir,
+        job.dir,
+      );
+      // If a power suspended (e.g. Suckerfish asked a question), stop iterating — the move
+      // job is already queued and will process after the suspension resolves. Continuing
+      // would risk a second suspension from another racer on the same origin.
+      if (ctx.s.pending) break;
+    }
   }
 }
 
@@ -154,6 +165,16 @@ function doMainMove(ctx: Ctx, racerId: RacerId, rng: Rng): void {
   }
   const reactionJobs = ctx.s.queue.splice(0, ctx.s.queue.length - beforeReactions);
 
+  // If a power suspended inside onAnyMainMoveRolled, re-queue the main move and bail
+  // out. No dice event or main-move queue has happened yet, so re-running from scratch
+  // later (with a fresh RNG at the next action step) is correct. The reaction jobs are
+  // discarded — they were created in response to a roll value that was cancelled, and the
+  // next run will roll fresh and create the right reactions.
+  if (ctx.s.pending) {
+    ctx.s.queue.unshift({ t: 'mainMove', racer: racerId });
+    return;
+  }
+
   // Every racer on the board may adjust the main move — Gunk goops opponents, Coach
   // hustles anyone sharing his space. Self applies last so its own bonus is not lost.
   // `modifiedBy` names whichever racer's hook actually changed the value, not the mover.
@@ -165,10 +186,18 @@ function doMainMove(ctx: Ctx, racerId: RacerId, rng: Rng): void {
     const next = fn(makeHookCtx(ctx, rng, other), value, racer);
     if (next !== value) modifiedBy ??= other.racerId;
     value = next;
+    if (ctx.s.pending) break;
   }
   const selfNext = hooks.modifyMainMove?.(h, value, racer) ?? value;
   if (selfNext !== value) modifiedBy ??= racerId;
   value = selfNext;
+
+  // If a modifier suspended the turn, re-queue the main move and bail out — no dice
+  // event or main-move queue has happened yet.
+  if (ctx.s.pending) {
+    ctx.s.queue.unshift({ t: 'mainMove', racer: racerId });
+    return;
+  }
 
   ctx.emit({
     t: 'dice/rolled',
@@ -194,19 +223,19 @@ function doMoveStep(ctx: Ctx, job: Extract<Job, { t: 'move' }>, rng: Rng): void 
   const racer = findRacer(ctx.s, job.racer);
   invariant(racer, `move for missing racer ${job.racer}`);
 
-  const settle = (): void => {
-    // Order matters: passing is judged first, then the space's own effect, then the stop
-    // hooks — matching the rulebook's racetrack → current player → other players ordering.
-    const tail: Job[] = [];
-    if (job.startBehind.length > 0) {
-      tail.push({ t: 'passCheck', racer: job.racer, startBehind: job.startBehind, done: [] });
-    }
-    if (job.resolveStop) {
-      tail.push({ t: 'spaceEffect', racer: job.racer });
-      tail.push({ t: 'stopHooks', racer: job.racer, done: [] });
-    }
-    if (tail.length > 0) ctx.s.queue.unshift(...tail);
-  };
+const settle = (): void => {
+      // Order matters: passing is judged first, then the space's own effect, then the stop
+      // hooks — matching the rulebook's racetrack → current player → other players ordering.
+      const tail: Job[] = [];
+      if (job.startBehind.length > 0) {
+        tail.push({ t: 'passCheck', racer: job.racer, startBehind: job.startBehind, done: [] });
+      }
+      if (job.resolveStop) {
+        tail.push({ t: 'spaceEffect', racer: job.racer, pos: racer.pos });
+        tail.push({ t: 'stopHooks', racer: job.racer, done: [], pos: racer.pos });
+      }
+      if (tail.length > 0) ctx.s.queue.unshift(...tail);
+    };
 
   if (job.remaining <= 0 || racer.eliminated || racer.pos === FINISH) return settle();
 
@@ -349,16 +378,16 @@ function doPassCheck(ctx: Ctx, job: Extract<Job, { t: 'passCheck' }>, rng: Rng):
   }
 }
 
-function doSpaceEffect(ctx: Ctx, racerId: RacerId, rng: Rng): void {
-  const racer = findRacer(ctx.s, racerId);
-  if (!racer || racer.eliminated || racer.pos === FINISH) return;
+function doSpaceEffect(ctx: Ctx, job: Extract<Job, { t: 'spaceEffect' }>, rng: Rng): void {
+  const racer = findRacer(ctx.s, job.racer);
+  if (!racer || racer.eliminated || job.pos === FINISH) return;
 
   const phase = ctx.s.phase;
   invariant(phase.t === 'racing', 'space effect resolved outside a race');
 
   const track = trackForRace(phase.raceNo as RaceNumber);
-  const space = track.spaces[racer.pos];
-  invariant(space, `no space at ${racer.pos} on ${track.id}`);
+  const space = track.spaces[job.pos];
+  invariant(space, 'no space at ' + job.pos + ' on ' + track.id);
 
   switch (space.effect.t) {
     case 'plain':
@@ -368,12 +397,12 @@ function doSpaceEffect(ctx: Ctx, racerId: RacerId, rng: Rng): void {
       const amount = space.effect.amount;
       ctx.emit({
         t: 'ability/triggered',
-        racerId,
+        racerId: racer.racerId,
         hook: 'space',
         text:
           amount > 0
-            ? `${racerName(racerId)} is swept ${amount} forward!`
-            : `${racerName(racerId)} is knocked ${-amount} back!`,
+            ? `${racerName(racer.racerId)} is swept ${amount} forward!`
+            : `${racerName(racer.racerId)} is knocked ${-amount} back!`,
       });
       // "A separate move than how you got there, and never part of your main move."
       // resolveStop false, or two arrows facing each other would loop forever.
@@ -384,7 +413,7 @@ function doSpaceEffect(ctx: Ctx, racerId: RacerId, rng: Rng): void {
     case 'trip':
       if (!racer.tripped) {
         racer.tripped = true;
-        ctx.emit({ t: 'racer/tripped', racerId, by: null });
+        ctx.emit({ t: 'racer/tripped', racerId: racer.racerId, by: null });
       }
       return;
 
@@ -404,18 +433,30 @@ function doSpaceEffect(ctx: Ctx, racerId: RacerId, rng: Rng): void {
  *
  * `self` first, then everyone else in board order — the rulebook's current player then
  * other players, clockwise. `done` guards against re-firing after a suspension.
+ *
+ * The `pos` stored in the job captures where the racer came to rest (before any arrow or
+ * displacement moved them further). It is applied temporarily during hook dispatch so
+ * powers see the actual stopping space rather than a post-arrow position — otherwise
+ * Romantic could loop between two arrow spaces forever.
  */
 function doStopHooks(ctx: Ctx, job: Extract<Job, { t: 'stopHooks' }>, rng: Rng): void {
   const racer = findRacer(ctx.s, job.racer);
   if (!racer || racer.eliminated) return;
 
+  // Temporarily restore the stopping position so hooks see the space the racer actually
+  // landed on, not a post-arrow position.
+  const savedPos = racer.pos;
+  racer.pos = job.pos;
+
   if (!job.done.includes(racer.racerId)) {
     job.done.push(racer.racerId);
     getHooks(racer.racerId).onStop?.(makeHookCtx(ctx, rng, racer));
+    racer.pos = savedPos;
     if (ctx.s.pending) {
       ctx.s.queue.unshift(job);
       return;
     }
+    racer.pos = job.pos;
   }
 
   for (const other of ctx.s.board) {
@@ -424,11 +465,15 @@ function doStopHooks(ctx: Ctx, job: Extract<Job, { t: 'stopHooks' }>, rng: Rng):
     job.done.push(other.racerId);
 
     getHooks(other.racerId).onOtherStops?.(makeHookCtx(ctx, rng, other), racer);
+    racer.pos = savedPos;
     if (ctx.s.pending) {
       ctx.s.queue.unshift(job);
       return;
     }
+    racer.pos = job.pos;
   }
+
+  racer.pos = savedPos;
 }
 
 /**
@@ -488,7 +533,10 @@ function fireSelf(
 
 /** Fires "before my race" powers for everyone, in board order. */
 export function fireRaceStart(ctx: Ctx, rng: Rng): void {
-  for (const racer of [...ctx.s.board]) fireSelf(ctx, rng, racer.racerId, 'onRaceStart');
+  for (const racer of [...ctx.s.board]) {
+    fireSelf(ctx, rng, racer.racerId, 'onRaceStart');
+    if (ctx.s.pending) break;
+  }
 }
 
 /** Builds the sandbox a handler runs inside. */
@@ -543,7 +591,7 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
       target.pos = to;
       // A warp is explicitly not a move, so no racer/moved event and no pass check.
       ctx.emit({ t: 'racer/warped', racerId: target.racerId, to });
-      ctx.s.queue.unshift({ t: 'stopHooks', racer: target.racerId, done: [] });
+      ctx.s.queue.unshift({ t: 'stopHooks', racer: target.racerId, done: [], pos: target.pos });
     },
 
     trip: (target) => {

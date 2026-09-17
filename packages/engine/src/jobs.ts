@@ -46,9 +46,9 @@ export type Job =
       done: RacerId[];
     }
   /** Apply the effect of the space a racer stopped on. */
-  | { t: 'spaceEffect'; racer: RacerId }
+  | { t: 'spaceEffect'; racer: RacerId; pos: number }
   /** Fire `onStop` for the racer, and `onOtherStops` for everyone else. */
-  | { t: 'stopHooks'; racer: RacerId; done: RacerId[] }
+  | { t: 'stopHooks'; racer: RacerId; done: RacerId[]; pos: number }
   /** Fire `onTurnEnd` for the racer, and `onOtherTurnEnd` for everyone else. */
   | { t: 'turnEnd'; racer: RacerId; done: RacerId[] }
   /** Check finishers, then hand the turn on or end the race. */
