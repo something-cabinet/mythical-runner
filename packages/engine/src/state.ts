@@ -17,6 +17,8 @@ export interface Player {
   readonly name: string;
   /** A player who has disconnected still holds their seat; the turn timer covers them. */
   readonly connected: boolean;
+  /** A computer player: never connects, and the server makes its moves. */
+  readonly bot?: boolean;
 }
 
 /** One racer's situation during a race. Only committed racers appear on the board. */

@@ -3,9 +3,9 @@ import { IllegalActionError, invariant } from '../errors.js';
 import type { PlayerId } from '../ids.js';
 import { makeRng, type Rng } from '../rng.js';
 import type { GameEvent } from '../events.js';
-import type { GameState } from '../state.js';
+import { MAX_PLAYERS, MIN_PLAYERS, type GameState } from '../state.js';
 import { currentDrafter, draftPick, draftRoll } from './draft.js';
-import { join, leave, setConnected, start } from './lobby.js';
+import { addBot, hostOf, join, leave, rematch, removeBot, setConnected, start } from './lobby.js';
 import { beginCommit as _beginCommit, raceCommit } from './commit.js';
 import { advanceAfterScoring, endTurn, raceContinue, raceRoll, takeTurn } from './racing.js';
 import { answerPending, runQueue } from './pipeline.js';
@@ -72,6 +72,12 @@ function route(ctx: Ctx, action: Action, rng: Rng): void {
       return setConnected(ctx, action);
     case 'lobby/start':
       return start(ctx, action);
+    case 'lobby/addBot':
+      return addBot(ctx, action);
+    case 'lobby/removeBot':
+      return removeBot(ctx, action);
+    case 'lobby/rematch':
+      return rematch(ctx, action, rng);
     case 'draft/roll':
       return draftRoll(ctx, action, rng);
     case 'draft/pick':
@@ -180,9 +186,15 @@ export function legalActions(state: GameState, player: PlayerId): Action[] {
     case 'lobby': {
       const joined = s.players.some((p) => p.id === player);
       if (!joined) return [{ t: 'lobby/join', by: player, name: '' }];
+      // Bots come and go at the host's say-so, not their own.
+      if (s.players.some((p) => p.id === player && p.bot)) return [];
       const out: Action[] = [{ t: 'lobby/leave', by: player }];
-      if (s.players[0]?.id === player && s.players.length >= 2) {
-        out.push({ t: 'lobby/start', by: player });
+      if (hostOf(s.players)?.id === player) {
+        if (s.players.length >= MIN_PLAYERS) out.push({ t: 'lobby/start', by: player });
+        if (s.players.length < MAX_PLAYERS) out.push({ t: 'lobby/addBot', by: player });
+        for (const bot of s.players.filter((p) => p.bot)) {
+          out.push({ t: 'lobby/removeBot', by: player, player: bot.id });
+        }
       }
       return out;
     }
@@ -208,6 +220,8 @@ export function legalActions(state: GameState, player: PlayerId): Action[] {
       return s.seatOrder.includes(player) ? [{ t: 'race/continue', by: player }] : [];
 
     case 'gameOver':
-      return [];
+      return s.players.some((p) => p.id === player && !p.bot)
+        ? [{ t: 'lobby/rematch', by: player }]
+        : [];
   }
 }

@@ -40,10 +40,13 @@ export function fuzz(games: number, baseSeed: number): void {
       const rng = makeRng(seed, 0x1234);
       // A third of games are played with a flaky, distracted table.
       const timeoutRate = g % 3 === 0 ? 0.15 : 0;
+      // A quarter of games fill some seats with bots.
+      const bots = g % 4 === 1 ? 1 + pick.nextInt(playerCount - 1) : 0;
       const result = playGame({
         seed,
         playerCount,
         timeoutRate,
+        bots,
         choose: (options: Action[]) => options[rng.nextInt(options.length)] as Action,
       });
       timeoutGames += timeoutRate > 0 ? 1 : 0;

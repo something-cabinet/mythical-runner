@@ -20,6 +20,9 @@ import type { PlayerView } from './state.js';
 export const CLIENT_ACTION_TYPES = [
   'lobby/start',
   'lobby/leave',
+  'lobby/addBot',
+  'lobby/removeBot',
+  'lobby/rematch',
   'draft/roll',
   'draft/pick',
   'race/commit',

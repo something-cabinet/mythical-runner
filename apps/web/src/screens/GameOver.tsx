@@ -1,11 +1,12 @@
 import { RACE_COUNT, totalPoints, type RaceNumber } from '@mr/engine';
 import { ActionBar, PlayerToken } from '../components/bits';
 import { playerName, points, rawName } from '../lib/present';
-import { useRoomContext } from '../lib/roomContext';
+import { legalOf, useRoomContext } from '../lib/roomContext';
 import { navigate } from '../lib/router';
 
 export function GameOverScreen() {
-  const { view } = useRoomContext();
+  const { view, message, canAct, send } = useRoomContext();
+  const rematch = legalOf(message, 'lobby/rematch')[0];
   if (view.phase.t !== 'gameOver') return null;
 
   const winners = view.phase.winners;
@@ -55,8 +56,18 @@ export function GameOverScreen() {
       </main>
 
       <ActionBar>
-        <button type="button" className="btn btn-primary btn-lg btn-block" onClick={() => navigate('/')}>
-          Play again
+        {rematch && (
+          <button
+            type="button"
+            className="btn btn-primary btn-lg btn-block"
+            disabled={!canAct}
+            onClick={() => send(rematch)}
+          >
+            Play again
+          </button>
+        )}
+        <button type="button" className="btn btn-ghost btn-block" onClick={() => navigate('/')}>
+          Leave for home
         </button>
       </ActionBar>
     </>

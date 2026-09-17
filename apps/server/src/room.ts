@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import {
   applyAction,
+  botAction,
   CLIENT_ACTION_TYPES,
   CLOSE_CODES,
   IllegalActionError,
@@ -45,6 +46,12 @@ import type { Env } from './env.js';
  * under both, and at ~210 actions a game the 100k/day free row-write budget still covers
  * hundreds of games a day.
  *
+ * ## Bots
+ *
+ * Bot seats are played by the room itself: whenever a bot has a move, the alarm is set a
+ * moment ahead and `alarm()` makes it, persisted and broadcast exactly like a human move.
+ * Nothing about a bot lives outside `GameState`, so hibernation is a non-event for them.
+ *
  * ## Storage keys
  *
  *   meta       { code, createdAt, turnSeconds }   written once
@@ -63,6 +70,22 @@ interface Meta {
 interface Attachment {
   readonly playerId: PlayerId;
 }
+
+/**
+ * The turn clock when everyone the game is waiting on is disconnected.
+ *
+ * An absent player would otherwise cost the table a full `turnSeconds` on every one of
+ * their turns. Short, but not zero: long enough to ride out a phone briefly locking, and a
+ * player who reconnects gets the full clock back.
+ */
+const OFFLINE_TURN_SECONDS = 8;
+
+/**
+ * How long a bot "thinks" before each move. Bots move through the alarm rather than
+ * instantly, so each bot move is its own broadcast the table can watch, and a string of
+ * bot turns can't monopolise the object.
+ */
+const BOT_MOVE_DELAY_MS = 900;
 
 /** How long an empty room lingers before deleting itself. */
 const EMPTY_ROOM_TTL_MS = 6 * 60 * 60 * 1000;
@@ -276,6 +299,21 @@ export class RoomDO extends DurableObject<Env> {
       return;
     }
 
+    const bot = botAction(this.state);
+    if (bot) {
+      try {
+        const events = this.apply(bot, { resetClock: true });
+        await this.ctx.storage.put('state', this.state);
+        this.broadcast(events);
+      } catch (err) {
+        // botAction only offers legal moves, so this is an engine bug. The turn clock is
+        // still running and will move the game on.
+        console.error('bot move failed', bot, err);
+      }
+      await this.scheduleAlarm();
+      return;
+    }
+
     const { deadline } = this.state;
     if (deadline !== null && now >= deadline) {
       try {
@@ -326,12 +364,16 @@ export class RoomDO extends DurableObject<Env> {
   private deadlineFor(state: GameState): number | null {
     if (!this.meta || this.meta.turnSeconds <= 0) return null;
     if (state.phase.t === 'lobby' || state.phase.t === 'gameOver') return null;
-    return Date.now() + this.meta.turnSeconds * 1000;
+    const seconds = waitingOnlyOnAbsent(state)
+      ? Math.min(OFFLINE_TURN_SECONDS, this.meta.turnSeconds)
+      : this.meta.turnSeconds;
+    return Date.now() + seconds * 1000;
   }
 
-  /** Points the single alarm at whichever comes first: the turn deadline or expiry. */
+  /** Points the single alarm at whichever comes first: a bot's move, the turn deadline, or expiry. */
   private async scheduleAlarm(): Promise<void> {
     const candidates: number[] = [];
+    if (this.state && botAction(this.state)) candidates.push(Date.now() + BOT_MOVE_DELAY_MS);
     if (this.state?.deadline != null) candidates.push(this.state.deadline);
     const expiresAt = await this.ctx.storage.get<number>('expiresAt');
     if (expiresAt !== undefined) candidates.push(expiresAt);
@@ -355,6 +397,13 @@ export class RoomDO extends DurableObject<Env> {
           { t: 'lobby/setConnected', by: who.playerId, connected: false },
           { resetClock: false },
         );
+        // Leaving mid-turn: if the game is now waiting only on absent players, stop
+        // waiting a full turn for them. Only ever shortens — not a way to reset the clock.
+        const { deadline } = this.state;
+        if (deadline !== null && waitingOnlyOnAbsent(this.state)) {
+          const offline = this.deadlineFor(this.state);
+          if (offline !== null && offline < deadline) this.state = { ...this.state, deadline: offline };
+        }
         await this.ctx.storage.put('state', this.state);
         this.broadcast(events);
       } catch (err) {
@@ -463,6 +512,19 @@ function reject(
   send(server, { t: 'error', code, message });
   server.close(CLOSE_CODES[code], message);
   return new Response(null, { status: 101, webSocket: client });
+}
+
+/**
+ * True when the game is blocked only on players who aren't connected.
+ *
+ * "Blocked on" is whoever has a legal move right now — the active racer, whoever owes a
+ * decision, drafters and committers still to go — so this needs no per-phase rules of its
+ * own. After a race everyone may press continue, so one player present is enough to keep
+ * the full clock.
+ */
+function waitingOnlyOnAbsent(state: GameState): boolean {
+  const waitingOn = state.players.filter((p) => legalActions(state, p.id).length > 0);
+  return waitingOn.length > 0 && waitingOn.every((p) => !p.connected);
 }
 
 /** Legal actions for one player, with `by` stripped, restricted to what a client may send. */

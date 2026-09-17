@@ -1,4 +1,4 @@
-import { MAX_PLAYERS } from '@mr/engine';
+import { hostOf, MAX_PLAYERS } from '@mr/engine';
 import { useState } from 'react';
 import { ActionBar, PlayerToken, Waiting } from '../components/bits';
 import { forgetCredentials } from '../lib/identity';
@@ -10,9 +10,11 @@ export function LobbyScreen() {
   const { code, view, message, canAct, send } = useRoomContext();
   const [shared, setShared] = useState<string | null>(null);
 
-  const host = view.players[0];
+  const host = hostOf(view.players);
   const isHost = host?.id === view.you;
   const canStart = legalOf(message, 'lobby/start').length > 0;
+  const addBot = legalOf(message, 'lobby/addBot')[0];
+  const removeBots = legalOf(message, 'lobby/removeBot');
   const seatsLeft = MAX_PLAYERS - view.players.length;
 
   const share = async (): Promise<void> => {
@@ -60,19 +62,48 @@ export function LobbyScreen() {
               {view.players.length}/{MAX_PLAYERS}
             </span>
           </div>
-          {view.players.map((p, i) => (
-            <div key={p.id} className={`player-row${p.connected ? '' : ' offline'}`}>
-              <PlayerToken view={view} pid={p.id} />
-              <span className="name">{p.name}</span>
-              {i === 0 && <span className="tag tag-gold">host</span>}
-              {p.id === view.you && <span className="tag">you</span>}
-              {!p.connected && <span className="tag">away</span>}
-            </div>
-          ))}
+          {view.players.map((p) => {
+            const remove = removeBots.find((a) => a.player === p.id);
+            return (
+              <div key={p.id} className={`player-row${p.connected ? '' : ' offline'}`}>
+                <PlayerToken view={view} pid={p.id} />
+                <span className="name">{p.name}</span>
+                {p.id === host?.id && <span className="tag tag-gold">host</span>}
+                {p.bot && <span className="tag">bot</span>}
+                {p.id === view.you && <span className="tag">you</span>}
+                {!p.connected && <span className="tag">away</span>}
+                {remove && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    style={{ minHeight: 36, padding: '0 10px' }}
+                    disabled={!canAct}
+                    onClick={() => send(remove)}
+                    aria-label={`Remove ${p.name}`}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            );
+          })}
           {seatsLeft > 0 && (
-            <p className="muted" style={{ fontSize: '0.85rem', paddingTop: 8 }}>
-              {seatsLeft} seat{seatsLeft === 1 ? '' : 's'} open
-            </p>
+            <div className="spread" style={{ paddingTop: 8 }}>
+              <p className="muted" style={{ fontSize: '0.85rem' }}>
+                {seatsLeft} seat{seatsLeft === 1 ? '' : 's'} open
+              </p>
+              {addBot && (
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ minHeight: 40 }}
+                  disabled={!canAct}
+                  onClick={() => send(addBot)}
+                >
+                  Add a bot
+                </button>
+              )}
+            </div>
           )}
         </section>
 
@@ -92,7 +123,7 @@ export function LobbyScreen() {
             >
               Start game
             </button>
-            {!canStart && <p className="muted" style={{ textAlign: 'center', fontSize: '0.85rem' }}>Waiting for at least one more player</p>}
+            {!canStart && <p className="muted" style={{ textAlign: 'center', fontSize: '0.85rem' }}>Add a bot or wait for at least one more player</p>}
           </>
         ) : (
           <Waiting>Waiting for {host ? playerName(view, host.id) : 'the host'} to start</Waiting>

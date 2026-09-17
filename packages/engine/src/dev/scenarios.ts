@@ -11,7 +11,8 @@
  *   npx tsc && node dist/dev/scenarios.js
  */
 
-import { applyAction, initGame } from '../reducer/index.js';
+import { applyAction, initGame, legalActions } from '../reducer/index.js';
+import { playGame } from './hotseat.js';
 import type { Action } from '../actions.js';
 import type { GameEvent } from '../events.js';
 import { choiceId, playerId, racerId } from '../ids.js';
@@ -1175,6 +1176,89 @@ scenario('Suckerfish can latch on to a move queued by a power that may not ask (
   check(posOf(state, 'lackey') === 12, 'Lackey moves 2', `pos ${posOf(state, 'lackey')}`);
   check(posOf(state, 'suckerfish') === 12, 'Suckerfish follows', `pos ${posOf(state, 'suckerfish')}`);
   check(posOf(state, 'vanilla-01') === 11, 'the roller still moves', `pos ${posOf(state, 'vanilla-01')}`);
+});
+
+// --- Phase 6: lobby, bots, rematch ---------------------------------------------
+
+const lobbyWith = (...names: string[]): GameState =>
+  names.reduce(
+    (s, n) => applyAction(s, { t: 'lobby/join', by: playerId(n), name: n }).state,
+    initGame(4242),
+  );
+
+const throws = (fn: () => unknown): boolean => {
+  try {
+    fn();
+    return false;
+  } catch {
+    return true;
+  }
+};
+
+scenario('Bots — only the host adds and removes them', () => {
+  const s = lobbyWith('host-player', 'guest-player');
+  const host = playerId('host-player');
+  const guest = playerId('guest-player');
+
+  check(
+    legalActions(s, host).some((a) => a.t === 'lobby/addBot') &&
+      !legalActions(s, guest).some((a) => a.t === 'lobby/addBot'),
+    'the host is offered Add bot; a guest is not',
+  );
+  check(throws(() => applyAction(s, { t: 'lobby/addBot', by: guest })), 'a guest adding a bot is rejected');
+
+  const added = applyAction(s, { t: 'lobby/addBot', by: host }).state;
+  const bot = added.players.find((p) => p.bot);
+  check(bot?.id === playerId('bot-1') && bot.name === 'Bot 1', 'seats Bot 1', JSON.stringify(bot));
+  check(legalActions(added, playerId('bot-1')).length === 0, 'a bot has nothing to do in the lobby');
+
+  check(
+    throws(() => applyAction(added, { t: 'lobby/removeBot', by: host, player: guest })),
+    'Remove bot cannot remove a human',
+  );
+  const removed = applyAction(added, { t: 'lobby/removeBot', by: host, player: playerId('bot-1') }).state;
+  check(removed.players.length === 2 && !removed.players.some((p) => p.bot), 'and removes the bot');
+});
+
+scenario('Bots — never become host', () => {
+  let s = lobbyWith('host-player');
+  s = applyAction(s, { t: 'lobby/addBot', by: playerId('host-player') }).state;
+  s = applyAction(s, { t: 'lobby/join', by: playerId('late-player'), name: 'Late' }).state;
+  s = applyAction(s, { t: 'lobby/leave', by: playerId('host-player') }).state;
+  check(
+    legalActions(s, playerId('late-player')).some((a) => a.t === 'lobby/start'),
+    'when the host leaves, the next human hosts — not the bot seated before them',
+  );
+});
+
+scenario('Bots — a game with bots plays to the end', () => {
+  for (const seed of [11, 22, 33]) {
+    const result = playGame({ seed, playerCount: 4, bots: 3 });
+    check(result.state.phase.t === 'gameOver', `seed ${seed}: one human, three bots, game over`);
+  }
+});
+
+scenario('Rematch — back to the lobby with whoever is still here', () => {
+  const played = playGame({ seed: 7, playerCount: 3, bots: 1 }).state;
+  const away: GameState = {
+    ...played,
+    players: played.players.map((p) => (p.id === playerId('p2') ? { ...p, connected: false } : p)),
+  };
+
+  check(legalActions(away, playerId('p1')).some((a) => a.t === 'lobby/rematch'), 'offered once the game is over');
+  check(legalActions(away, playerId('bot-1')).length === 0, 'but not to a bot');
+
+  const { state, events } = applyAction(away, { t: 'lobby/rematch', by: playerId('p1') });
+  check(state.phase.t === 'lobby', 'the room is back in its lobby');
+  check(
+    state.players.map((p) => String(p.id)).join(',') === 'p1,bot-1',
+    'the absent player is dropped; the bot stays',
+    state.players.map((p) => String(p.id)).join(','),
+  );
+  check(pointsOf(state, 'p1') === 0 && state.seatOrder.length === 0, 'scores and seats are cleared');
+  check(state.seed !== away.seed, 'with a fresh seed');
+  check(has(events, 'game/rematch'), 'announced');
+  check(throws(() => applyAction(played, { t: 'lobby/rematch', by: playerId('nobody-here') })), 'strangers cannot trigger it');
 });
 
 // --- Report -----------------------------------------------------------------

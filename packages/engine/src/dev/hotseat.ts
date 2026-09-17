@@ -12,6 +12,7 @@
  */
 
 import { applyAction, initGame, legalActions } from '../reducer/index.js';
+import { botAction } from '../bots.js';
 import { racerName } from '../characters/registry.js';
 import type { Action } from '../actions.js';
 import type { GameEvent } from '../events.js';
@@ -35,6 +36,11 @@ export interface PlayOptions {
    * otherwise only ever be covered by a single scenario test.
    */
   readonly timeoutRate?: number;
+  /**
+   * How many of the `playerCount` seats are bots, added by the host in the lobby and
+   * played by `botAction` exactly as the server plays them. At least one seat stays human.
+   */
+  readonly bots?: number;
 }
 
 export interface PlayResult {
@@ -51,7 +57,8 @@ export function playGame(opts: PlayOptions): PlayResult {
   const timeoutRate = opts.timeoutRate ?? 0;
   const timeoutRng = makeRng(seed, 0xbeef);
 
-  const players: PlayerId[] = Array.from({ length: playerCount }, (_, i) =>
+  const botCount = Math.min(opts.bots ?? 0, playerCount - 1);
+  const players: PlayerId[] = Array.from({ length: playerCount - botCount }, (_, i) =>
     playerId(`p${i + 1}`),
   );
 
@@ -69,6 +76,7 @@ export function playGame(opts: PlayOptions): PlayResult {
   for (const [i, p] of players.entries()) {
     apply({ t: 'lobby/join', by: p, name: `Player ${i + 1}` });
   }
+  for (let i = 0; i < botCount; i++) apply({ t: 'lobby/addBot', by: players[0] as PlayerId });
   apply({ t: 'lobby/start', by: players[0] as PlayerId });
 
   while (state.phase.t !== 'gameOver') {
@@ -78,6 +86,13 @@ export function playGame(opts: PlayOptions): PlayResult {
 
     if (timeoutRate > 0 && timeoutRng.nextFloat() < timeoutRate) {
       apply({ t: 'system/timeout', at: 0 });
+      continue;
+    }
+
+    // Bots move first whenever they can, as the server has them do.
+    const bot = botAction(state);
+    if (bot) {
+      apply(bot);
       continue;
     }
 

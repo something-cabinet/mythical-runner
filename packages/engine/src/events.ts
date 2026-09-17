@@ -29,6 +29,12 @@ export interface PlayerLeft {
   readonly player: PlayerId;
 }
 
+/** The finished game was cleared and the room is back in its lobby. */
+export interface GameRematch {
+  readonly t: 'game/rematch';
+  readonly by: PlayerId;
+}
+
 export interface GameStarted {
   readonly t: 'game/started';
   readonly seatOrder: readonly PlayerId[];
@@ -212,6 +218,7 @@ export type GameEvent =
   | PlayerJoined
   | PlayerLeft
   | GameStarted
+  | GameRematch
   | DraftRolled
   | DraftOrderSet
   | DraftPicked

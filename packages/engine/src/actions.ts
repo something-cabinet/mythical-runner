@@ -35,6 +35,28 @@ export interface LobbyStart {
   readonly by: PlayerId;
 }
 
+/** Host only, lobby only: seats a computer player. The server plays its moves. */
+export interface LobbyAddBot {
+  readonly t: 'lobby/addBot';
+  readonly by: PlayerId;
+}
+
+/** Host only, lobby only: unseats a computer player. */
+export interface LobbyRemoveBot {
+  readonly t: 'lobby/removeBot';
+  readonly by: PlayerId;
+  readonly player: PlayerId;
+}
+
+/**
+ * Any seated player, once the game is over: back to the lobby with the same room, for
+ * another game with whoever is still here.
+ */
+export interface LobbyRematch {
+  readonly t: 'lobby/rematch';
+  readonly by: PlayerId;
+}
+
 /** Roll-off for draft order. Highest unique roll goes first; ties re-roll. */
 export interface DraftRoll {
   readonly t: 'draft/roll';
@@ -88,6 +110,9 @@ export type Action =
   | LobbyLeave
   | LobbySetConnected
   | LobbyStart
+  | LobbyAddBot
+  | LobbyRemoveBot
+  | LobbyRematch
   | DraftRoll
   | DraftPick
   | RaceCommit

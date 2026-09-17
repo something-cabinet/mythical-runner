@@ -60,11 +60,11 @@ with a full room join through the proxy.
 
 ```bash
 npm run typecheck                    # all three workspaces
-npm test                             # engine: 136 scenario checks + 1000 fuzzed games
+npm test                             # engine: 156 scenario checks + 1000 fuzzed games
 
 # these need `npm run start` running in another terminal
-npm run e2e -w @mr/server            # 38 checks over real WebSockets, ~40 s
-npm run e2e -w @mr/server -- --fast  # skips the 15-second turn-clock scenario
+npm run e2e -w @mr/server            # 50 checks over real WebSockets, a few minutes
+npm run e2e -w @mr/server -- --fast  # skips the clock and bot scenarios
 npm run test:ui -w @mr/web           # a full game through the UI on phone-sized screens
 ```
 
@@ -217,9 +217,21 @@ pieces added for wave 2, worth knowing before touching a power:
 
 ### Phase 6 — polish
 
-Spectators, replay viewer, fill bots, sound. A shorter clock specifically for disconnected
-players — an absent player currently costs the table a full `turnSeconds` per turn.
-"Play again" currently returns to the home page; a rematch with the same group would be nicer.
+**Done:**
+
+- **Short clock for absent players.** When everyone the game is waiting on is disconnected,
+  the deadline is 8 seconds instead of `turnSeconds` — including when a player drops
+  mid-turn. "Waiting on" is whoever has a legal action, so there are no per-phase rules.
+  Reconnecting restores the full clock. Rooms with the clock off are unaffected.
+- **Play again.** `lobby/rematch` takes a finished room back to its lobby: same code, bots
+  kept, disconnected players dropped (they can rejoin), fresh seed.
+- **Fill bots.** The host adds and removes bots in the lobby (`lobby/addBot`,
+  `lobby/removeBot`). `botAction` in the engine picks a random legal move — never
+  dismissing the scoreboard — and the room plays it through its alarm, 0.9 s apart, saved
+  and broadcast like a human move. Bot ids (`bot-N`) are too short for a browser to connect
+  with, so a bot seat can't be hijacked. The host is now the first *human* (`hostOf`).
+
+**Still to do:** spectators, a replay viewer, sound.
 
 ### Deploying
 
@@ -232,8 +244,6 @@ limits hard stops rather than bills. The game is now worth deploying.
 
 ## 6. Open items
 
-- **The Wild Wilds space layout is invented.** The rulebook documents the space types but not
-  the board. Isolated in [tracks/wildWilds.ts](../packages/engine/src/tracks/wildWilds.ts).
 - **Credentials travel in the WebSocket URL's query string**, so they appear in any log that
   records full URLs. Acceptable for a friends' game.
 - **Legal:** a commercial, in-print game. Private play is fine; publishing with the real racer

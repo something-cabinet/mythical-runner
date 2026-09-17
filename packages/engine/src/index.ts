@@ -31,5 +31,7 @@ export {
 } from './characters/registry.js';
 export { initGame, applyAction, legalActions, type ApplyResult } from './reducer/index.js';
 export { currentDrafter } from './reducer/draft.js';
+export { hostOf } from './reducer/lobby.js';
 export { redact } from './redact.js';
+export { botAction } from './bots.js';
 export * from './protocol.js';

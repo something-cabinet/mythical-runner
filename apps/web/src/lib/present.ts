@@ -143,6 +143,8 @@ export function describeEvent(e: GameEvent, view: PlayerView): LogLine | null {
       return { text: `${who(e.player)} joined`, tone: 'plain' };
     case 'player/left':
       return { text: `${who(e.player)} left`, tone: 'plain' };
+    case 'game/rematch':
+      return { text: `${who(e.by)} started a rematch`, tone: 'turn' };
     case 'game/started':
       return { text: 'The game has started', tone: 'turn' };
     case 'draft/rolled':

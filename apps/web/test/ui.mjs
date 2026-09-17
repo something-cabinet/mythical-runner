@@ -156,8 +156,8 @@ async function takeTurn(player) {
     return;
   }
 
-  // Never "Play again": it leaves the finished game.
-  const button = bar.locator('button:enabled', { hasNotText: 'Play again' });
+  // Never "Play again" or "Leave for home": both leave the finished game.
+  const button = bar.locator('button:enabled', { hasNotText: /Play again|Leave for home/ });
   if ((await button.count()) > 0) {
     await button.first().click(TAP).catch(() => {});
     lastProgress = Date.now();

@@ -85,7 +85,13 @@ function connect(code, who) {
         if (client.state && pred(client.state)) return resolve(client.state);
         const timer = setTimeout(() => {
           client.listeners.delete(fn);
-          reject(new Error(`timed out waiting for ${label}`));
+          const v = client.state?.view;
+          const where = v
+            ? ` (stuck at step ${v.step}, phase ${v.phase.t}, legal [${client.state.legal.map((a) => a.t)}], ` +
+              `pending ${v.pending ? `${v.pending.player}: ${v.pending.prompt}` : 'none'}, ` +
+              `players ${v.players.map((p) => `${p.name}${p.connected ? '' : '(away)'}`)})`
+            : '';
+          reject(new Error(`timed out waiting for ${label}${where}`));
         }, timeoutMs);
         const fn = (msg) => {
           if (msg.t === 'state' && pred(msg)) {
@@ -135,13 +141,37 @@ function autoplay(client, { idle = () => false } = {}) {
       return;
     }
     if (msg.t !== 'state' || idle()) return;
-    if (msg.legal.length === 0 || msg.view.step === lastStep) return;
+    // Room management is left to each test: a random rematch would restart the game under it.
+    const legal = msg.legal.filter((a) => !a.t.startsWith('lobby/'));
+    if (legal.length === 0 || msg.view.step === lastStep) return;
     lastStep = msg.view.step;
-    client.send(msg.legal[rand(msg.legal.length)]);
+    client.send(legal[rand(legal.length)]);
   };
   client.listeners.add(act);
   if (client.state) act(client.state);
   return () => client.listeners.delete(act);
+}
+
+/**
+ * Seats players one at a time, in the order given.
+ *
+ * Connecting them all at once races their joins, and the first human seated is the host —
+ * a test that fires off A and B together and then has A start the game fails whenever B's
+ * join happens to land first.
+ */
+async function joinInOrder(code, ...identities) {
+  const clients = [];
+  for (const who of identities) {
+    const client = connect(code, who);
+    await client.opened;
+    await client.waitFor(
+      (m) => m.view.players.some((p) => p.id === who.playerId),
+      5000,
+      `${who.name} to be seated`,
+    );
+    clients.push(client);
+  }
+  return clients;
 }
 
 function scenario(name, fn) {
@@ -162,8 +192,7 @@ const isGameOver = (m) => m.view.phase.t === 'gameOver';
 
 const fullGame = scenario('Four clients play a complete game over WebSockets', async () => {
   const code = await createRoom(0); // no clock: this test is about the happy path
-  const clients = ['Ada', 'Bo', 'Cy', 'Di'].map((n) => connect(code, identity(n)));
-  await Promise.all(clients.map((c) => c.opened));
+  const clients = await joinInOrder(code, ...['Ada', 'Bo', 'Cy', 'Di'].map(identity));
 
   const host = clients[0];
   await host.waitFor((m) => m.view.players.length === 4, 5000, 'all four seated');
@@ -208,8 +237,7 @@ const fullGame = scenario('Four clients play a complete game over WebSockets', a
 
 const secrecy = scenario('Commits stay secret until everyone has chosen', async () => {
   const code = await createRoom(0);
-  const [a, b] = [connect(code, identity('A')), connect(code, identity('B'))];
-  await Promise.all([a.opened, b.opened]);
+  const [a, b] = await joinInOrder(code, identity('A'), identity('B'));
   await a.waitFor((m) => m.view.players.length === 2);
 
   a.send({ t: 'lobby/start' });
@@ -281,8 +309,7 @@ const auth = scenario('Credentials, room existence and seat limits are enforced'
 
 const impersonation = scenario('A client cannot act as someone else or as the clock', async () => {
   const code = await createRoom(0);
-  const [a, b] = [connect(code, identity('A')), connect(code, identity('B'))];
-  await Promise.all([a.opened, b.opened]);
+  const [a, b] = await joinInOrder(code, identity('A'), identity('B'));
   await a.waitFor((m) => m.view.players.length === 2);
 
   // B tries to start the game while claiming to be the host.
@@ -314,8 +341,7 @@ const impersonation = scenario('A client cannot act as someone else or as the cl
 const reconnect = scenario('A player can drop mid-game and reconnect to the same seat', async () => {
   const code = await createRoom(0);
   const aId = identity('A');
-  const [a, b] = [connect(code, aId), connect(code, identity('B'))];
-  await Promise.all([a.opened, b.opened]);
+  const [a, b] = await joinInOrder(code, aId, identity('B'));
   await a.waitFor((m) => m.view.players.length === 2);
   a.send({ t: 'lobby/start' });
 
@@ -358,8 +384,7 @@ const reconnect = scenario('A player can drop mid-game and reconnect to the same
 
 const clock = scenario('The turn clock auto-plays for an idle player', async () => {
   const code = await createRoom(15); // the minimum
-  const [a, b] = [connect(code, identity('A')), connect(code, identity('Idle'))];
-  await Promise.all([a.opened, b.opened]);
+  const [a, b] = await joinInOrder(code, identity('A'), identity('Idle'));
   await a.waitFor((m) => m.view.players.length === 2);
 
   let bIdle = false;
@@ -373,26 +398,136 @@ const clock = scenario('The turn clock auto-plays for an idle player', async () 
   // B stops responding. A keeps playing. Wait until it is B's move, then see whether the
   // server moves the game on without them.
   bIdle = true;
+  // A move B sent just before going idle may still be in flight — and since Genius and
+  // Skipper can give B back-to-back turns, it may land on a turn this test would time.
+  await sleep(1000);
   const waiting = await a.waitFor(
     (m) => m.view.phase.t === 'racing' && m.view.phase.active === b.who.playerId && m.view.pending === null,
     30000,
     "B's turn",
   );
   const frozenStep = waiting.view.step;
-  const t0 = Date.now();
 
-  const advanced = await a.waitFor(
-    (m) => m.view.step > frozenStep && m.events.some((e) => e.t === 'dice/rolled' || e.t === 'racer/stoodUp'),
-    25000,
-    'the clock to auto-roll for B',
-  );
-  const waited = Date.now() - t0;
-  check(!!advanced, 'the server rolled for the idle player');
-  check(waited >= 10000 && waited <= 22000, 'after roughly the configured 15 seconds', `${waited} ms`);
+  // Any step forward is the clock: with nothing pending it's B's move alone. Waiting for a
+  // roll specifically would miss a turn whose racer asks something first (Magician's
+  // reroll), which takes a second clock to get to the roll.
+  const advanced = await a.waitFor((m) => m.view.step > frozenStep, 25000, 'the clock to act for B');
+  // Timed from when the server started B's clock, not from when this test noticed it was
+  // B's turn — the state that shows it may already be seconds old.
+  const waited = Date.now() - (waiting.view.deadline - 15000);
+  check(!!advanced, 'the server acted for the idle player');
+  check(waited >= 13000 && waited <= 20000, 'after roughly the configured 15 seconds', `${waited} ms`);
 
   stopA();
   stopB();
   [a, b].forEach((c) => c.close());
+});
+
+const rematch = scenario('Play again returns everyone still here to the same lobby', async () => {
+  const code = await createRoom(0);
+  const [a, b] = await joinInOrder(code, identity('A'), identity('B'));
+  await a.waitFor((m) => m.view.players.length === 2);
+  a.send({ t: 'lobby/start' });
+
+  const stops = [autoplay(a), autoplay(b)];
+  await Promise.all([a, b].map((c) => c.waitFor(isGameOver, 120000, 'game over')));
+  stops.forEach((s) => s());
+
+  check(a.state.legal.some((x) => x.t === 'lobby/rematch'), 'Play again is offered at game over');
+  a.send({ t: 'lobby/rematch' });
+  const back = await b.waitFor((m) => m.view.phase.t === 'lobby', 5000, 'the lobby');
+  check(back.view.players.length === 2, 'both players are back in the lobby');
+  check(Object.values(back.view.scores).every((t) => t.length === 0), 'with scores cleared');
+
+  const info = await (await fetch(`${BASE}/api/rooms/${code}`)).json();
+  check(info.joinable === true, 'and the room takes new players again');
+
+  a.send({ t: 'lobby/start' });
+  await b.waitFor((m) => m.view.phase.t === 'draftRoll', 5000, 'a second game to start');
+  check(true, 'the host can start the second game');
+  [a, b].forEach((c) => c.close());
+});
+
+const bots = scenario('The host can fill seats with bots, and the server plays them', async () => {
+  const code = await createRoom(0);
+  const host = connect(code, identity('Host'));
+  await host.opened;
+  await host.waitFor((m) => m.view.players.length === 1);
+  const guest = connect(code, identity('Guest'));
+  await guest.opened;
+  await guest.waitFor((m) => m.view.players.length === 2);
+
+  check(!guest.state.legal.some((x) => x.t === 'lobby/addBot'), 'a guest may not add bots');
+  // Leave properly: a guest who only disconnects keeps their seat, and with no clock the
+  // game would wait for them forever.
+  guest.send({ t: 'lobby/leave' });
+  await host.waitFor((m) => m.view.players.length === 1, 5000, 'the guest to leave');
+  guest.close();
+
+  const hostNow = await host.waitFor((m) => m.legal.some((x) => x.t === 'lobby/addBot'), 5000, 'Add bot');
+  host.send(hostNow.legal.find((x) => x.t === 'lobby/addBot'));
+  const withBot = await host.waitFor((m) => m.view.players.some((p) => p.bot), 5000, 'the bot');
+  check(true, 'the bot is seated');
+
+  // A bot's seat cannot be taken over: bot ids are too short for a browser to connect with.
+  const botId = withBot.view.players.find((p) => p.bot).id;
+  const impostor = connect(code, { playerId: botId, secret: token(32), name: 'x' });
+  const closed = await impostor.closed;
+  check(closed.code === 4000, "nobody can connect as the bot", `close ${closed.code}`);
+
+  host.send({ t: 'lobby/start' });
+  const stop = autoplay(host);
+  const botMoved = await host.waitFor(
+    (m) => m.events.some((e) => (e.t === 'draft/rolled' || e.t === 'draft/picked') && e.player === botId),
+    15000,
+    'the bot to act',
+  );
+  check(!!botMoved, 'the server makes the bot moves');
+
+  await host.waitFor((m) => m.view.phase.t === 'scored', 120000, 'the first race to finish');
+  check(true, 'a race with a bot plays to the end');
+  stop();
+  [host, guest].forEach((c) => c.close());
+});
+
+const offlineClock = scenario('A disconnected player only gets a short clock', async () => {
+  const code = await createRoom(60);
+  const [a, b] = await joinInOrder(code, identity('A'), identity('Gone'));
+  await a.waitFor((m) => m.view.players.length === 2);
+  a.send({ t: 'lobby/start' });
+
+  const stopA = autoplay(a);
+  const stopB = autoplay(b);
+  await a.waitFor((m) => m.view.phase.t === 'racing', 60000, 'a race to start');
+  stopB();
+  b.close();
+
+  // Both conditions in one state: the turn may reach B a moment before the server has
+  // noticed B's socket close, and the clock only shortens once it has.
+  const away = (m) => m.view.players.find((p) => p.id === b.who.playerId)?.connected === false;
+  const waiting = await a.waitFor(
+    (m) =>
+      away(m) &&
+      m.view.phase.t === 'racing' &&
+      m.view.phase.active === b.who.playerId &&
+      m.view.pending === null,
+    60000,
+    "the absent player's turn",
+  );
+  const t0 = Date.now();
+  check(waiting.view.deadline - t0 < 12000, 'their turn gets seconds, not the full minute', `${waiting.view.deadline - t0} ms left`);
+
+  // Any step forward will do: with no question pending it's B's move alone, so nothing but
+  // the clock can advance the game. (Checking for a roll misses turns that have none, like
+  // a Hare skipping its move.)
+  const advanced = await a.waitFor(
+    (m) => m.view.step > waiting.view.step,
+    20000,
+    'the clock to act for them',
+  );
+  check(!!advanced && Date.now() - t0 < 12000, 'and the game moves on without them', `${Date.now() - t0} ms`);
+  stopA();
+  a.close();
 });
 
 // --- Run --------------------------------------------------------------------
@@ -408,7 +543,15 @@ try {
 }
 
 console.log(`Testing ${BASE}`);
-for (const run of [fullGame, secrecy, auth, impersonation, reconnect, ...(onlyFast ? [] : [clock])]) {
+for (const run of [
+  fullGame,
+  secrecy,
+  auth,
+  impersonation,
+  reconnect,
+  rematch,
+  ...(onlyFast ? [] : [clock, offlineClock, bots]),
+]) {
   await run();
 }
 
