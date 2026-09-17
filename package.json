@@ -16,7 +16,8 @@
     "start": "npm run build -w @mr/web && npm run dev -w @mr/server"
   },
   "devDependencies": {
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "wrangler": "^4.133.0"
   },
   "engines": {
     "node": ">=20"
