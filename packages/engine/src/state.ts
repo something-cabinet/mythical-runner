@@ -3,11 +3,26 @@ import type { Job } from './jobs.js';
 import type { Token } from './scoring.js';
 import type { RaceNumber } from './tracks/index.js';
 
-/** How many racers each player drafts, and therefore how many races there are. */
-export const RACERS_PER_PLAYER = 4;
 export const RACE_COUNT = 4;
 export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 6;
+
+/**
+ * How many racers one player runs in a single race.
+ *
+ * One, except in the two-player variant: "Both players simultaneously pick 2 different
+ * racers for each race, so 4 racers will be on the track to start." Everything downstream
+ * — how many racers get drafted, how long the draft runs, how many racers a player moves
+ * on their turn — falls out of this number rather than being special-cased per rule.
+ */
+export function racersPerRace(playerCount: number): number {
+  return playerCount === 2 ? 2 : 1;
+}
+
+/** How many racers each player drafts: enough for every race. */
+export function racersPerPlayer(playerCount: number): number {
+  return RACE_COUNT * racersPerRace(playerCount);
+}
 
 /** Racers that must cross the line before a race ends. */
 export const FINISHERS_PER_RACE = 2;
@@ -75,7 +90,11 @@ export interface PendingDecision {
 export interface DecisionOption {
   readonly id: ChoiceId;
   readonly label: string;
-  /** Optional target for UI highlighting (a racer, a space). */
+  /**
+   * What the option is about, for the client to illustrate: a racer (highlighted on the
+   * board, and shown as a card with its power) or a space. The racer need not be racing —
+   * Egg picks among three drawn straight from the deck.
+   */
   readonly target?: { readonly t: 'racer'; readonly racerId: RacerId } | { readonly t: 'space'; readonly index: number };
 }
 
@@ -85,11 +104,14 @@ export type Phase =
   /** Roll-off to determine draft order. Highest unique roll drafts first. */
   | { readonly t: 'draftRoll'; readonly rolls: Readonly<Record<PlayerId, number | null>> }
   /**
-   * Snake draft. `pick` counts picks made so far across all four rounds, so the current
-   * round is `floor(pick / playerCount)` and even rounds run forward, odd rounds reverse.
+   * Snake draft. `pick` counts picks made so far, so the current round is
+   * `floor(pick / playerCount)`; even rounds run forward, odd rounds reverse.
    *
-   * Cards are dealt in waves of `2 * playerCount` face-up into `layout`; a wave covers two
-   * rounds and is exhausted exactly as the next one is dealt.
+   * Cards are dealt face-up into `layout` a line at a time, and each new line starts one
+   * seat further along — "repeat this process, starting with the player to the left of the
+   * start player". A line is two rounds per racer each player will run, so it is consumed
+   * exactly as the next is dealt: 2 x playerCount normally, and 8 in the two-player
+   * variant, whose line of 8 gives the rulebook's ABBAABBA and then BAABBAAB.
    */
   | {
       readonly t: 'draft';
@@ -98,18 +120,35 @@ export type Phase =
       readonly order: readonly PlayerId[];
       readonly pick: number;
     }
-  /** Simultaneous secret selection of this race's racer. */
+  /**
+   * Simultaneous secret selection of this race's racers — one each, or two in the
+   * two-player variant. A player is done when they hold `racersPerRace` of them.
+   */
   | {
       readonly t: 'commit';
       readonly raceNo: RaceNumber;
       /** SECRET until every player has committed. Stripped per-player by redact(). */
-      readonly committed: Readonly<Record<PlayerId, RacerId | null>>;
+      readonly committed: Readonly<Record<PlayerId, readonly RacerId[]>>;
     }
   /** The race itself. */
   | {
       readonly t: 'racing';
       readonly raceNo: RaceNumber;
       readonly active: PlayerId;
+      /**
+       * The active player's racers that have yet to move this turn: "you use each of your
+       * racers in the order you want", so the player picks which of these goes next.
+       * Outside the two-player variant this is always the one racer they have.
+       */
+      readonly toMove: readonly RacerId[];
+      /** The racer whose turn is resolving right now; null between racers. */
+      readonly moving: RacerId | null;
+      /**
+       * Players who have finished a turn in this race. A player's *first* turn moves only
+       * one racer — "on each player's first turn, they pick one racer to use" — and every
+       * turn after it moves all of them.
+       */
+      readonly opened: readonly PlayerId[];
       /** In finishing order. The race ends when this reaches FINISHERS_PER_RACE. */
       readonly finished: readonly PlayerId[];
       /**
@@ -124,12 +163,15 @@ export type Phase =
        */
       readonly claimedSpaces: readonly number[];
       /**
-       * Players who take the next turns out of order, first to last: Skipper's "I go next
+       * Racers that take the next turns out of order, first to last: Skipper's "I go next
        * in turn order" and Genius's "I take another turn after this one". Consumed one per
        * hand-off; once empty, turn order continues clockwise from whoever went last, which
        * is what "after I go, turn order continues to my left" asks for.
+       *
+       * Racers rather than players, because that is what the powers say: a Genius sharing a
+       * team with another racer earns the extra turn for itself, not for its teammate.
        */
-      readonly nextUp: readonly PlayerId[];
+      readonly nextUp: readonly RacerId[];
       /**
        * Counts turns begun this race. A turn can span many actions while powers wait on
        * questions, so this — not `step` — is what "this turn" means to a power that has to
@@ -222,8 +264,8 @@ export type RedactedPhase =
   | {
       readonly t: 'commit';
       readonly raceNo: RaceNumber;
-      /** Your own choice, or null. */
-      readonly yourCommit: RacerId | null;
+      /** Your own choices so far, in the order you locked them in. */
+      readonly yourCommit: readonly RacerId[];
       /** Who has locked in, without revealing what. */
       readonly committedBy: readonly PlayerId[];
     };

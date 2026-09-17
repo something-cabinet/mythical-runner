@@ -429,6 +429,25 @@ select {
   box-shadow: 0 0 0 2px var(--surface);
 }
 
+/* A racer token carries art rather than initials, so the disc becomes its frame. The art
+   is inset far enough to sit inside the circle, which leaves a ring of the owner's seat
+   colour showing however opaque the art itself is. */
+.token-sprite {
+  overflow: hidden;
+  padding: calc(var(--size) * 0.13);
+}
+
+.token-sprite img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 50%;
+  /* Art is drawn on transparency and sits on a seat colour, so a light rim keeps dark
+     outlines from vanishing into the darker seat colours. */
+  filter: drop-shadow(0 0 1px rgb(255 255 255 / 0.85));
+}
+
+
 .player-row {
   display: flex;
   align-items: center;
@@ -519,6 +538,36 @@ select {
 
 .racer-card[data-dim='true'] {
   opacity: 0.45;
+}
+
+/* The portrait band. A fixed height keeps a grid row of cards aligned however tall or
+   wide the individual pieces of art are; `contain` means none of them is ever cropped. */
+.racer-card .racer-sprite {
+  display: grid;
+  place-items: center;
+  height: 96px;
+  margin: -2px -2px 2px;
+  border-radius: calc(var(--radius) - 4px);
+  background:
+    radial-gradient(circle at 50% 120%, color-mix(in srgb, var(--accent-bg) 22%, transparent), transparent 70%),
+    color-mix(in srgb, var(--border) 45%, var(--surface));
+}
+
+.racer-card .racer-sprite img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+/* The stand-in is opaque white and square, so it is cropped to a disc rather than left to
+   read as a blank panel: a plain grey face where a portrait will go. */
+.racer-card .racer-sprite img[data-placeholder='true'] {
+  width: 70px;
+  height: 70px;
+  object-fit: cover;
+  border-radius: 50%;
+  opacity: 0.7;
 }
 
 .racer-card .racer-name {
@@ -672,6 +721,7 @@ select {
   }
 }
 
+/* The fallback for a racer with no art yet. */
 .board .piece-label {
   font-size: 15px;
   font-weight: 850;
@@ -679,6 +729,13 @@ select {
   dominant-baseline: central;
   fill: #1a1523;
   pointer-events: none;
+}
+
+/* Clipped to the disc by `#piece-disc`; the white rim keeps dark linework legible on the
+   darker seat colours, the same trick the list tokens use. */
+.board .piece-sprite {
+  pointer-events: none;
+  filter: drop-shadow(0 0 1px rgb(255 255 255 / 0.9));
 }
 
 /* Tokens share hues with the spaces, so a dark ring keeps them apart. */
@@ -744,10 +801,6 @@ select {
   transition: opacity 400ms ease;
 }
 
-.board .dice-stale {
-  opacity: 0.35;
-}
-
 .board .dice-body {
   transform-box: fill-box;
   transform-origin: center;
@@ -799,6 +852,12 @@ select {
   font-weight: 900;
   text-anchor: middle;
   dominant-baseline: central;
+}
+
+.board .dice-maths {
+  fill: #ffd86b;
+  font-size: 23px;
+  font-weight: 800;
 }
 
 .board .dice-label {
@@ -930,6 +989,39 @@ select {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
   gap: 10px;
+}
+
+/* Racer cards as choices, e.g. Egg's three hatchlings. Tighter than the draft grid and
+   capped in height: the bar has to leave the board visible on a phone. */
+.actionbar .racer-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.actionbar .racer-card {
+  min-height: 0;
+  padding: 10px;
+  gap: 4px;
+}
+
+/* The bar has to leave the board visible, so the portrait shrinks rather than the text. */
+.actionbar .racer-card .racer-sprite {
+  height: 56px;
+}
+
+.racer-card .racer-pick {
+  margin-top: auto;
+  align-self: flex-start;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent-bg);
+}
+
+.racer-card:disabled .racer-pick {
+  color: var(--faint);
 }
 
 .waiting {

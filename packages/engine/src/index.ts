@@ -29,6 +29,7 @@ export {
   racerName,
   racerText,
 } from './characters/registry.js';
+export { powerOf, copyTarget } from './characters/powers.js';
 export { initGame, applyAction, legalActions, type ApplyResult } from './reducer/index.js';
 export { currentDrafter } from './reducer/draft.js';
 export { hostOf } from './reducer/lobby.js';

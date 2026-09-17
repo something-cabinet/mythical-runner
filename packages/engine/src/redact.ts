@@ -1,5 +1,5 @@
 import type { PlayerId, RacerId } from './ids.js';
-import type { GameState, PlayerView, RedactedPhase } from './state.js';
+import { racersPerRace, type GameState, type PlayerView, type RedactedPhase } from './state.js';
 
 /**
  * Produces the view one player is allowed to see.
@@ -40,11 +40,12 @@ function stripResume(pending: NonNullable<GameState['pending']>): PlayerView['pe
 function redactPhase(phase: GameState['phase'], viewer: PlayerId): RedactedPhase {
   if (phase.t !== 'commit') return phase;
 
-  const entries = Object.entries(phase.committed) as [PlayerId, RacerId | null][];
+  const entries = Object.entries(phase.committed) as [PlayerId, readonly RacerId[]][];
+  const need = racersPerRace(entries.length);
   return {
     t: 'commit',
     raceNo: phase.raceNo,
-    yourCommit: phase.committed[viewer] ?? null,
-    committedBy: entries.filter(([, r]) => r !== null).map(([p]) => p),
+    yourCommit: phase.committed[viewer] ?? [],
+    committedBy: entries.filter(([, r]) => r.length >= need).map(([p]) => p),
   };
 }

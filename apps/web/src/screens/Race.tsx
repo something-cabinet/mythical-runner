@@ -1,8 +1,8 @@
 import { FINISH, type RacerId, type RaceNumber } from '@mr/engine';
 import { useState } from 'react';
 import { Board } from '../components/Board';
-import { ActionBar, RacerToken, Standings, Waiting } from '../components/bits';
-import { ordinal, playerName, powerText, racerName, rawName } from '../lib/present';
+import { ActionBar, RacerCard, RacerToken, Standings, Waiting } from '../components/bits';
+import { borrowedPower, ordinal, playerName, powerText, racerName, rawName } from '../lib/present';
 import { legalOf, useRoomContext } from '../lib/roomContext';
 
 /**
@@ -16,7 +16,12 @@ export function RaceScreen() {
   if (view.phase.t !== 'racing' && view.phase.t !== 'scored') return null;
   const phase = view.phase;
   const racing = phase.t === 'racing';
-  const active = racing ? phase.active : null;
+  // The racer up right now, and everyone the active player still has to move this turn.
+  const upNow = racing ? (phase.moving ?? (phase.toMove.length === 1 ? (phase.toMove[0] ?? null) : null)) : null;
+  const upThisTurn = racing ? [...phase.toMove, ...(phase.moving ? [phase.moving] : [])] : [];
+  // An opening turn moves one racer of the player's choosing, so the others are candidates
+  // rather than a queue.
+  const opening = racing && !phase.opened.includes(phase.active);
 
   const targets: RacerId[] = (view.pending?.options ?? []).flatMap((o) =>
     o.target?.t === 'racer' ? [o.target.racerId] : [],
@@ -54,9 +59,7 @@ export function RaceScreen() {
               roll={board.roll}
               activeRacer={
                 // Follow the die while its move plays out; the server has already moved on.
-                board.roll && !board.roll.stale
-                  ? board.roll.racerId
-                  : (view.board.find((r) => r.owner === active)?.racerId ?? null)
+                board.roll ? board.roll.racerId : upNow
               }
             />
           </section>
@@ -66,31 +69,42 @@ export function RaceScreen() {
               <h2 id="field-heading" className="section-title">
                 On the track
               </h2>
-              {field.map((r) => (
-                <div key={r.racerId} className="field-row" data-out={r.eliminated}>
-                  <RacerToken view={view} racer={r.racerId} owner={r.owner} />
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 750 }}>
-                      {racerName(r.racerId)}{' '}
-                      <span className="who">· {r.owner === view.you ? 'you' : rawName(view, r.owner)}</span>
+              {field.map((r) => {
+                // An Egg that hatched into Ostrich runs Ostrich's card, so that is the name
+                // and the power worth reading; its own name stays alongside, because the
+                // token on the track is still an Egg.
+                const power = borrowedPower(view, r);
+                return (
+                  <div key={r.racerId} className="field-row" data-out={r.eliminated}>
+                    <RacerToken view={view} racer={r.racerId} owner={r.owner} />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 750 }}>
+                        {racerName(power ?? r.racerId)}{' '}
+                        {power && <span className="who">(as {racerName(r.racerId)}) </span>}
+                        <span className="who">· {r.owner === view.you ? 'you' : rawName(view, r.owner)}</span>
+                      </div>
+                      <p className="power">{powerText(power ?? r.racerId)}</p>
                     </div>
-                    <p className="power">{powerText(r.racerId)}</p>
+                    <div className="stack" style={{ gap: 4, alignItems: 'flex-end' }}>
+                      {arrived(r) && r.finishedRank !== null ? (
+                        <span className="tag tag-gold">{ordinal(r.finishedRank)}</span>
+                      ) : r.eliminated ? (
+                        <span className="tag tag-bad">out</span>
+                      ) : (
+                        <span className="tag num">
+                          {drawn(r.racerId, r.pos) === 0 ? 'start' : `space ${Math.min(drawn(r.racerId, r.pos), FINISH - 1)}`}
+                        </span>
+                      )}
+                      {r.tripped && <span className="tag tag-bad">tripped</span>}
+                      {upThisTurn.includes(r.racerId) && r.finishedRank === null && (
+                        <span className="tag tag-gold">
+                          {r.racerId === upNow ? 'turn' : opening ? 'choose' : 'to go'}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <div className="stack" style={{ gap: 4, alignItems: 'flex-end' }}>
-                    {arrived(r) && r.finishedRank !== null ? (
-                      <span className="tag tag-gold">{ordinal(r.finishedRank)}</span>
-                    ) : r.eliminated ? (
-                      <span className="tag tag-bad">out</span>
-                    ) : (
-                      <span className="tag num">
-                        {drawn(r.racerId, r.pos) === 0 ? 'start' : `space ${Math.min(drawn(r.racerId, r.pos), FINISH - 1)}`}
-                      </span>
-                    )}
-                    {r.tripped && <span className="tag tag-bad">tripped</span>}
-                    {r.owner === active && r.finishedRank === null && <span className="tag tag-gold">turn</span>}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </section>
           </div>
 
@@ -154,10 +168,11 @@ function StatusBanner() {
     text = mine ? `${racerName(pending.source)} needs your decision` : `Waiting on ${playerName(view, pending.player)} — ${racerName(pending.source)}`;
   } else {
     mine = phase.active === view.you;
-    const racer = view.board.find((r) => r.owner === phase.active);
-    text = mine
-      ? `Your turn${racer ? ` — ${racerName(racer.racerId)}` : ''}`
-      : `${playerName(view, phase.active)}'s turn${racer ? ` — ${racerName(racer.racerId)}` : ''}`;
+    // With two racers to run, the turn belongs to the player until they have moved both;
+    // name whichever one is up, or say there is still a choice to make.
+    const up = phase.moving ?? (phase.toMove.length === 1 ? phase.toMove[0] : null);
+    const which = up ? ` — ${racerName(up)}` : phase.toMove.length > 1 ? ' — pick a racer' : '';
+    text = mine ? `Your turn${which}` : `${playerName(view, phase.active)}'s turn${which}`;
   }
 
   return (
@@ -168,7 +183,7 @@ function StatusBanner() {
 }
 
 function RaceActions() {
-  const { view, message, canAct, send } = useRoomContext();
+  const { view, message, canAct, send, board } = useRoomContext();
   if (view.phase.t === 'scored') {
     return (
       <ActionBar wide>
@@ -181,51 +196,104 @@ function RaceActions() {
   const pending = view.pending;
 
   const decisions = legalOf(message, 'race/decide');
-  const roll = legalOf(message, 'race/roll')[0];
-  const mine = view.board.find((r) => r.owner === view.you);
+  const rolls = legalOf(message, 'race/roll');
+  const myRacers = view.board.filter((r) => r.owner === view.you);
 
   if (pending && decisions.length > 0) {
+    // A power asking about a roll asks while that roll is still tumbling across the
+    // infield. Nobody should have to answer for a die they have not seen land, so the
+    // choices wait for the board to catch up.
+    const held = !canAct || board.animating;
+    const choices = decisions.map((d) => ({
+      action: d,
+      option: pending.options.find((o) => o.id === d.choice),
+    }));
+    // An option about a racer gets that racer's card, as in the draft: Egg is choosing
+    // between three powers, and three names say nothing about what they do. The verb —
+    // "DUEL!", "Swap with Gunk" — stays on the card as its button text.
+    const cards = choices.flatMap(({ action, option }) =>
+      option?.target?.t === 'racer' ? [{ action, option, racer: option.target.racerId }] : [],
+    );
+    const plain = choices.filter(({ option }) => option?.target?.t !== 'racer');
+
     return (
       <ActionBar wide>
         <p className="prompt">{pending.prompt}</p>
-        <div className="options">
-          {decisions.map((d, i) => {
-            const label = pending.options.find((o) => o.id === d.choice)?.label ?? d.choice;
-            return (
+        {cards.length > 0 && (
+          <div className="racer-grid">
+            {cards.map(({ action, option, racer }) => (
+              <RacerCard
+                key={action.choice}
+                racer={racer}
+                disabled={held}
+                onSelect={() => send(action)}
+                footer={
+                  <span className="racer-pick">
+                    {option.label === racerName(racer) ? 'Choose' : option.label}
+                  </span>
+                }
+              />
+            ))}
+          </div>
+        )}
+        {plain.length > 0 && (
+          <div className="options">
+            {plain.map(({ action, option }, i) => (
               <button
-                key={d.choice}
+                key={action.choice}
                 type="button"
-                className={`btn btn-lg${i === 0 ? ' btn-primary' : ''}`}
-                disabled={!canAct}
-                onClick={() => send(d)}
+                className={`btn btn-lg${cards.length === 0 && i === 0 ? ' btn-primary' : ''}`}
+                disabled={held}
+                onClick={() => send(action)}
               >
-                {label}
+                {option?.label ?? action.choice}
               </button>
-            );
-          })}
+            ))}
+          </div>
+        )}
+      </ActionBar>
+    );
+  }
+
+  if (rolls.length > 0) {
+    // One button per racer still to move: "you use each of your racers in the order you
+    // want", so the choice of who goes next is the player's, one at a time.
+    const label = (racerId: RacerId | undefined): string => {
+      const racer = racerId ? view.board.find((r) => r.racerId === racerId) : myRacers[0];
+      const verb = racer?.tripped ? 'Stand up' : 'Roll';
+      return rolls.length > 1 && racer ? `${verb} · ${racerName(racer.racerId)}` : verb;
+    };
+    return (
+      <ActionBar wide>
+        {rolls.length > 1 && <p className="prompt">Which racer goes next?</p>}
+        <div className={rolls.length > 1 ? 'options' : undefined}>
+          {rolls.map((action, i) => (
+            <button
+              key={action.racerId ?? i}
+              type="button"
+              className={`btn btn-lg${i === 0 ? ' btn-primary' : ''}${rolls.length > 1 ? '' : ' btn-block'}`}
+              disabled={!canAct}
+              onClick={() => send(action)}
+            >
+              {label(action.racerId)}
+            </button>
+          ))}
         </div>
       </ActionBar>
     );
   }
 
-  if (roll) {
-    return (
-      <ActionBar wide>
-        <button type="button" className="btn btn-primary btn-lg btn-block" disabled={!canAct} onClick={() => send(roll)}>
-          {mine?.tripped ? 'Stand back up' : 'Roll'}
-        </button>
-      </ActionBar>
-    );
-  }
-
-  const done = mine && (mine.finishedRank !== null || mine.eliminated || mine.pos >= FINISH);
+  const done =
+    myRacers.length > 0 &&
+    myRacers.every((r) => r.finishedRank !== null || r.eliminated || r.pos >= FINISH);
+  const out = myRacers.every((r) => r.eliminated);
   return (
     <ActionBar wide>
       <Waiting>
         {pending
           ? `${playerName(view, pending.player)} ${pending.player === view.you ? 'are' : 'is'} deciding…`
           : done
-            ? `Your racer is ${mine?.eliminated ? 'out' : 'home'} — ${playerName(view, phase.active)}'s turn`
+            ? `Your ${myRacers.length > 1 ? 'racers are' : 'racer is'} ${out ? 'out' : 'home'} — ${playerName(view, phase.active)}'s turn`
             : `${playerName(view, phase.active)}'s turn`}
       </Waiting>
     </ActionBar>

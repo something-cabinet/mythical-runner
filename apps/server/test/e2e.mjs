@@ -248,12 +248,22 @@ const secrecy = scenario('Commits stay secret until everyone has chosen', async 
   stopA();
   stopB();
 
-  const pick = a.state.legal.find((x) => x.t === 'race/commit');
-  a.send(pick);
+  // Two players race two racers each, so A locks in both before they count as committed.
+  const picks = [];
+  for (let i = 0; i < 2; i++) {
+    const next = a.state.legal.find((x) => x.t === 'race/commit' && !picks.some((p) => p.racerId === x.racerId));
+    picks.push(next);
+    a.send(next);
+    await a.waitFor((m) => m.view.phase.yourCommit?.length === i + 1, 5000, `A locked in ${i + 1}`);
+  }
+  const pick = picks[0];
   const bView = await b.waitFor((m) => m.view.phase.committedBy?.length === 1, 5000, 'A committed');
 
   check(bView.view.phase.committedBy.includes(a.who.playerId), "B can see that A has committed");
-  check(bView.view.phase.yourCommit === null, "B's view carries only B's own (empty) commit");
+  check(
+    Array.isArray(bView.view.phase.yourCommit) && bView.view.phase.yourCommit.length === 0,
+    "B's view carries only B's own (empty) commit",
+  );
 
   // A's racer legitimately appears in `hands`: drafted teams are public, because the draft
   // happens face-up. What must not happen is anything revealing WHICH of those four A
@@ -262,15 +272,18 @@ const secrecy = scenario('Commits stay secret until everyone has chosen', async 
   check(hands[a.who.playerId].includes(pick.racerId), "A's racer is in A's public drafted hand, as expected");
   const outsideHands = JSON.stringify({ ...bView, view: viewWithoutHands });
   check(
-    !outsideHands.includes(`"${pick.racerId}"`),
-    "nothing outside the public hands reveals which racer A chose",
-    pick.racerId,
+    picks.every((p) => !outsideHands.includes(`"${p.racerId}"`)),
+    "nothing outside the public hands reveals which racers A chose",
+    picks.map((p) => p.racerId).join(','),
   );
   check(!bView.view.used[a.who.playerId].includes(pick.racerId), "A's choice is not yet marked used");
   check(bView.events.length === 0, 'committing emits no event another player could read');
 
-  const aView = await a.waitFor((m) => m.view.phase.yourCommit !== null, 5000);
-  check(aView.view.phase.yourCommit === pick.racerId, 'A sees their own commit');
+  const aView = await a.waitFor((m) => m.view.phase.yourCommit?.length === 2, 5000);
+  check(
+    picks.every((p) => aView.view.phase.yourCommit.includes(p.racerId)),
+    'A sees their own commits',
+  );
 
   [a, b].forEach((c) => c.close());
 });

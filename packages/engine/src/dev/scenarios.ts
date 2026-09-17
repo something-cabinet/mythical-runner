@@ -12,6 +12,7 @@
  */
 
 import { applyAction, initGame, legalActions } from '../reducer/index.js';
+import { currentDrafter } from '../reducer/draft.js';
 import { playGame } from './hotseat.js';
 import type { Action } from '../actions.js';
 import type { GameEvent } from '../events.js';
@@ -44,7 +45,7 @@ interface Placement {
 /** Builds a mid-race state — on the Mild Mile, whose spaces are all inert, unless `raceNo` says otherwise. */
 function raceState(placements: readonly Placement[], active: string, raceNo: 1 | 2 | 3 | 4 = 1): GameState {
   const base = initGame(4242);
-  const players = placements.map((p) => playerId(p.player));
+  const players = [...new Set(placements.map((p) => p.player))].map(playerId);
 
   const board: RacerState[] = placements.map((p) => ({
     owner: playerId(p.player),
@@ -61,13 +62,22 @@ function raceState(placements: readonly Placement[], active: string, raceNo: 1 |
     ...base,
     players: players.map((id, i) => ({ id, name: `P${i + 1}`, connected: true })),
     seatOrder: players,
-    hands: Object.fromEntries(placements.map((p) => [p.player, [racerId(p.racer)]])),
-    used: Object.fromEntries(placements.map((p) => [p.player, [racerId(p.racer)]])),
+    // Grouped, because a player can have more than one racer on the track in the
+    // two-player variant.
+    hands: Object.fromEntries(
+      players.map((p) => [p, board.filter((r) => r.owner === p).map((r) => r.racerId)]),
+    ),
+    used: Object.fromEntries(
+      players.map((p) => [p, board.filter((r) => r.owner === p).map((r) => r.racerId)]),
+    ),
     scores: Object.fromEntries(players.map((p) => [p, []])),
     phase: {
       t: 'racing',
       raceNo,
       active: playerId(active),
+      toMove: board.filter((r) => r.owner === playerId(active)).map((r) => r.racerId),
+      moving: null,
+      opened: [],
       finished: [],
       stalledTurns: 0,
       claimedSpaces: [],
@@ -95,7 +105,11 @@ const logLines = (events: readonly GameEvent[]): string =>
     .map((e) => (e as { text: string }).text)
     .join(' | ');
 
-const roll = (by: string): Action => ({ t: 'race/roll', by: playerId(by) });
+const roll = (by: string, racer?: string): Action => ({
+  t: 'race/roll',
+  by: playerId(by),
+  ...(racer ? { racerId: racerId(racer) } : {}),
+});
 const decide = (by: string, choice: string): Action => ({
   t: 'race/decide',
   by: playerId(by),
@@ -180,7 +194,7 @@ function commitState(
     hands: Object.fromEntries(Object.entries(hands).map(([p, rs]) => [p, rs.map(racerId)])),
     used: Object.fromEntries(players.map((p) => [p, []])),
     scores: Object.fromEntries(players.map((p) => [p, []])),
-    phase: { t: 'commit', raceNo, committed: Object.fromEntries(players.map((p) => [p, null])) },
+    phase: { t: 'commit', raceNo, committed: Object.fromEntries(players.map((p) => [p, []])) },
     ...extra,
   };
 }
@@ -822,13 +836,31 @@ scenario('Flip Flop — "swap spaces with another racer instead of rolling"', ()
 scenario('Blimp — "+3 before the second corner, -1 on or after it"', () => {
   const before = raceState([{ player: 'p1', racer: 'blimp', pos: 5 }], 'p1');
   const b = rollFor(before, 'p1', 6);
-  const rolledBefore = b.events.find((e) => e.t === 'dice/rolled') as { modifiedBy?: string };
+  const rolledBefore = b.events.find((e) => e.t === 'dice/rolled') as {
+    value: number;
+    natural?: number;
+    modifiedBy?: string;
+  };
   check(rolledBefore.modifiedBy === racerId('blimp'), 'gets +3 before the corner');
+  check(
+    rolledBefore.natural === rolledBefore.value - 3,
+    'reports the die face alongside the boosted move',
+    `natural ${rolledBefore.natural}, value ${rolledBefore.value}`,
+  );
 
   const after = raceState([{ player: 'p1', racer: 'blimp', pos: 20 }], 'p1');
   const a = rollFor(after, 'p1', 1);
-  const rolledAfter = a.events.find((e) => e.t === 'dice/rolled') as { modifiedBy?: string };
+  const rolledAfter = a.events.find((e) => e.t === 'dice/rolled') as {
+    value: number;
+    natural?: number;
+    modifiedBy?: string;
+  };
   check(rolledAfter.modifiedBy === racerId('blimp'), 'gets -1 on or after the corner');
+  check(
+    rolledAfter.natural === rolledAfter.value + 1,
+    'and when it drags the move down',
+    `natural ${rolledAfter.natural}, value ${rolledAfter.value}`,
+  );
 });
 
 // --- Phase 5, wave 2 ----------------------------------------------------------
@@ -843,9 +875,24 @@ scenario('Alchemist — "When I roll a 1 or 2... I can move 4 instead"', () => {
   );
   const asked = rollUntil(s, 'p1', (r) => pendingDie(r.state) === 2);
   check(asked.state.pending?.player === playerId('p1'), 'asks after rolling a 2');
+  // The client puts the die on the table from this event, so it has to come first: being
+  // asked about a 2 nobody has seen yet is the wrong way round.
+  const thrown = asked.events.findIndex((e) => e.t === 'dice/thrown');
+  const question = asked.events.findIndex((e) => e.t === 'decision/requested');
+  check(thrown >= 0 && thrown < question, 'the die is thrown before the question', `${thrown} vs ${question}`);
 
   const transmuted = applyAction(asked.state, decide('p1', 'transmute'));
   check(posOf(transmuted.state, 'alchemist') === 7, 'moves 4 instead', `pos ${posOf(transmuted.state, 'alchemist')}`);
+  const settled = transmuted.events.find((e) => e.t === 'dice/rolled') as {
+    value: number;
+    natural?: number;
+    replaced?: boolean;
+  };
+  check(
+    settled.natural === 2 && settled.value === 4 && settled.replaced === true,
+    'and the move stands in place of the roll rather than adding to it',
+    `natural ${settled.natural}, value ${settled.value}, replaced ${settled.replaced}`,
+  );
 
   const kept = applyAction(asked.state, decide('p1', 'keep'));
   check(posOf(kept.state, 'alchemist') === 5, 'or keeps the 2', `pos ${posOf(kept.state, 'alchemist')}`);
@@ -953,14 +1000,24 @@ scenario('Genius — "If I\'m right, I take another turn after this one"', () =>
 });
 
 scenario('Egg — "draw 3 new racers from the deck and pick one. I have its powers"', () => {
-  const s = commitState({ p1: ['egg'], p2: ['coach'] }, 1);
+  // Three seats: two players would be playing the variant, which asks for two racers each
+  // and has nothing to do with what Egg does.
+  const s = commitState({ p1: ['egg'], p2: ['coach'], p3: ['legs'] }, 1);
   const r1 = applyAction(s, commit('p1', 'egg'));
-  const r2 = applyAction(r1.state, commit('p2', 'coach'));
+  const r2 = applyAction(applyAction(r1.state, commit('p2', 'coach')).state, commit('p3', 'legs'));
   const options = r2.state.pending?.options.map((o) => String(o.id).slice('power:'.length)) ?? [];
 
   check(r2.state.pending?.source === racerId('egg'), 'asks before the race starts');
   check(options.length === 3 && new Set(options).size === 3, 'three different racers', options.join(','));
-  check(!options.includes('egg') && !options.includes('coach'), 'none of them drafted');
+  check(
+    !options.includes('egg') && !options.includes('coach') && !options.includes('legs'),
+    'none of them drafted',
+  );
+  // The client draws each choice as that racer's card, which it can only do from the target.
+  const targeted = (r2.state.pending?.options ?? []).every(
+    (o, i) => o.target?.t === 'racer' && o.target.racerId === racerId(options[i] ?? ''),
+  );
+  check(targeted, 'each option names the racer it offers');
 
   const picked = applyAction(r2.state, decide('p1', `power:${options[0] ?? ''}`));
   check(racerAt(picked.state, 'egg')?.memo['borrowedPower'] === options[0], 'Egg has the chosen power');
@@ -969,15 +1026,20 @@ scenario('Egg — "draw 3 new racers from the deck and pick one. I have its powe
 scenario('Twin — "pick a racer who won a previous race and race with their powers"', () => {
   // p1's Sisyphus won race 1. Twin borrowing it must also get Sisyphus' "before race"
   // chips: "I still get any 'before race' powers."
-  const s = commitState({ p1: ['sisyphus', 'twin'], p2: ['coach', 'legs'] }, 2, {
-    used: { [playerId('p1')]: [racerId('sisyphus')], [playerId('p2')]: [racerId('coach')] },
+  const s = commitState({ p1: ['sisyphus', 'twin'], p2: ['coach', 'legs'], p3: ['gunk', 'banana'] }, 2, {
+    used: {
+      [playerId('p1')]: [racerId('sisyphus')],
+      [playerId('p2')]: [racerId('coach')],
+      [playerId('p3')]: [racerId('banana')],
+    },
     scores: {
       [playerId('p1')]: [{ kind: 'gold', value: 3, raceNo: 1 }],
       [playerId('p2')]: [{ kind: 'silver', value: 1, raceNo: 1 }],
+      [playerId('p3')]: [],
     },
   });
   const r1 = applyAction(s, commit('p1', 'twin'));
-  const r2 = applyAction(r1.state, commit('p2', 'legs'));
+  const r2 = applyAction(applyAction(r1.state, commit('p2', 'legs')).state, commit('p3', 'gunk'));
   const ids = r2.state.pending?.options.map((o) => String(o.id)) ?? [];
   check(ids.includes('power:sisyphus') && !ids.includes('power:coach'), 'only past winners are offered', ids.join(','));
 
@@ -1053,8 +1115,11 @@ scenario('Rocket Scientist — "double that number. If I do, I trip"', () => {
 });
 
 scenario('Sisyphus — "Before my race, I take 4 point chips"', () => {
-  const s = commitState({ p1: ['sisyphus'], p2: ['coach'] }, 1);
-  const r = applyAction(applyAction(s, commit('p1', 'sisyphus')).state, commit('p2', 'coach'));
+  const s = commitState({ p1: ['sisyphus'], p2: ['coach'], p3: ['legs'] }, 1);
+  const r = applyAction(
+    applyAction(applyAction(s, commit('p1', 'sisyphus')).state, commit('p2', 'coach')).state,
+    commit('p3', 'legs'),
+  );
   check(pointsOf(r.state, 'p1') === 4, 'starts the race with 4 points', `points ${pointsOf(r.state, 'p1')}`);
 });
 
@@ -1259,6 +1324,94 @@ scenario('Rematch — back to the lobby with whoever is still here', () => {
   check(state.seed !== away.seed, 'with a fresh seed');
   check(has(events, 'game/rematch'), 'announced');
   check(throws(() => applyAction(played, { t: 'lobby/rematch', by: playerId('nobody-here') })), 'strangers cannot trigger it');
+});
+
+// --- Two-player variant -----------------------------------------------------
+
+scenario('2 players — "snake draft them (ABBAABBA)... do it again, in reverse order"', () => {
+  const order = [playerId('A'), playerId('B')];
+  const drafted = Array.from({ length: 16 }, (_, pick) => String(currentDrafter(order, pick))).join('');
+  check(drafted === 'ABBAABBABAABBAAB', 'ABBAABBA, then BAABBAAB', drafted);
+
+  const three = [playerId('A'), playerId('B'), playerId('C')];
+  const normal = Array.from({ length: 12 }, (_, pick) => String(currentDrafter(three, pick))).join('');
+  // "Repeat this process, starting with the player to the left of the start player."
+  check(normal === 'ABCCBABCAACB', 'and three players snake, then shift a seat', normal);
+});
+
+scenario('2 players — a whole game, two racers each', () => {
+  const { state } = playGame({ seed: 5150, playerCount: 2, bots: 1 });
+  check(state.phase.t === 'gameOver', 'plays to the end');
+  const hands = state.seatOrder.map((p) => (state.hands[p] ?? []).length);
+  check(hands.every((n) => n === 8), 'both players drafted 8 racers', hands.join(','));
+  const used = state.seatOrder.map((p) => (state.used[p] ?? []).length);
+  check(used.every((n) => n === 8), 'and raced all of them, two per race', used.join(','));
+});
+
+scenario('2 players — "on each player’s first turn, they pick one racer to use"', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: 1 },
+      { player: 'p1', racer: 'vanilla-02', pos: 2 },
+      { player: 'p2', racer: 'vanilla-03', pos: 3 },
+      { player: 'p2', racer: 'vanilla-04', pos: 4 },
+    ],
+    'p1',
+  );
+  check(s.board.length === 4, 'four racers on the track');
+
+  const offered = legalActions(s, playerId('p1'));
+  check(
+    offered.length === 2 && offered.every((a) => a.t === 'race/roll'),
+    'either racer may go first',
+    `${offered.length} options`,
+  );
+  check(throws(() => applyAction(s, roll('p1'))), 'but the player has to say which');
+
+  // First turn: one racer, then the turn passes.
+  const first = applyAction(s, roll('p1', 'vanilla-02'));
+  check(moverAt(first.state) === 'p2', 'one racer, then it is p2’s turn', moverAt(first.state));
+
+  const second = applyAction(first.state, roll('p2', 'vanilla-03'));
+  check(moverAt(second.state) === 'p1', 'p2’s opener is one racer too', moverAt(second.state));
+
+  // Second turn round: both racers, in the order the player wants.
+  const both = applyAction(second.state, roll('p1', 'vanilla-01'));
+  check(moverAt(both.state) === 'p1', 'now p1 keeps the turn for their second racer', moverAt(both.state));
+  const left = both.state.phase.t === 'racing' ? [...both.state.phase.toMove].map(String) : [];
+  check(left.join(',') === 'vanilla-02', 'and it is the one that has not gone', left.join(','));
+
+  const passed = applyAction(both.state, roll('p1', 'vanilla-02'));
+  check(moverAt(passed.state) === 'p2', 'only then does the turn pass', moverAt(passed.state));
+  check(
+    throws(() => applyAction(both.state, roll('p1', 'vanilla-01'))),
+    'a racer cannot go twice in one turn',
+  );
+});
+
+scenario('2 players — "the player who received the lower number of points goes first"', () => {
+  let s = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: FINISH - 1 },
+      { player: 'p1', racer: 'vanilla-02', pos: FINISH - 1 },
+      { player: 'p2', racer: 'vanilla-03', pos: 1 },
+      { player: 'p2', racer: 'vanilla-04', pos: 2 },
+    ],
+    'p1',
+  );
+
+  // Play it out: p1's two racers are on the line, so p1 takes both cups.
+  for (let guard = 0; guard < 20 && s.phase.t === 'racing'; guard++) {
+    const who = s.phase.active;
+    const options = legalActions(s, who).filter((a) => a.t === 'race/roll');
+    const next = options[0];
+    if (!next) break;
+    s = applyAction(s, next).state;
+  }
+
+  check(s.phase.t === 'scored', 'the race is over', s.phase.t);
+  check(pointsOf(s, 'p1') > pointsOf(s, 'p2'), 'p1 scored more', `${pointsOf(s, 'p1')} vs ${pointsOf(s, 'p2')}`);
+  check(String(s.trailingPlayer) === 'p2', 'so p2 leads off the next race', String(s.trailingPlayer));
 });
 
 // --- Report -----------------------------------------------------------------

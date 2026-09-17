@@ -6,7 +6,7 @@ import type { GameEvent } from '../events.js';
 import { MAX_PLAYERS, MIN_PLAYERS, type GameState } from '../state.js';
 import { currentDrafter, draftPick, draftRoll } from './draft.js';
 import { addBot, hostOf, join, leave, rematch, removeBot, setConnected, start } from './lobby.js';
-import { beginCommit as _beginCommit, raceCommit } from './commit.js';
+import { beginCommit as _beginCommit, commitSize, raceCommit } from './commit.js';
 import { advanceAfterScoring, endTurn, raceContinue, raceRoll, takeTurn } from './racing.js';
 import { answerPending, runQueue } from './pipeline.js';
 import { finish, hand, makeCtx, used, type Ctx } from './working.js';
@@ -149,11 +149,17 @@ function timeout(ctx: Ctx, a: SystemTimeout, rng: Rng): void {
       return draftPick(ctx, { t: 'draft/pick', by: who, racerId: pick });
     }
     case 'commit': {
+      // Fills every outstanding slot, not just one each: the variant asks for two racers
+      // apiece, and a half-committed player would leave the race unable to start.
       for (const p of [...s.seatOrder]) {
-        if (s.phase.t !== 'commit' || s.phase.committed[p] !== null) continue;
-        const choice = hand(s, p).find((r) => !used(s, p).includes(r));
-        invariant(choice, `player ${p} has no unused racer at timeout`);
-        raceCommit(ctx, { t: 'race/commit', by: p, racerId: choice }, rng);
+        for (;;) {
+          if (s.phase.t !== 'commit') return;
+          const mine = s.phase.committed[p] ?? [];
+          if (mine.length >= commitSize(s)) break;
+          const choice = hand(s, p).find((r) => !used(s, p).includes(r) && !mine.includes(r));
+          invariant(choice, `player ${p} has no unused racer at timeout`);
+          raceCommit(ctx, { t: 'race/commit', by: p, racerId: choice }, rng);
+        }
       }
       return;
     }
@@ -206,15 +212,19 @@ export function legalActions(state: GameState, player: PlayerId): Action[] {
       return s.phase.layout.map((racerId) => ({ t: 'draft/pick', by: player, racerId }));
     }
     case 'commit': {
-      if (s.phase.committed[player] !== undefined && s.phase.committed[player] !== null) return [];
+      const mine = s.phase.committed[player];
+      if (!mine || mine.length >= commitSize(s)) return [];
       const owned = s.hands[player] ?? [];
       const spent = s.used[player] ?? [];
       return owned
-        .filter((r) => !spent.includes(r))
+        .filter((r) => !spent.includes(r) && !mine.includes(r))
         .map((racerId) => ({ t: 'race/commit', by: player, racerId }));
     }
-    case 'racing':
-      return s.phase.active === player ? [{ t: 'race/roll', by: player }] : [];
+    case 'racing': {
+      // One per racer still to move: which of them goes next is the player's call.
+      if (s.phase.active !== player || s.phase.moving !== null) return [];
+      return s.phase.toMove.map((racerId) => ({ t: 'race/roll', by: player, racerId }));
+    }
 
     case 'scored':
       return s.seatOrder.includes(player) ? [{ t: 'race/continue', by: player }] : [];

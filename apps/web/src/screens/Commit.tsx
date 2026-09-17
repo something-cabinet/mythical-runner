@@ -1,11 +1,12 @@
-import type { RacerId } from '@mr/engine';
-import { useState } from 'react';
+import { racersPerRace, type RacerId } from '@mr/engine';
+import { useEffect, useState } from 'react';
 import { ActionBar, PlayerToken, RacerCard, Waiting } from '../components/bits';
 import { awardsFor, listNames, racerName, rawName, trackLabel, waitingOn } from '../lib/present';
 import { legalOf, useRoomContext } from '../lib/roomContext';
 
 /**
- * Secret selection of this race's racer.
+ * Secret selection of this race's racer — or racers: the two-player variant enters two
+ * each, locked in one at a time.
  *
  * Two taps — select, then lock in — because the choice is irrevocable and a stray tap
  * while scrolling a phone should not spend a racer.
@@ -13,6 +14,10 @@ import { legalOf, useRoomContext } from '../lib/roomContext';
 export function CommitScreen() {
   const { view, message, canAct, send } = useRoomContext();
   const [selected, setSelected] = useState<RacerId | null>(null);
+  const entered = view.phase.t === 'commit' ? view.phase.yourCommit.length : 0;
+  // A racer just locked in is no longer a legal choice; clear the selection so the next
+  // pick starts from nothing.
+  useEffect(() => setSelected(null), [entered]);
   if (view.phase.t !== 'commit') return null;
 
   const phase = view.phase;
@@ -21,6 +26,8 @@ export function CommitScreen() {
   const hand = view.hands[view.you] ?? [];
   const used = view.used[view.you] ?? [];
   const locked = phase.yourCommit;
+  const need = racersPerRace(view.seatOrder.length);
+  const done = locked.length >= need;
   const others = waitingOn(view).filter((p) => p !== view.you);
 
   const lockIn = (): void => {
@@ -35,10 +42,13 @@ export function CommitScreen() {
           <p className="section-title">
             Race {phase.raceNo} of 4 · {trackLabel(phase.raceNo)}
           </p>
-          <h1 style={{ fontSize: '1.5rem' }}>{locked ? 'Locked in' : 'Choose your racer'}</h1>
+          <h1 style={{ fontSize: '1.5rem' }}>
+            {done ? 'Locked in' : need > 1 ? `Choose ${need - locked.length} more racer${need - locked.length === 1 ? '' : 's'}` : 'Choose your racer'}
+          </h1>
           <p className="muted">
-            1st takes {awards.gold} points, 2nd takes {awards.silver}. Everyone reveals at once — nobody sees your pick
-            until then.
+            1st takes {awards.gold} points, 2nd takes {awards.silver}. Everyone reveals at once — nobody sees your{' '}
+            {need > 1 ? 'picks' : 'pick'} until then.
+            {need > 1 && ' With two players you race two different racers each.'}
           </p>
         </section>
 
@@ -46,14 +56,14 @@ export function CommitScreen() {
           <div className="racer-grid">
             {hand.map((racer) => {
               const spent = used.includes(racer);
-              const chosen = locked === racer;
+              const chosen = locked.includes(racer);
               return (
                 <RacerCard
                   key={racer}
                   racer={racer}
                   selected={selected === racer || chosen}
-                  dim={spent || (locked !== null && !chosen)}
-                  disabled={spent || locked !== null || !canAct}
+                  dim={spent || (done && !chosen)}
+                  disabled={spent || chosen || done || !canAct}
                   onSelect={() => setSelected(racer)}
                   footer={
                     spent ? (
@@ -89,7 +99,7 @@ export function CommitScreen() {
       </main>
 
       <ActionBar>
-        {locked === null && legal.length > 0 ? (
+        {!done && legal.length > 0 ? (
           <button type="button" className="btn btn-primary btn-lg btn-block" disabled={!selected || !canAct} onClick={lockIn}>
             {selected ? `Lock in ${racerName(selected)}` : 'Tap a racer to choose'}
           </button>

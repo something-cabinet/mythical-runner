@@ -79,6 +79,11 @@ export interface RaceCommit {
 export interface RaceRoll {
   readonly t: 'race/roll';
   readonly by: PlayerId;
+  /**
+   * Which of your racers is going. Optional when only one of them is left to move, which
+   * is every turn outside the two-player variant.
+   */
+  readonly racerId?: RacerId;
 }
 
 /**

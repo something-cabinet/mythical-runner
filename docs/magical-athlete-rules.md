@@ -452,9 +452,7 @@ Make a line of 8 faceup racers from the deck and snake draft them (Players A and
 Both players simultaneously pick 2 different racers for each race, so 4 racers will be on the track to start. Each player also takes two dice to use for their different racers.
 
 ### Racing:
-When a player goes, they take turns with both of their racers, one after the other, in whichever order they prefer. Just be sure to complete the first racer's turn before moving onto the next. If you have racer powers that trigger when "other racers" do something, that includes your second racer.
-
-After the first race, the player who received the lower number of points in the last race goes first. If tied, roll off!
+On each player's first turn, they pick one racer to use. Then in all subsequent turns, you use each of your racers in the order you want, making sure to fully complete one racer before moving onto the next. After the first race, the player who received the lower number of points in the last race goes first. If tied, roll off! If you have racer powers that trigger when "other racers" do something, that includes your second racer.
 
 ---
 

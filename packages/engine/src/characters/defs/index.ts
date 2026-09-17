@@ -797,7 +797,9 @@ const egg = def(
       h.ask({
         player: h.self.owner,
         prompt: 'Scramble! Hatch with which power?',
-        options: draw.map((id) => option(`power:${id}`, h.nameOf(id))),
+        // Targeted, so the client can show each drawn racer's card rather than a bare name:
+        // the choice is between three powers, and the names alone don't say what they do.
+        options: draw.map((id) => option(`power:${id}`, h.nameOf(id), racerTarget(id))),
         key: 'scramble',
       });
     },
@@ -971,7 +973,7 @@ const twin = def(
         player: h.self.owner,
         prompt: "Race with a past winner's powers?",
         options: [
-          ...winners.map((id) => option(`power:${id}`, h.nameOf(id))),
+          ...winners.map((id) => option(`power:${id}`, h.nameOf(id), racerTarget(id))),
           option('none', 'Keep my own'),
         ],
         key: 'doubleDip',

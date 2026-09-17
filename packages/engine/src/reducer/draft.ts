@@ -3,7 +3,7 @@ import { ALL_RACER_IDS } from '../characters/registry.js';
 import { IllegalActionError, invariant } from '../errors.js';
 import type { PlayerId, RacerId } from '../ids.js';
 import type { Rng } from '../rng.js';
-import { RACERS_PER_PLAYER } from '../state.js';
+import { racersPerPlayer, racersPerRace } from '../state.js';
 import { beginCommit } from './commit.js';
 import { type Ctx, hand } from './working.js';
 
@@ -57,28 +57,47 @@ function beginDraft(ctx: Ctx, order: PlayerId[], rng: Rng): void {
 }
 
 /**
- * Deals a fresh face-up layout when the previous one runs out.
+ * How many rounds of the snake one line of face-up cards covers.
  *
- * A wave is `2 x playerCount` cards and covers exactly two rounds of the snake: everyone
- * picks once going forward, then once coming back, which consumes the layout precisely.
+ * Two normally — forward once, back once — and four in the two-player variant, whose line
+ * of 8 is drafted "ABBAABBA" before the next line is dealt.
+ */
+function roundsPerLine(playerCount: number): number {
+  return 2 * racersPerRace(playerCount);
+}
+
+/**
+ * Deals a fresh face-up line when the previous one runs out.
+ *
+ * A line is `playerCount x roundsPerLine` cards, so it is consumed exactly as the next one
+ * is dealt.
  */
 function dealWaveIfNeeded(ctx: Ctx): void {
   const { s } = ctx;
   invariant(s.phase.t === 'draft', 'dealWave outside draft');
   const n = s.phase.order.length;
-  if (s.phase.pick % (2 * n) !== 0) return;
+  const size = n * roundsPerLine(n);
+  if (s.phase.pick % size !== 0) return;
 
-  const wave = s.phase.deck.splice(0, 2 * n);
-  invariant(wave.length === 2 * n, 'racer deck exhausted mid-draft');
+  const wave = s.phase.deck.splice(0, size);
+  invariant(wave.length === size, 'racer deck exhausted mid-draft');
   s.phase.layout = wave;
 }
 
-/** Whose pick it is, given the snake ordering. */
+/**
+ * Whose pick it is, given the snake ordering.
+ *
+ * Rounds alternate direction, and each new line of cards shifts the whole snake one seat
+ * along: "repeat this process, starting with the player to the left of the start player".
+ * With two players that shift is the variant's "do it again with 8 more racers from the
+ * deck, in reverse order" — ABBAABBA, then BAABBAAB.
+ */
 export function currentDrafter(order: readonly PlayerId[], pick: number): PlayerId {
   const n = order.length;
   const round = Math.floor(pick / n);
   const i = pick % n;
-  const seat = round % 2 === 0 ? i : n - 1 - i;
+  const line = Math.floor(round / roundsPerLine(n));
+  const seat = (line + (round % 2 === 0 ? i : n - 1 - i)) % n;
   const p = order[seat];
   invariant(p, `no drafter at seat ${seat}`);
   return p;
@@ -100,7 +119,7 @@ export function draftPick(ctx: Ctx, a: DraftPick): void {
 
   s.phase.pick += 1;
 
-  const total = s.phase.order.length * RACERS_PER_PLAYER;
+  const total = s.phase.order.length * racersPerPlayer(s.phase.order.length);
   if (s.phase.pick >= total) {
     beginCommit(ctx, 1);
     return;

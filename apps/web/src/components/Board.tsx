@@ -1,6 +1,6 @@
 import { FINISH, trackForRace, type PlayerView, type RacerId, type RaceNumber } from '@mr/engine';
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { ordinal, racerInitials, racerName, rawName, seatColor } from '../lib/present';
+import { hasSprite, ordinal, racerInitials, racerName, racerSprite, rawName, seatColor } from '../lib/present';
 import { ROLL_TUMBLE_MS, type ShownRoll } from '../lib/useBoardPositions';
 
 /**
@@ -24,6 +24,14 @@ const GAP = 6;
 /** The dark rim around the track. */
 const PAD = 14;
 const R_FINISH = 24;
+/**
+ * How much of a piece's diameter its portrait fills.
+ *
+ * Small enough that the art sits inside the disc rather than on it, so a ring of the
+ * owner's seat colour always shows — art that is opaque rather than cut out would
+ * otherwise swallow the one cue for whose racer this is.
+ */
+const SPRITE_INSET = 0.84;
 
 /** Plain spaces cycle through the board's colours, like the printed track. */
 const SPACE_COLORS = ['#f28fd0', '#ffc93c', '#44bf6c', '#5ea8ef', '#f0473c'] as const;
@@ -143,7 +151,13 @@ const PIPS: Record<number, readonly (readonly [number, number])[]> = {
 
 /**
  * The latest roll as a big die in the infield. It tumbles through random faces, lands on
- * the result, and then names who rolled it. Remounted per roll via `key`.
+ * the face that was thrown, and then names who threw it. Remounted per throw via `key`.
+ *
+ * The pips are always the real face. What a power did to it is spelled out underneath: an
+ * adjustment as arithmetic ("4 + 3 = 7", Blimp), a substitution as a swap ("4 instead",
+ * Alchemist), because a 1 traded for a move of 4 was never "1 + 3". While `roll.move` is
+ * still null the die simply sits there — powers are mid-decision, and the player is being
+ * asked about the very face they can see.
  */
 function Die({ roll, x, y, size, color, portrait }: {
   roll: ShownRoll;
@@ -153,32 +167,45 @@ function Die({ roll, x, y, size, color, portrait }: {
   color: string;
   portrait: boolean;
 }) {
-  const [face, setFace] = useState(() => (roll.instant ? roll.value : 1 + Math.floor(Math.random() * 6)));
+  const [face, setFace] = useState(() => (roll.instant ? roll.face : 1 + Math.floor(Math.random() * 6)));
   const [landed, setLanded] = useState(roll.instant);
 
+  // Keyed by the throw, so settling the move into an already-landed die does not set it
+  // tumbling again — only a fresh throw does that.
   useEffect(() => {
     if (roll.instant) return;
     const spin = setInterval(() => setFace((f) => ((f + 1 + Math.floor(Math.random() * 4)) % 6) + 1), 75);
     const land = setTimeout(() => {
       clearInterval(spin);
-      setFace(roll.value);
+      setFace(roll.face);
       setLanded(true);
     }, ROLL_TUMBLE_MS);
     return () => {
       clearInterval(spin);
       clearTimeout(land);
     };
-  }, [roll]);
+  }, [roll.key, roll.instant, roll.face]);
 
   const pips = PIPS[face];
   const unit = size / 3.4;
   const name = racerName(roll.racerId);
+  const by = roll.modifiedBy ? ` (${racerName(roll.modifiedBy)})` : '';
+  const delta = (roll.move ?? roll.face) - roll.face;
+  // U+2212 for the minus, so "4 − 1 = 3" lines up with the digits either side of it.
+  const maths =
+    roll.move === null || delta === 0
+      ? null
+      : roll.replaced
+        ? roll.move === 0
+          ? `no move${by}`
+          : `moves ${roll.move} instead${by}`
+        : `${roll.face} ${delta < 0 ? '−' : '+'} ${Math.abs(delta)} = ${roll.move}${by}`;
   const labelX = portrait ? x : x + size / 2 + 22;
-  const labelY = portrait ? y + size / 2 + 30 : y;
+  const labelY = portrait ? y + size / 2 + 30 : y - (maths ? 15 : 0);
 
   return (
-    <g className={`dice${landed ? ' dice-landed' : ' dice-tumbling'}${roll.stale ? ' dice-stale' : ''}`}>
-      <title>{`${name} rolled ${roll.value}`}</title>
+    <g className={`dice${landed ? ' dice-landed' : ' dice-tumbling'}`}>
+      <title>{`${name} rolled ${roll.face}${maths ? `, moves ${roll.move}` : ''}`}</title>
       <g transform={`translate(${x} ${y})`}>
         <g className="dice-body">
           <rect x={-size / 2} y={-size / 2} width={size} height={size} rx={size * 0.2} className="dice-face" style={{ stroke: color }} />
@@ -195,8 +222,13 @@ function Die({ roll, x, y, size, color, portrait }: {
             {name}
           </tspan>
           <tspan x={labelX} dy="1.2em">
-            {roll.modifiedBy ? `rolled ${roll.value} (${racerName(roll.modifiedBy)})` : `rolled ${roll.value}`}
+            {maths ? `rolled ${roll.face}` : `rolled ${roll.face}${by}`}
           </tspan>
+          {maths && (
+            <tspan className="dice-maths num" x={labelX} dy="1.25em">
+              {maths}
+            </tspan>
+          )}
         </text>
       )}
     </g>
@@ -263,6 +295,14 @@ export function Board({
 
   return (
     <svg className="board" viewBox={`0 0 ${g.width} ${g.height}`} role="img" aria-label={`${track.name} race track`}>
+      <defs>
+        {/* One clip for every portrait: object-bounding-box units make it scale to each
+            piece's own square, so pieces of different sizes share the one definition, and
+            square art is cropped to the disc instead of overhanging it. */}
+        <clipPath id="piece-disc" clipPathUnits="objectBoundingBox">
+          <circle cx="0.5" cy="0.5" r="0.5" />
+        </clipPath>
+      </defs>
       <rect className="board-rim" x={0} y={0} width={g.width} height={g.height} rx={PAD + 26} />
       <rect
         className="board-outline"
@@ -281,7 +321,7 @@ export function Board({
         rx={10}
       />
       <text
-        className={`infield-name${roll && !roll.stale ? ' infield-name-dim' : ''}`}
+        className={`infield-name${roll ? ' infield-name-dim' : ''}`}
         x={inf.x}
         y={inf.y}
         transform={g.portrait ? `rotate(-90 ${inf.x} ${inf.y})` : undefined}
@@ -441,9 +481,24 @@ export function Board({
                 fill={seatColor(view, r.owner)}
                 className={mine ? 'piece-you' : 'piece-ring'}
               />
-              <text className="piece-label" style={{ fontSize: Math.round(radius * 0.8) }}>
-                {racerInitials(r.racerId)}
-              </text>
+              {/* Initials, not the stand-in face: every racer without art would wear the
+                  same one, and a board of identical faces is worse than no art at all. */}
+              {hasSprite(r.racerId) ? (
+                <image
+                  className="piece-sprite"
+                  href={racerSprite(r.racerId)}
+                  x={-radius * SPRITE_INSET}
+                  y={-radius * SPRITE_INSET}
+                  width={radius * 2 * SPRITE_INSET}
+                  height={radius * 2 * SPRITE_INSET}
+                  preserveAspectRatio="xMidYMid meet"
+                  clipPath="url(#piece-disc)"
+                />
+              ) : (
+                <text className="piece-label" style={{ fontSize: Math.round(radius * 0.8) }}>
+                  {racerInitials(r.racerId)}
+                </text>
+              )}
             </g>
             {r.tripped && (
               <g transform={`translate(${radius * 0.72} ${-radius * 0.72})`}>

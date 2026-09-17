@@ -187,10 +187,15 @@ function doMainMove(ctx: Ctx, racerId: RacerId, rng: Rng): void {
   if (hooks.skipsMainMove?.(h) === true) return;
 
   const replaced = hooks.replaceMainMove?.(h) ?? null;
+  const face = replaced ?? rng.rollD6();
+  // Announce the throw before anything reacts to it: Magician's reroll and Alchemist's
+  // transmute both ask a question from here on, and the player should see the die they are
+  // being asked about.
+  if (replaced === null) ctx.emit({ t: 'dice/thrown', player: racer.owner, racerId, value: face });
   ctx.s.queue.unshift({
     t: 'roll',
     racer: racerId,
-    value: replaced ?? rng.rollD6(),
+    value: face,
     die: replaced === null,
     stage: 'reroll',
     done: [],
@@ -289,11 +294,21 @@ function doRoll(ctx: Ctx, job: Extract<Job, { t: 'roll' }>, rng: Rng): void {
     }
   }
 
+  // `job.value` is the face that came to rest — after any reroll, before any modifier — so
+  // it is what the player physically saw. Report it alongside the adjusted move whenever a
+  // power moved the number, so the board can show the die and the arithmetic separately.
+  const natural = job.die && job.value !== value ? job.value : undefined;
+  // A distance set by a power, or a cancellation, stands in place of the die rather than
+  // shifting it: Alchemist's 1 does not become "1 + 3".
+  const wasReplaced = job.distance !== null || cancelled;
+
   ctx.emit({
     t: 'dice/rolled',
     player: racer.owner,
     racerId: racer.racerId,
     value,
+    ...(natural !== undefined ? { natural } : {}),
+    ...(natural !== undefined && wasReplaced ? { replaced: true } : {}),
     ...(modifiedBy ? { modifiedBy } : {}),
   });
 
@@ -774,7 +789,9 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
     cutInLine: () => {
       const phase = ctx.s.phase;
       if (phase.t !== 'racing') return;
-      phase.nextUp.push(self.owner);
+      // The racer cuts in, not its owner: a teammate does not inherit Skipper's place in
+      // the queue or Genius's extra turn.
+      phase.nextUp.push(self.racerId);
     },
 
     takePlace: () => {
@@ -798,6 +815,9 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
       if (!roll || !roll.die) return;
       const was = roll.value;
       roll.value = rng.rollD6();
+      // The die belongs to whoever is taking the turn, not to whoever forced the reroll.
+      const mover = findRacer(ctx.s, roll.racer);
+      if (mover) ctx.emit({ t: 'dice/thrown', player: mover.owner, racerId: roll.racer, value: roll.value });
       roll.rerolls += 1;
       roll.stage = 'reroll';
       roll.done = [];

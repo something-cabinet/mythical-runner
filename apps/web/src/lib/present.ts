@@ -2,6 +2,9 @@ import {
   currentDrafter,
   racerName,
   racerText,
+  racerId,
+  powerOf,
+  copyTarget,
   RACE_AWARDS,
   totalPoints,
   type GameEvent,
@@ -9,6 +12,7 @@ import {
   type PlayerView,
   type RacerId,
   type RaceNumber,
+  type RacerState,
 } from '@mr/engine';
 
 /**
@@ -66,7 +70,58 @@ export function racerInitials(id: RacerId): string {
   return initials(racerName(id));
 }
 
+/**
+ * Racer art, keyed by racer id, under `apps/web/public/character_sprite`.
+ *
+ * Only the racers whose art has been drawn are listed; the rest fall back to the
+ * placeholder, so a new racer never renders a broken image. File names are listed
+ * explicitly rather than derived from the id, because the art is hand-authored and its
+ * names do not all match the ids, nor are they all PNGs (`lovable-loser` is a JPEG named
+ * `loveableLoser`).
+ *
+ * To add art: drop the file in that folder and add one line here.
+ */
+const SPRITE_FILES: Readonly<Record<string, string>> = {
+  banana: 'banana.png',
+  dicemonger: 'dicemonger.png',
+  duelist: 'duelist.png',
+  hare: 'hare.png',
+  heckler: 'heckler.png',
+  hypnotist: 'hypnotist.png',
+  'lovable-loser': 'loveableLoser.jpg',
+  romantic: 'romantic.png',
+};
+
+const SPRITE_DIR = '/character_sprite';
+const PLACEHOLDER_SPRITE = `${SPRITE_DIR}/placeholder.png`;
+
+/** The image for a racer, or the placeholder when that racer has no art yet. */
+export function racerSprite(id: RacerId): string {
+  const file = SPRITE_FILES[id];
+  return file ? `${SPRITE_DIR}/${file}` : PLACEHOLDER_SPRITE;
+}
+
+/** True when `racerSprite` is a real likeness rather than the stand-in. */
+export function hasSprite(id: RacerId): boolean {
+  return id in SPRITE_FILES;
+}
+
 export { racerName, racerText };
+
+const COPY_CAT = racerId('copy-cat');
+
+/**
+ * Whose card a racer is actually running, or null when it is running its own.
+ *
+ * Egg and Twin borrow a power for the whole race; Copy Cat has whoever leads right now.
+ * The lists show the borrowed card, since that — not the name on the token — is what the
+ * racer will actually do.
+ */
+export function borrowedPower(view: PlayerView, racer: RacerState): RacerId | null {
+  const power = powerOf(racer);
+  if (power !== racer.racerId) return power;
+  return racer.racerId === COPY_CAT ? copyTarget(view, racer) : null;
+}
 
 /** Placeholder racers have no power yet; the UI says so rather than showing a blank. */
 export function powerText(id: RacerId): string {
@@ -155,11 +210,15 @@ export function describeEvent(e: GameEvent, view: PlayerView): LogLine | null {
       return { text: `${who(e.player)} drafted ${racer(e.racerId)}`, tone: 'plain' };
     case 'race/started':
       return { text: `Race ${e.raceNo} begins on the ${trackLabel(e.raceNo)}`, tone: 'turn' };
-    case 'race/revealed':
+    case 'race/revealed': {
+      // Grouped by player, since the two-player variant reveals two racers each.
+      const byPlayer = new Map<PlayerId, string[]>();
+      for (const p of e.picks) byPlayer.set(p.player, [...(byPlayer.get(p.player) ?? []), racer(p.racerId)]);
       return {
-        text: e.picks.map((p) => `${who(p.player)}: ${racer(p.racerId)}`).join(' · '),
+        text: [...byPlayer].map(([p, names]) => `${who(p)}: ${names.join(' + ')}`).join(' · '),
         tone: 'plain',
       };
+    }
     case 'turnOrder/set':
       return {
         text:
@@ -169,6 +228,9 @@ export function describeEvent(e: GameEvent, view: PlayerView): LogLine | null {
         tone: 'turn',
       };
     case 'turn/began':
+      return null;
+    // The throw itself is the board's business; the log reports the move it settles into.
+    case 'dice/thrown':
       return null;
     case 'dice/rolled':
       return { text: `${racer(e.racerId)} moves ${e.value}`, tone: 'plain' };

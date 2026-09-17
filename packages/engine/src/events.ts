@@ -95,14 +95,47 @@ export interface TurnOrderRolled {
 export interface TurnBegan {
   readonly t: 'turn/began';
   readonly player: PlayerId;
-  readonly racerId: RacerId;
+  /**
+   * The racer taking it — absent while the player still has a choice of which of their
+   * racers to move, which only happens in the two-player variant.
+   */
+  readonly racerId?: RacerId;
 }
 
+/**
+ * A d6 leaving the hand, emitted the moment it is thrown — before any power has had a say.
+ *
+ * Powers that ask about a roll (Magician's reroll, Alchemist's transmute) ask between this
+ * and `dice/rolled`, so the client can put the die on the table before the question. A
+ * reroll throws again and emits a second one; a replaced main move throws nothing and emits
+ * none at all.
+ */
+export interface DiceThrown {
+  readonly t: 'dice/thrown';
+  readonly player: PlayerId;
+  readonly racerId: RacerId;
+  /** The face, before modifiers. */
+  readonly value: number;
+}
+
+/** The settled main move: what the racer will actually move, die or no die. */
 export interface DiceRolled {
   readonly t: 'dice/rolled';
   readonly player: PlayerId;
   readonly racerId: RacerId;
   readonly value: number;
+  /**
+   * The die face actually rolled, when it differs from `value` — powers adjusted the main
+   * move afterwards. Absent when nothing changed the roll, and when no die was thrown at
+   * all (a replaced main move). Lets the client show the natural die plus the maths.
+   */
+  readonly natural?: number;
+  /**
+   * True when the move replaced the roll outright — Alchemist transmuting a 1 into 4, a
+   * cancelled move — rather than adjusting it by some amount. The difference matters to
+   * anyone reading the number: "1 becomes 4" is not "1 + 3".
+   */
+  readonly replaced?: boolean;
   /** Set when an ability replaced or modified the roll, for log clarity. */
   readonly modifiedBy?: RacerId;
 }
@@ -227,6 +260,7 @@ export type GameEvent =
   | TurnOrderRolled
   | TurnOrderSet
   | TurnBegan
+  | DiceThrown
   | DiceRolled
   | RacerMoved
   | RacerPassed

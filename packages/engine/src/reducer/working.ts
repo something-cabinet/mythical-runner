@@ -100,10 +100,9 @@ export function seatAt(s: MutableState, i: number): PlayerId {
   return p;
 }
 
-export function racerOf(s: MutableState, p: PlayerId): DeepMutable<RacerState> {
-  const r = s.board.find((x) => x.owner === p);
-  invariant(r, `player ${p} has no racer on the board`);
-  return r;
+/** Everything `p` has on the board this race: one racer, or two in the two-player variant. */
+export function racersOf(s: MutableState, p: PlayerId): DeepMutable<RacerState>[] {
+  return s.board.filter((x) => x.owner === p);
 }
 
 export function findRacer(s: MutableState, id: RacerId): DeepMutable<RacerState> | undefined {

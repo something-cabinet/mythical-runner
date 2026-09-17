@@ -1,4 +1,4 @@
-import { currentDrafter, RACERS_PER_PLAYER, type PlayerId, type RacerId } from '@mr/engine';
+import { currentDrafter, racersPerPlayer, type PlayerId, type RacerId } from '@mr/engine';
 import { useEffect, useState } from 'react';
 import { ActionBar, PlayerToken, RacerCard, Waiting } from '../components/bits';
 import { listNames, playerName, racerName, rawName, waitingOn } from '../lib/present';
@@ -70,7 +70,8 @@ function Picking() {
   const picker = currentDrafter(phase.order, phase.pick);
   const legalPicks = legalOf(message, 'draft/pick');
   const myTurn = legalPicks.length > 0;
-  const total = phase.order.length * RACERS_PER_PLAYER;
+  const perPlayer = racersPerPlayer(phase.order.length);
+  const total = phase.order.length * perPlayer;
   const round = Math.floor(phase.pick / phase.order.length);
   const myHand = view.hands[view.you] ?? [];
 
@@ -109,7 +110,7 @@ function Picking() {
 
         <section className="stack" aria-labelledby="team-heading">
           <h2 id="team-heading" className="section-title">
-            Your team · {myHand.length}/{RACERS_PER_PLAYER}
+            Your team · {myHand.length}/{perPlayer}
           </h2>
           {myHand.length === 0 ? (
             <p className="muted">Nobody yet.</p>

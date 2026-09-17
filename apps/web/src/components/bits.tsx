@@ -1,11 +1,13 @@
 import type { PlayerId, PlayerView, RacerId } from '@mr/engine';
 import { useEffect, useState, type ReactNode } from 'react';
 import {
+  hasSprite,
   initials,
   points,
   powerText,
   racerInitials,
   racerName,
+  racerSprite,
   racerText,
   rawName,
   seatColor,
@@ -25,7 +27,14 @@ export function PlayerToken({ view, pid, size = 34 }: { view: PlayerView; pid: P
   );
 }
 
-/** A racer's disc, in its owner's colour, with the racer's initials. */
+/**
+ * A racer's disc, in its owner's colour, carrying the racer's portrait — or its initials
+ * where there is no art yet, matching the board. The stand-in face is the same for every
+ * racer that lacks art, so it would make a row of them indistinguishable.
+ *
+ * The portrait is the racer, never the card it is currently running: an Egg that hatched
+ * into Ostrich is still an Egg on the track, so it keeps the Egg's face.
+ */
 export function RacerToken({
   view,
   racer,
@@ -37,19 +46,20 @@ export function RacerToken({
   owner: PlayerId;
   size?: number;
 }) {
+  const art = hasSprite(racer);
   return (
     <span
-      className="token"
+      className={`token${art ? ' token-sprite' : ''}`}
       aria-hidden="true"
       style={{ background: seatColor(view, owner), color: SEAT_INK, ['--size' as string]: `${size}px` }}
     >
-      {racerInitials(racer)}
+      {art ? <img src={racerSprite(racer)} alt="" /> : racerInitials(racer)}
     </span>
   );
 }
 
 /**
- * A racer card: name and full power text.
+ * A racer card: portrait, name and full power text.
  *
  * Power text is never truncated or hidden behind a tap. With thirty-six rule-breaking
  * powers, not being able to see what a racer does is the single easiest way for this game
@@ -82,6 +92,9 @@ export function RacerCard({
       disabled={!interactive}
       onClick={onSelect}
     >
+      <span className="racer-sprite" aria-hidden="true">
+        <img src={racerSprite(racer)} alt="" data-placeholder={!hasSprite(racer)} loading="lazy" />
+      </span>
       <span className="racer-name">{racerName(racer)}</span>
       <span className="racer-power">{powerText(racer)}</span>
       {footer}

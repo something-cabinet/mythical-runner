@@ -15,26 +15,64 @@ const ROLL_HOLD_MS = 550;
 
 /** The most recent roll, for the board to show as a die. */
 export interface ShownRoll {
-  /** Changes with every roll, so the die remounts and tumbles again. */
+  /** Changes with every throw, so the die remounts and tumbles again. */
   readonly key: number;
   readonly racerId: RacerId;
-  readonly value: number;
+  /** The face on the die: what was thrown, or the distance a power substituted for it. */
+  readonly face: number;
+  /**
+   * The main move this settles into, or null while powers are still having their say —
+   * a die on the table with a question hanging over it.
+   */
+  readonly move: number | null;
+  /** The move stands in place of the face (Alchemist) rather than adjusting it (Blimp). */
+  readonly replaced: boolean;
   readonly modifiedBy?: RacerId | undefined;
-  /** False while it is part of the turn being played out; true once the next turn begins. */
-  readonly stale: boolean;
   /** Shown without the tumble, e.g. under reduced motion. */
   readonly instant: boolean;
 }
 
 type Step =
   | { readonly t: 'move'; readonly racer: RacerId; readonly to: number; readonly hop: boolean }
-  | { readonly t: 'roll'; readonly racer: RacerId; readonly value: number; readonly modifiedBy?: RacerId | undefined }
+  | { readonly t: 'throw'; readonly racer: RacerId; readonly value: number }
+  | {
+      readonly t: 'roll';
+      readonly racer: RacerId;
+      readonly value: number;
+      readonly natural?: number | undefined;
+      readonly replaced?: boolean | undefined;
+      readonly modifiedBy?: RacerId | undefined;
+    }
   | { readonly t: 'turn' };
 
 function truth(message: StateMessage | null): Positions {
   const out: Record<string, number> = {};
   for (const r of message?.view.board ?? []) out[r.racerId] = r.pos;
   return out;
+}
+
+/**
+ * Folds a settled main move into the die already on the table, when it is that die's own
+ * result — so the number the player watched land stays put and only the label grows. A
+ * replaced main move (Legs jogging a fixed 5) never threw anything, so it gets a die of
+ * its own.
+ */
+function settle(
+  prev: ShownRoll | null,
+  step: Extract<Step, { t: 'roll' }>,
+  key: number,
+  instant: boolean,
+): ShownRoll {
+  const face = step.natural ?? step.value;
+  const settled = {
+    move: step.value,
+    replaced: step.replaced ?? false,
+    modifiedBy: step.modifiedBy,
+  };
+  if (prev && prev.racerId === step.racer && prev.move === null && prev.face === face) {
+    return { ...prev, ...settled };
+  }
+  return { key, racerId: step.racer, face, ...settled, instant };
 }
 
 export interface BoardAnimation {
@@ -65,8 +103,11 @@ export interface BoardAnimation {
  *    a reconnect delivers a snapshot with no events at all. Resyncing means the drawing can
  *    never drift from the truth for longer than one turn.
  *
- * A `dice/rolled` event queues a pause for the die to tumble and land, so everyone sees the
- * number before the racer sets off.
+ * A `dice/thrown` event queues a pause for the die to tumble and land, so everyone sees the
+ * face before anything reacts to it — including the powers that ask a question about it.
+ * The `dice/rolled` that follows fills in the move that face settled into. The die is cleared when the next turn begins: a roll
+ * belongs to the turn that made it, and leaving it lingering over the infield reads as part
+ * of the turn now starting.
  *
  * Honours `prefers-reduced-motion` by skipping the replay entirely; the die then just shows
  * the latest roll.
@@ -75,6 +116,8 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
   const [positions, setPositions] = useState<Positions>(() => truth(message));
   const [animating, setAnimating] = useState(false);
   const [roll, setRoll] = useState<ShownRoll | null>(null);
+  // Mirrors `roll`, so the drain can read what is on the table without waiting for React.
+  const shown = useRef<ShownRoll | null>(null);
   const rollKey = useRef(0);
   const queue = useRef<Step[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -83,6 +126,11 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
 
   useEffect(() => {
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+    const show = (next: ShownRoll | null): void => {
+      shown.current = next;
+      setRoll(next);
+    };
 
     const drain = (): void => {
       timer.current = null;
@@ -96,19 +144,31 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
       if (next.t === 'move') {
         setPositions((prev) => ({ ...prev, [next.racer]: next.to }));
         delay = !next.hop ? 0 : queue.current.length > BACKLOG_FAST ? HOP_FAST_MS : HOP_MS;
-      } else if (next.t === 'roll') {
-        setRoll({
+      } else if (next.t === 'throw') {
+        show({
           key: ++rollKey.current,
           racerId: next.racer,
-          value: next.value,
-          modifiedBy: next.modifiedBy,
-          stale: false,
+          face: next.value,
+          move: null,
+          replaced: false,
           instant: false,
         });
+        // Long enough for the die to come to rest — and if a power is about to ask about
+        // it, the question waits behind this.
+        delay = queue.current.length > BACKLOG_FAST ? HOP_FAST_MS : ROLL_TUMBLE_MS;
+      } else if (next.t === 'roll') {
+        const before = shown.current;
+        show(settle(before, next, ++rollKey.current, false));
+        const fresh = shown.current?.key !== before?.key;
         // A long backlog means a burst of powers; don't make it longer.
-        delay = queue.current.length > BACKLOG_FAST ? HOP_FAST_MS : ROLL_TUMBLE_MS + ROLL_HOLD_MS;
+        delay =
+          queue.current.length > BACKLOG_FAST
+            ? HOP_FAST_MS
+            : fresh
+              ? ROLL_TUMBLE_MS + ROLL_HOLD_MS
+              : ROLL_HOLD_MS;
       } else {
-        setRoll((prev) => (prev ? { ...prev, stale: true } : prev));
+        show(null);
       }
       timer.current = setTimeout(drain, delay);
     };
@@ -120,17 +180,37 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
         timer.current = null;
         setPositions(truth(latest.current));
         setAnimating(false);
-        const last = [...events].reverse().find((e) => e.t === 'dice/rolled');
-        if (last?.t === 'dice/rolled') {
-          setRoll({
-            key: ++rollKey.current,
-            racerId: last.racerId,
-            value: last.value,
-            modifiedBy: last.modifiedBy,
-            stale: false,
-            instant: true,
-          });
+        // Same bookkeeping as the animated path, just without the waiting: the die ends up
+        // wherever this batch of events leaves it, and a new turn clears it.
+        let next = shown.current;
+        for (const e of events) {
+          if (e.t === 'turn/began' || e.t === 'race/started') next = null;
+          else if (e.t === 'dice/thrown') {
+            next = {
+              key: ++rollKey.current,
+              racerId: e.racerId,
+              face: e.value,
+              move: null,
+              replaced: false,
+              instant: true,
+            };
+          } else if (e.t === 'dice/rolled') {
+            next = settle(
+              next,
+              {
+                t: 'roll',
+                racer: e.racerId,
+                value: e.value,
+                natural: e.natural,
+                replaced: e.replaced,
+                modifiedBy: e.modifiedBy,
+              },
+              ++rollKey.current,
+              true,
+            );
+          }
         }
+        show(next);
         return;
       }
 
@@ -138,9 +218,18 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
         if (e.t === 'race/started') {
           // A new race: everyone is back on Start. Drop any stale hops from the last race.
           queue.current = [];
-          setRoll(null);
+          show(null);
+        } else if (e.t === 'dice/thrown') {
+          queue.current.push({ t: 'throw', racer: e.racerId, value: e.value });
         } else if (e.t === 'dice/rolled') {
-          queue.current.push({ t: 'roll', racer: e.racerId, value: e.value, modifiedBy: e.modifiedBy });
+          queue.current.push({
+            t: 'roll',
+            racer: e.racerId,
+            value: e.value,
+            natural: e.natural,
+            replaced: e.replaced,
+            modifiedBy: e.modifiedBy,
+          });
         } else if (e.t === 'turn/began') {
           queue.current.push({ t: 'turn' });
         } else if (e.t === 'racer/moved') {

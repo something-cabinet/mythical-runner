@@ -92,11 +92,14 @@ await host.page.waitForURL(/\/r\/[A-Z0-9]{4}$/);
 const code = host.page.url().slice(-4);
 console.log(`Room ${code}`);
 
+// Three players by default; PLAYERS=2 plays the two-player variant, where each player
+// commits two racers and moves both on a turn.
+const PLAYER_COUNT = Math.min(3, Math.max(2, Number(process.env.PLAYERS ?? 3)));
 const guests = [];
 for (const [name, scheme] of [
   ['Bo', 'dark'],
   ['Cy', 'light'],
-]) {
+].slice(0, PLAYER_COUNT - 1)) {
   const guest = await newPlayer(name, scheme);
   await guest.page.goto(`${BASE}/r/${code}`);
   // Typing must not join by itself: that bug seated people after their first keystroke.
@@ -110,7 +113,7 @@ for (const [name, scheme] of [
 }
 const players = [host, ...guests];
 
-await host.page.getByText('Cy', { exact: true }).waitFor();
+await host.page.getByText(PLAYER_COUNT === 3 ? 'Cy' : 'Bo', { exact: true }).waitFor();
 await screenshot(host, 'lobby');
 await screenshot(guests[0], 'lobby');
 await checkOverflow(host, 'lobby');
