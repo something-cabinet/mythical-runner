@@ -31,6 +31,25 @@ npm test                             # engine: scenario checks + fuzzed games
 npm run e2e -w @mr/server            # server e2e tests over real WebSockets
 npm run test:ui -w @mr/web           # a full game through the UI on phone-sized screens
 ```
+## How to deploy on Cloudflare
+
+Log in to Cloudflare 
+
+```
+cd apps/server
+npx wrangler login
+```
+
+This opens a browser to authorize wrangler against your Cloudflare account.
+
+Build the web client, then deploy the Worker (which serves both the static site and the API/Durable Object):
+
+```
+npm run build -w @mr/web
+npm run deploy -w @mr/server
+```
+
+Verify — hit https://mythical-runner.khoalamvn.workers.dev/api/health and open the site in a couple of browser tabs to play a room end-to-end, same as the local verification in STATUS.md.
 
 ## Docs
 
