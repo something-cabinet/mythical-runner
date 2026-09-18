@@ -181,6 +181,42 @@ export function RosterStrip({ view, racers, slots }: { view: PlayerView; racers:
 }
 
 /**
+ * A compact readiness rail: one small avatar per seat with a checkmark badge that pops
+ * in the moment that player locks in, instead of a full list of name rows repeating
+ * "choosing…" / "locked in" as text. Mirrors the seat-chip motif from `TurnStrip`.
+ */
+export function ReadyStrip({
+  view,
+  seatOrder,
+  readyIds,
+}: {
+  view: PlayerView;
+  seatOrder: readonly PlayerId[];
+  readyIds: readonly PlayerId[];
+}) {
+  return (
+    <div className="ready-strip">
+      {seatOrder.map((pid) => {
+        const ready = readyIds.includes(pid);
+        return (
+          <div key={pid} className="ready-slot" data-ready={ready}>
+            <span style={{ position: 'relative' }}>
+              <PlayerToken view={view} pid={pid} size={40} />
+              <span className="ready-badge" aria-hidden="true">
+                {ready ? '✓' : '···'}
+              </span>
+            </span>
+            <span className="name">
+              {pid === view.you ? 'You' : rawName(view, pid)}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
  * A dense, always-visible stat readout — race number, racers home vs. still running, the
  * current leader, your own points — in the compact icon+value idiom of a competitive HUD
  * (Dota's top bar, a broadcast scoreboard), rather than a sentence you have to read.

@@ -778,6 +778,71 @@ select {
   object-fit: contain;
 }
 
+/* ---- Ready strip ------------------------------------------------------- */
+
+.ready-strip {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ready-slot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.ready-slot .name {
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: var(--muted);
+  max-width: 64px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ready-slot[data-ready='true'] .name {
+  color: var(--good);
+}
+
+.ready-badge {
+  position: absolute;
+  right: -2px;
+  top: -2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 0.62rem;
+  font-weight: 900;
+  border: 2px solid var(--surface);
+  background: var(--surface-3);
+  color: var(--faint);
+}
+
+.ready-slot[data-ready='true'] .ready-badge {
+  background: var(--good);
+  color: var(--surface);
+  animation: readyPop 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes readyPop {
+  0% { transform: scale(0.4); opacity: 0; }
+  70% { transform: scale(1.2); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ready-slot[data-ready='true'] .ready-badge {
+    animation: none;
+  }
+}
+
 /* ---- Seat grid (lobby) ---------------------------------------------------- */
 
 .seat-grid {
@@ -963,6 +1028,11 @@ select {
   font-size: 0.84rem;
   color: var(--muted);
   line-height: 1.35;
+  transition: color 120ms ease;
+}
+
+.racer-card:hover:not(:disabled) .racer-power:not(:empty) {
+  color: var(--accent);
 }
 
 .racer-card[data-vanilla='true'] .racer-power {
@@ -1421,20 +1491,41 @@ select {
 /* ---- Dice --------------------------------------------------------------- */
 
 .die {
-  width: 52px;
-  height: 52px;
-  border-radius: 12px;
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
   background: var(--surface);
   border: 2px solid var(--border);
   display: grid;
   place-items: center;
-  font-size: 1.5rem;
+  font-size: 1.9rem;
   font-weight: 850;
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--border) 70%, transparent), 0 10px 18px rgb(0 0 0 / 16%);
+  transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 160ms ease, border-color 160ms ease;
 }
 
 .die[data-empty='true'] {
   color: var(--faint);
   border-style: dashed;
+  box-shadow: none;
+  animation: dicePulse 1.6s ease-in-out infinite;
+}
+
+@keyframes dicePulse {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 0.9; transform: scale(1.04); }
+}
+
+.die[data-empty='false'] {
+  border-color: color-mix(in srgb, var(--accent-bg) 55%, var(--border));
+  color: var(--accent);
+  transform: translateY(-2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .die[data-empty='true'] {
+    animation: none;
+  }
 }
 
 /* ---- Results ------------------------------------------------------------ */

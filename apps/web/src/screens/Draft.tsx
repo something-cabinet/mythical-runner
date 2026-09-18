@@ -92,17 +92,18 @@ function Picking() {
         <div className="race-kicker">
           <span className="race-kicker-mark" aria-hidden="true">✦</span>
           <span>Draft night</span>
-          <span className="race-kicker-rule" aria-hidden="true" />
-          <span className="num">
-            Pick {Math.min(phase.pick + 1, total)} of {total}
-          </span>
         </div>
 
         <TurnStrip
           view={view}
           current={picker}
           label={myTurn ? 'Your pick' : 'Now picking'}
-          sub={`Round ${round + 1} · ${round % 2 === 0 ? 'forward' : 'snaking back'}`}
+          sub={
+            <>
+              Pick <span className="num">{Math.min(phase.pick + 1, total)}</span> of {total} · Round {round + 1} ·{' '}
+              {round % 2 === 0 ? 'forward' : 'snaking back'}
+            </>
+          }
           order={phase.order}
           pick={phase.pick}
         />

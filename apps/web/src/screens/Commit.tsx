@@ -1,7 +1,7 @@
 import { racersPerRace, type RacerId } from '@mr/engine';
 import { useEffect, useState } from 'react';
-import { ActionBar, PlayerToken, RacerCard, Waiting } from '../components/bits';
-import { awardsFor, listNames, racerName, rawName, trackLabel, waitingOn } from '../lib/present';
+import { ActionBar, RacerCard, ReadyStrip, Waiting } from '../components/bits';
+import { awardsFor, listNames, racerName, trackLabel, waitingOn } from '../lib/present';
 import { legalOf, useRoomContext } from '../lib/roomContext';
 
 /**
@@ -82,22 +82,10 @@ export function CommitScreen() {
         </section>
 
         <section className="card" aria-labelledby="ready-heading">
-          <h2 id="ready-heading" className="section-title" style={{ marginBottom: 4 }}>
+          <h2 id="ready-heading" className="section-title" style={{ marginBottom: 8 }}>
             Ready?
           </h2>
-          {view.seatOrder.map((pid) => {
-            const ready = phase.committedBy.includes(pid);
-            return (
-              <div key={pid} className="player-row">
-                <PlayerToken view={view} pid={pid} size={30} />
-                <span className="name">
-                  {rawName(view, pid)}
-                  {pid === view.you && <span className="muted"> (you)</span>}
-                </span>
-                <span className={`tag${ready ? ' tag-good' : ''}`}>{ready ? 'locked in' : 'choosing…'}</span>
-              </div>
-            );
-          })}
+          <ReadyStrip view={view} seatOrder={view.seatOrder} readyIds={phase.committedBy} />
         </section>
       </main>
 
