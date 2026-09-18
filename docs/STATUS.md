@@ -233,10 +233,10 @@ pieces added for wave 2, worth knowing before touching a power:
 
 - **Character sets.** The host toggles sets in the lobby (`lobby/toggleSet`); the draft
   deck and Egg's draw come from `state.racerSets` only. At least one set stays on, and
-  Start is withheld until the sets hold `draftSize(players)` racers — Dota alone (16) seats
-  at most four. Sets live in [characters/sets.ts](../packages/engine/src/characters/sets.ts);
+  Start is withheld until the sets hold `draftSize(players)` racers — Dota alone (22) seats
+  at most five. Sets live in [characters/sets.ts](../packages/engine/src/characters/sets.ts);
   each racer names its set in its def.
-- **The Dota set** — 16 heroes in
+- **The Dota set** — 22 heroes in
   [characters/defs/dota.ts](../packages/engine/src/characters/defs/dota.ts), designed in
   [new-character-set.md](./new-character-set.md). Engine pieces added for them: every trip
   goes through `tripRacer` (`ignoresTrip`, `onRacerTripped`); `afterMainMove` is a job
@@ -245,8 +245,13 @@ pieces added for wave 2, worth knowing before touching a power:
   their state on the racer under engine-owned memo keys, so it survives a borrowed power
   changing. Copy Cat's machinery is now shared by Morphling (a "mimic" of last place).
   "Once per round" was ruled to mean once per race.
+  The second wave of six (Bloodseeker to Abaddon) added: `dieSides` and `h.rollDie` (Chaos
+  Knight's d20, used for its main move, rerolls and any power that has it roll);
+  `phase.tripSpaces` with `h.mineSpace` (Techies — a mine replaces the space's own effect,
+  and the board draws it as MINE!); and `h.defer`, which re-enters a power's `resume`
+  once the current work is done, so Abaddon can ask a question in reaction to a trip.
 
-**Still to do:** spectators, a replay viewer, sound, art for the Dota racers.
+**Still to do:** spectators, a replay viewer, sound.
 
 ### Deploying
 

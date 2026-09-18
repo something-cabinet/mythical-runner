@@ -206,7 +206,7 @@ function doMainMove(ctx: Ctx, racerId: RacerId, rng: Rng): void {
   if (hooks.skipsMainMove?.(h) === true) return;
 
   const replaced = hooks.replaceMainMove?.(h) ?? null;
-  const face = replaced ?? rng.rollD6();
+  const face = replaced ?? rollDieOf(ctx, rng, racer);
   // Announce the throw before anything reacts to it: Magician's reroll and Alchemist's
   // transmute both ask a question from here on, and the player should see the die they are
   // being asked about.
@@ -578,6 +578,12 @@ function doSpaceEffect(ctx: Ctx, job: Extract<Job, { t: 'spaceEffect' }>, rng: R
   const phase = ctx.s.phase;
   invariant(phase.t === 'racing', 'space effect resolved outside a race');
 
+  // Techies' mines replace whatever the space was.
+  if (phase.tripSpaces.includes(job.pos)) {
+    tripRacer(ctx, rng, racer, null);
+    return;
+  }
+
   const track = trackForRace(phase.raceNo as RaceNumber);
   const space = track.spaces[job.pos];
   invariant(space, 'no space at ' + job.pos + ' on ' + track.id);
@@ -762,6 +768,12 @@ function warpRacer(
   ctx.s.queue.unshift(...tail);
 }
 
+/** Rolls `racer`'s own die: a d6, unless a power (Chaos Knight) says otherwise. */
+function rollDieOf(ctx: Ctx, rng: Rng, racer: MutableRacer): number {
+  const sides = hooksFor(ctx.s, racer).dieSides?.(makeHookCtx(ctx, rng, racer)) ?? 6;
+  return rng.roll(sides);
+}
+
 /**
  * A cup or star chip's value once the earner's powers have had their say — Dota's
  * Alchemist doubles both.
@@ -907,6 +919,29 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
       return lost;
     },
 
+    rollDie: (target) => rollDieOf(ctx, rng, target),
+
+    mineSpace: (pos) => {
+      const phase = ctx.s.phase;
+      if (phase.t !== 'racing' || pos <= START || pos >= FINISH) return false;
+      if (phase.tripSpaces.includes(pos)) return false;
+      if (trackForRace(phase.raceNo as RaceNumber).spaces[pos]?.effect.t === 'trip') return false;
+      phase.tripSpaces.push(pos);
+      return true;
+    },
+
+    defer: (key, data) => {
+      ctx.s.queue.unshift({
+        t: 'resume',
+        racer: self.racerId,
+        key,
+        data: (data ?? null) as never,
+        choice: '' as ChoiceId,
+        // A mimic answers under the power it has now, as it would a question asked now.
+        ...(isMimic(powerOf(self)) ? { copy: copyTarget(ctx.s, self) } : {}),
+      });
+    },
+
     silence: (target) => {
       target.memo[SILENCED] = true;
     },
@@ -949,9 +984,9 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
       const roll = currentRoll(ctx);
       if (!roll || !roll.die) return;
       const was = roll.value;
-      roll.value = rng.rollD6();
       // The die belongs to whoever is taking the turn, not to whoever forced the reroll.
       const mover = findRacer(ctx.s, roll.racer);
+      roll.value = mover ? rollDieOf(ctx, rng, mover) : rng.rollD6();
       if (mover) ctx.emit({ t: 'dice/thrown', player: mover.owner, racerId: roll.racer, value: roll.value });
       roll.rerolls += 1;
       roll.stage = 'reroll';

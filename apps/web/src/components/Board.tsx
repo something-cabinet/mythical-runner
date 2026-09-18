@@ -200,7 +200,7 @@ function Die({ view, roll, x, y, size, color, portrait }: {
         ? roll.move === 0
           ? `no move${by}`
           : `moves ${roll.move} instead${by}`
-        : `${roll.face} ${delta < 0 ? '−' : '+'} ${Math.abs(delta)} = ${roll.move}${by}`;
+        : `${roll.face} ${delta < 0 ? '−' : '+'} ${Math.abs(delta)} = ${roll.move < 0 ? `−${-roll.move}` : roll.move}${by}`;
   const labelX = portrait ? x : x + size / 2 + 22;
   const labelY = portrait ? y + size / 2 + 30 : y - (maths ? 15 : 0);
 
@@ -244,6 +244,8 @@ interface BoardProps {
   /** Racers to highlight, e.g. the target of a decision. */
   readonly highlight?: readonly RacerId[];
   readonly claimedSpaces?: readonly number[];
+  /** Spaces turned into TRIP spaces mid-race (Techies' mines), drawn over what they were. */
+  readonly tripSpaces?: readonly number[];
   /** The latest roll, drawn as a die in the infield. */
   readonly roll?: ShownRoll | null;
   /** The racer whose turn it is, which gets a glow. */
@@ -256,6 +258,7 @@ export function Board({
   positions,
   highlight = [],
   claimedSpaces = [],
+  tripSpaces = [],
   roll = null,
   activeRacer = null,
 }: BoardProps) {
@@ -333,7 +336,8 @@ export function Board({
       {track.spaces.map((space, i) => {
         const b = boxes[i] ?? { x: 0, y: 0, w: 0, h: 0 };
         const c = center(b);
-        const e = space.effect;
+        const mined = tripSpaces.includes(space.index);
+        const e = mined ? ({ t: 'trip' } as const) : space.effect;
         const isStart = space.index === 0;
         const claimed = e.t === 'star' && claimedSpaces.includes(space.index);
         const fill = isStart ? SPACE_COLORS[3] : SPACE_COLORS[(space.index - 1) % SPACE_COLORS.length];
@@ -379,7 +383,7 @@ export function Board({
             )}
             {e.t === 'trip' && (
               <text className="glyph glyph-trip" x={c.x} y={c.y}>
-                TRIP!
+                {mined ? 'MINE!' : 'TRIP!'}
               </text>
             )}
             {e.t === 'arrow' && (
@@ -398,7 +402,7 @@ export function Board({
                 : e.t === 'star'
                   ? `Space ${space.index}: star, 1 point${claimed ? ' (already taken)' : ''}`
                   : e.t === 'trip'
-                    ? `Space ${space.index}: trip`
+                    ? `Space ${space.index}: trip${mined ? ' (mined)' : ''}`
                     : e.t === 'arrow'
                       ? `Space ${space.index}: move ${e.amount > 0 ? 'forward' : 'back'} ${Math.abs(e.amount)}`
                       : `Space ${space.index}`}

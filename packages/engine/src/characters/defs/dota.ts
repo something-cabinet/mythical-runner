@@ -1,11 +1,11 @@
 import { racerId, type ChoiceId } from '../../ids.js';
 import { option, racerTarget, type HookCtx } from '../hooks.js';
 import type { RacerDef } from '../types.js';
-import { FINISH } from '../../tracks/index.js';
+import { FINISH, START } from '../../tracks/index.js';
 import { defFor, isRunning } from './shared.js';
 
 /**
- * The Dota set: sixteen heroes from Dota 2, designed in `docs/new-character-set.md`.
+ * The Dota set: twenty-two heroes from Dota 2, designed in `docs/new-character-set.md`.
  *
  * Same conventions as the classic set: optional ("I can") powers ask and default to
  * declining, log lines name racers with `h.nameOf`, and one `h.log` per happening.
@@ -58,7 +58,7 @@ const spiritBreaker = def(
   {
     onPass: (h, passed) => {
       if (!isRunning(passed)) return;
-      const roll = h.rng.rollD6();
+      const roll = h.rollDie(passed);
       h.log(
         roll === 1
           ? `${h.nameOf(h.self)} bashes ${h.nameOf(passed)}, who rolls a 1 and goes down!`
@@ -383,8 +383,8 @@ const legionCommander = def(
       if (key !== 'duel' || choice === ('pass' as ChoiceId)) return;
       const foe = h.racers().find((r) => choice === (`duel:${r.racerId}` as ChoiceId));
       if (!foe || !isRunning(foe)) return;
-      const mine = h.rng.rollD6();
-      const theirs = h.rng.rollD6();
+      const mine = h.rollDie(h.self);
+      const theirs = h.rollDie(foe);
       // "I win ties."
       const winner = mine >= theirs ? h.self : foe;
       h.log(
@@ -445,6 +445,167 @@ const stormSpirit = def('storm-spirit', 'Storm Spirit', 'All my moves are warps.
   movesByWarp: (h) => isRunning(h.self),
 });
 
+/**
+ * THIRST — "I get +1 to my main move for each other racer currently tripped."
+ *
+ * Counted as the move is settled, so a racer that went down earlier this turn counts.
+ */
+const bloodseeker = def(
+  'bloodseeker',
+  'Bloodseeker',
+  'I get +1 to my main move for each other racer currently tripped.',
+  {
+    modifyMainMove: (h, value, mover) => {
+      if (mover.racerId !== h.self.racerId) return value;
+      const down = h.running().filter((r) => r.racerId !== h.self.racerId && r.tripped).length;
+      if (down === 0) return value;
+      h.log(`${h.nameOf(h.self)} smells blood: +${down}.`);
+      return value + down;
+    },
+  },
+);
+
+/**
+ * POWER COGS — "Before my main move, I push every racer 1 space away from me."
+ *
+ * Racers ahead move 1 forward, racers behind move 1 back; racers on my space have no "away"
+ * and stay put. Each push is a move, so it can pass, and the space it ends on fires.
+ */
+const clockwerk = def(
+  'clockwerk',
+  'Clockwerk',
+  'Before my main move, I push every racer 1 space away from me.',
+  {
+    beforeMainMove: (h) => {
+      if (!isRunning(h.self)) return;
+      const pushed = h
+        .running()
+        .filter((r) => r.racerId !== h.self.racerId && r.pos !== h.self.pos && r.pos !== START);
+      // A racer on Start can't be pushed any further back.
+      if (pushed.length === 0) return;
+      h.log(`${h.nameOf(h.self)}'s Power Cogs push everyone 1 away.`);
+      // Moves are queued at the front, so queue in reverse to push in board order.
+      for (const r of [...pushed].reverse()) h.move(r, r.pos > h.self.pos ? 1 : -1);
+    },
+  },
+);
+
+/**
+ * MEAT HOOK — "I can skip my main move to warp any racer to my space and trip them."
+ *
+ * A warp passes nobody, but the racer does arrive: my space's effect and
+ * stop powers fire for them. Offered like Earthshaker's slam: before the roll, and not on a
+ * tripped turn.
+ */
+const pudge = def(
+  'pudge',
+  'Pudge',
+  'I can skip my main move to warp any racer to my space and trip them.',
+  {
+    beforeMainMove: (h) => {
+      if (!isRunning(h.self) || h.self.tripped) return;
+      const targets = h.running().filter((r) => r.racerId !== h.self.racerId);
+      if (targets.length === 0) return;
+      h.ask({
+        player: h.self.owner,
+        prompt: 'Meat Hook? Warp a racer to your space and trip them, instead of rolling.',
+        options: [
+          ...targets.map((r) => option(`hook:${r.racerId}`, `Hook ${h.nameOf(r)}`, racerTarget(r.racerId))),
+          option('roll', 'Roll normally'),
+        ],
+        key: 'hook',
+        defaultChoice: 'roll' as ChoiceId,
+      });
+    },
+    resume: (h, key, choice) => {
+      if (key !== 'hook' || choice === ('roll' as ChoiceId)) return;
+      const victim = h.racers().find((r) => choice === (`hook:${r.racerId}` as ChoiceId));
+      if (!victim || !isRunning(victim)) return;
+      h.skipMainMove();
+      h.log(`${h.nameOf(h.self)} hooks ${h.nameOf(victim)}!`);
+      h.warp(victim, h.self.pos);
+      h.trip(victim);
+    },
+  },
+);
+
+/**
+ * PROXIMITY MINES — "Every space I stop on becomes a TRIP space."
+ *
+ * Mined as I come to rest, after the space has done whatever it does, so I don't trip on
+ * the mine I've just laid — but it's a TRIP space for everyone from then on, me included,
+ * for the rest of the race. A star or an arrow under it is gone. Start and the finish
+ * can't be mined.
+ */
+const techies = def('techies', 'Techies', 'Every space I stop on becomes a TRIP space.', {
+  onStop: (h) => {
+    if (!isRunning(h.self)) return;
+    if (h.mineSpace(h.self.pos)) h.log(`${h.nameOf(h.self)} plants a mine on space ${h.self.pos}.`);
+  },
+});
+
+/**
+ * CHAOS BOLT — "I roll a d20, and get -9 to my main move. It can take me backwards."
+ *
+ * The d20 is my die for anything that has me roll: rerolls, a duel, Spirit Breaker's bash.
+ * The -9 is only on the main move. Below 0 it runs backwards, clamped at Start; at exactly
+ * 0 there is no move. Self modifiers apply last, so the -9 comes after everyone else's —
+ * a Gunk can't clamp a backwards move to 0.
+ */
+const chaosKnight = def(
+  'chaos-knight',
+  'Chaos Knight',
+  'I roll a d20, and get -9 to my main move. It can take me backwards.',
+  {
+    dieSides: () => 20,
+    modifyMainMove: (h, value, mover) => {
+      if (mover.racerId !== h.self.racerId) return value;
+      h.log(`${h.nameOf(h.self)}'s Chaos Bolt: -9.`);
+      return value - 9;
+    },
+  },
+);
+
+/**
+ * BORROWED TIME — "Whenever another racer trips, I can help them up at once. If I do, I
+ * move 3."
+ *
+ * Offered once the trip has settled, so a Tidehunter that shrugged it off by itself isn't
+ * offered. A racer helped up is no longer tripped, and so doesn't skip its next main move.
+ */
+const abaddon = def(
+  'abaddon',
+  'Abaddon',
+  'Whenever another racer trips, I can help them up at once. If I do, I move 3.',
+  {
+    onRacerTripped: (h, target) => {
+      if (target.racerId === h.self.racerId || !isRunning(h.self) || !isRunning(target)) return;
+      h.defer('mistCoil', { target: target.racerId });
+    },
+    resume: (h, key, choice, data) => {
+      const { target: targetId } = (data ?? {}) as { target?: string };
+      const target = h.racers().find((r) => r.racerId === targetId);
+      if (!target || !isRunning(target) || !target.tripped || !isRunning(h.self)) return;
+      if (key === 'mistCoil') {
+        h.ask({
+          player: h.self.owner,
+          prompt: `${h.nameOf(target)} is down. Help them up and move 3?`,
+          options: [option('help', `Help ${h.nameOf(target)} up`, racerTarget(target.racerId)), option('pass', 'Leave them')],
+          key: 'helpUp',
+          data: { target: targetId },
+          defaultChoice: 'pass' as ChoiceId,
+        });
+        return;
+      }
+      if (key !== 'helpUp' || choice !== ('help' as ChoiceId)) return;
+      target.tripped = false;
+      h.emit({ t: 'racer/stoodUp', racerId: target.racerId });
+      h.log(`${h.nameOf(h.self)} helps ${h.nameOf(target)} up, and moves 3.`);
+      h.move(h.self, 3);
+    },
+  },
+);
+
 export const DOTA_RACERS: readonly RacerDef[] = [
   bountyHunter,
   spiritBreaker,
@@ -462,4 +623,10 @@ export const DOTA_RACERS: readonly RacerDef[] = [
   legionCommander,
   oracle,
   stormSpirit,
+  bloodseeker,
+  clockwerk,
+  pudge,
+  techies,
+  chaosKnight,
+  abaddon,
 ];

@@ -94,8 +94,9 @@ const SPRITE_FILES: Readonly<Record<string, string>> = {
   'lovable-loser': 'classic/loveableLoser.jpg',
   romantic: 'classic/romantic.png',
 
-  // The Dota set: Valve's own hero face crops (the art Dotabuff shows as its hero
-  // avatar), squared to 144x144 so the disc's circular clip lands on the face.
+  // The Dota set: Valve's own hero portraits (`heroes/<name>_full.png`, the art Dotabuff
+  // shows as its hero avatar), the middle 144x144 of the 256x144 image, so the disc's
+  // circular clip lands on the face.
   'anti-mage': 'dota2/anti-mage.png',
   'bounty-hunter': 'dota2/bounty-hunter.png',
   'dota-alchemist': 'dota2/dota-alchemist.png',
@@ -112,6 +113,12 @@ const SPRITE_FILES: Readonly<Record<string, string>> = {
   'storm-spirit': 'dota2/storm-spirit.png',
   'templar-assassin': 'dota2/templar-assassin.png',
   tidehunter: 'dota2/tidehunter.png',
+  bloodseeker: 'dota2/bloodseeker.png',
+  clockwerk: 'dota2/clockwerk.png',
+  pudge: 'dota2/pudge.png',
+  techies: 'dota2/techies.png',
+  'chaos-knight': 'dota2/chaos-knight.png',
+  abaddon: 'dota2/abaddon.png',
 };
 
 const SPRITE_DIR = '/character_sprite';
@@ -312,7 +319,10 @@ export function describeEvent(e: GameEvent, view: PlayerView): LogLine | null {
     case 'dice/thrown':
       return null;
     case 'dice/rolled':
-      return { text: `${racer(e.racerId)} moves ${e.value}`, tone: 'plain' };
+      return {
+        text: e.value < 0 ? `${racer(e.racerId)} moves ${-e.value} back` : `${racer(e.racerId)} moves ${e.value}`,
+        tone: 'plain',
+      };
     case 'racer/passed':
       return { text: `${racer(e.racerId)} passes ${racer(e.passed)}`, tone: 'plain' };
     case 'racer/warped':

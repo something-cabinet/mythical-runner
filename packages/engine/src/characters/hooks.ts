@@ -91,6 +91,26 @@ export interface HookCtx {
   forfeit(player: PlayerId, value: number): number;
 
   /**
+   * Rolls `target`'s own die — a d6, or whatever `dieSides` says. For powers that make a
+   * racer roll ("they roll a die", "we roll our dice"), so Chaos Knight throws its d20 there
+   * too.
+   */
+  rollDie(target: MutableRacer): number;
+
+  /**
+   * Techies: space `pos` is a TRIP space for the rest of the race, whatever it was before.
+   * Start and the finish can't be mined. False when nothing changed — already a TRIP space.
+   */
+  mineSpace(pos: number): boolean;
+
+  /**
+   * Calls this power's `resume` with `key` and `data` once the work now running has
+   * finished, where it may `ask`. For reacting with a question from a hook that must not
+   * ask, like Abaddon offering help from `onRacerTripped`. `choice` arrives empty.
+   */
+  defer(key: string, data?: unknown): void;
+
+  /**
    * Silencer: `target` has no powers at all during its next turn — "they can only roll for
    * main move". Lifted when that turn ends.
    */
@@ -201,6 +221,12 @@ export interface Hooks {
    * Rule 5: powers at a specific time only happen once per turn.
    */
   beforeMainMove?(h: HookCtx): void;
+
+  /**
+   * Chaos Knight: how many faces `self`'s die has. A d6 when absent. Applies to every roll
+   * of that racer's die — the main move, rerolls, and `HookCtx.rollDie`.
+   */
+  dieSides?(h: HookCtx): number;
 
   /**
    * Replaces the main move entirely, e.g. Legs' "skip rolling and move 5 instead".

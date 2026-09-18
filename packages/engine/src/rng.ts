@@ -30,6 +30,8 @@ export interface Rng {
   nextFloat(): number;
   /** A single d6, 1..6. */
   rollD6(): number;
+  /** A single die with `sides` faces, 1..sides. Chaos Knight throws a d20. */
+  roll(sides: number): number;
   /** Fisher-Yates shuffle; returns a new array, does not mutate the input. */
   shuffle<T>(items: readonly T[]): T[];
   /** How many raw draws have been taken. Useful for assertions in replay tests. */
@@ -72,6 +74,10 @@ export function makeRng(seed: number, step: number): Rng {
 
     rollD6(): number {
       return rng.nextInt(6) + 1;
+    },
+
+    roll(sides: number): number {
+      return rng.nextInt(sides) + 1;
     },
 
     shuffle<T>(items: readonly T[]): T[] {

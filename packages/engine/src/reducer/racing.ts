@@ -34,6 +34,7 @@ export function beginRacing(ctx: Ctx, raceNo: RaceNumber, rng: Rng): void {
     finished: [],
     stalledTurns: 0,
     claimedSpaces: [],
+    tripSpaces: [],
     nextUp: [],
     extraTurns: [],
     turn: 0,

@@ -223,8 +223,8 @@ const duelist = def(
       const target = h.racers().find((r) => r.racerId === targetId);
       if (!target || !isRunning(target)) return;
 
-      const mine = h.rng.rollD6();
-      const theirs = h.rng.rollD6();
+      const mine = h.rollDie(h.self);
+      const theirs = h.rollDie(target);
       // "I win ties."
       const winner = mine >= theirs ? h.self : target;
       h.log(

@@ -169,6 +169,11 @@ export type Phase =
        */
       readonly claimedSpaces: readonly number[];
       /**
+       * Spaces turned into TRIP spaces for the rest of the race — Techies' mines. Their own
+       * effect, star or arrow, is gone.
+       */
+      readonly tripSpaces: readonly number[];
+      /**
        * Racers that take the next turns out of order, first to last: Skipper's "I go next
        * in turn order". Consumed one per hand-off, once the current player's team has
        * gone; turn order then continues clockwise from whoever went last, which is what

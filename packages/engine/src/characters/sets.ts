@@ -7,7 +7,7 @@
  */
 export const CHARACTER_SETS = [
   { id: 'classic', name: 'Classic', text: 'The 36 racers from the Magical Athlete box.' },
-  { id: 'dota', name: 'Dota', text: '16 heroes from Dota 2.' },
+  { id: 'dota', name: 'Dota', text: '22 heroes from Dota 2.' },
 ] as const;
 
 export type CharacterSetId = (typeof CHARACTER_SETS)[number]['id'];

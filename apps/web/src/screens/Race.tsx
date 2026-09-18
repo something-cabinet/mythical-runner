@@ -59,6 +59,7 @@ export function RaceScreen() {
               positions={board.positions}
               highlight={targets}
               claimedSpaces={racing ? phase.claimedSpaces : []}
+              tripSpaces={racing ? phase.tripSpaces : []}
               roll={board.roll}
               activeRacer={
                 // Follow the die while its move plays out; the server has already moved on.
