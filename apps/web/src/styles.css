@@ -1055,9 +1055,11 @@ select {
   gap: 16px;
 }
 
-/* The board is a dark physical object in both themes, like the printed track. */
+/* The board is a dark physical object in both themes, like the printed track — lifted
+   off the page with its own drop shadow so it reads as a table, not a flat panel. */
 .board .board-rim {
   fill: #1b1724;
+  filter: drop-shadow(0 14px 30px rgb(0 0 0 / 45%));
 }
 
 .board .board-outline {
@@ -1112,13 +1114,14 @@ select {
 }
 
 .board .start-label {
-  fill: #e0321f;
+  fill: #ff4d3d;
   font-size: 30px;
   font-weight: 900;
   font-style: italic;
   letter-spacing: 0.02em;
   text-anchor: middle;
   dominant-baseline: central;
+  filter: drop-shadow(0 0 8px rgb(255 77 61 / 55%));
 }
 
 .board .glyph {
@@ -1131,6 +1134,7 @@ select {
 .board .glyph-star {
   fill: #ffc93c;
   font-size: 32px;
+  filter: drop-shadow(0 0 6px rgb(255 201 60 / 70%));
 }
 
 .board .glyph-trip {
@@ -1153,6 +1157,21 @@ select {
   stroke: #ffc93c;
   stroke-width: 2.5;
   stroke-dasharray: 8 6;
+  filter: drop-shadow(0 0 10px rgb(255 201 60 / 35%));
+}
+
+/* Racing-flag check, faint enough to read as texture behind the finishers' portraits. */
+.board .finish-check {
+  opacity: 0.16;
+  pointer-events: none;
+}
+
+.board .finish-check-a {
+  fill: #ffc93c;
+}
+
+.board .finish-check-b {
+  fill: #2c2538;
 }
 
 .board .finish-label {
@@ -1228,16 +1247,17 @@ select {
 
 /* The racer whose turn it is breathes a soft halo in its seat colour. */
 .board .piece-active {
-  opacity: 0.45;
+  opacity: 0.55;
   transform-box: fill-box;
   transform-origin: center;
-  animation: piece-glow 1.3s ease-in-out infinite;
+  animation: piece-glow 1.1s ease-in-out infinite;
+  filter: drop-shadow(0 0 10px currentColor);
 }
 
 @keyframes piece-glow {
   50% {
-    opacity: 0.12;
-    transform: scale(1.3);
+    opacity: 0.15;
+    transform: scale(1.4);
   }
 }
 

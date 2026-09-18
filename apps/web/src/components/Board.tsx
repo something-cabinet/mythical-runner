@@ -303,6 +303,12 @@ export function Board({
         <clipPath id="piece-disc" clipPathUnits="objectBoundingBox">
           <circle cx="0.5" cy="0.5" r="0.5" />
         </clipPath>
+        {/* Racing-flag check for the finish pad, at a scale that reads as texture, not tiles. */}
+        <pattern id="finish-check" width="16" height="16" patternUnits="userSpaceOnUse" patternTransform={g.portrait ? 'rotate(90)' : undefined}>
+          <rect width="16" height="16" className="finish-check-a" />
+          <rect width="8" height="8" className="finish-check-b" />
+          <rect x="8" y="8" width="8" height="8" className="finish-check-b" />
+        </pattern>
       </defs>
       <rect className="board-rim" x={0} y={0} width={g.width} height={g.height} rx={PAD + 26} />
       <rect
@@ -408,6 +414,15 @@ export function Board({
       })}
 
       <rect className="finish" x={finishBox.x} y={finishBox.y} width={finishBox.w} height={finishBox.h} rx={8} />
+      <rect
+        className="finish-check"
+        x={finishBox.x}
+        y={finishBox.y}
+        width={finishBox.w}
+        height={finishBox.h}
+        rx={8}
+        fill="url(#finish-check)"
+      />
       <text
         className="finish-label"
         x={finishSplit.label.x}
