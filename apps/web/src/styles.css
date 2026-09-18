@@ -1258,17 +1258,159 @@ select {
 
   .race-layout {
     display: grid;
-    grid-template-columns: minmax(0, 1.25fr) minmax(320px, 1fr);
-    gap: 16px;
+    grid-template-columns: minmax(0, 1.55fr) minmax(300px, 0.72fr);
+    gap: 20px;
     align-items: start;
   }
 
-  /* The board turns landscape here and takes the full row, like the printed track. */
-  .race-board {
-    grid-column: 1 / -1;
+  .race-arena {
+    grid-column: 1;
+    min-width: 0;
+  }
+
+  .race-side-panel {
+    grid-column: 2;
+    padding-top: 42px;
+  }
+
+  .race-side-panel > .card {
+    background: color-mix(in srgb, var(--surface) 92%, var(--accent-bg));
   }
 
   .actionbar-inner-wide {
     max-width: 1080px;
+  }
+}
+
+/* ---- Gameplay overdrive ------------------------------------------------- */
+.race-page {
+  gap: 12px;
+}
+
+.race-kicker {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.race-kicker-mark {
+  color: var(--accent-bg);
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.race-kicker-rule {
+  width: 32px;
+  height: 1px;
+  background: color-mix(in srgb, var(--accent-bg) 55%, var(--border));
+}
+
+.race-arena {
+  min-width: 0;
+}
+
+.arena-topline {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 2px 12px;
+}
+
+.arena-topline h1 {
+  font-size: clamp(1.35rem, 4vw, 2rem);
+  font-weight: 900;
+  letter-spacing: -0.04em;
+}
+
+.eyebrow {
+  color: var(--coral);
+  font-size: 0.7rem;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.arena-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  border: 1px solid color-mix(in srgb, var(--good) 38%, var(--border));
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: var(--good);
+  background: color-mix(in srgb, var(--good) 9%, var(--surface));
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.race-board {
+  overflow: hidden;
+  border-width: 2px;
+  border-color: color-mix(in srgb, var(--accent-bg) 42%, var(--border));
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent-bg) 6%, transparent), 0 18px 42px rgb(0 0 0 / 24%);
+}
+
+.race-side-panel .section-title {
+  color: var(--coral);
+}
+
+.actionbar {
+  border-top-width: 2px;
+  border-top-color: color-mix(in srgb, var(--accent-bg) 42%, var(--border));
+}
+
+.actionbar-inner-wide {
+  position: relative;
+}
+
+.actionbar .prompt {
+  color: var(--accent-bg);
+  font-size: 0.92rem;
+  letter-spacing: 0.02em;
+}
+
+.actionbar .btn-lg {
+  min-height: 58px;
+  border-radius: 16px;
+  font-size: 1.05rem;
+  font-weight: 850;
+  letter-spacing: -0.01em;
+}
+
+@media (max-width: 959px) {
+  .race-page {
+    padding-top: 10px;
+  }
+
+  .race-side-panel {
+    display: contents;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .racer-card,
+  .set-toggle,
+  .code-chip,
+  .segmented button {
+    transition: none;
   }
 }

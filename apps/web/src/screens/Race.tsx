@@ -49,10 +49,24 @@ export function RaceScreen() {
 
   return (
     <>
-      <main className="page page-wide">
+      <main className="page page-wide race-page">
+        <div className="race-kicker">
+          <span className="race-kicker-mark" aria-hidden="true">✦</span>
+          <span>Mythical Circuit</span>
+          <span className="race-kicker-rule" aria-hidden="true" />
+          <span className="num">Race {phase.raceNo}</span>
+        </div>
         <StatusBanner />
         <div className="race-layout">
-          <section className="card race-board" style={{ padding: 10 }}>
+          <section className="race-arena">
+            <div className="arena-topline">
+              <div>
+                <p className="eyebrow">The enchanted track</p>
+                <h1>Dash to the finish</h1>
+              </div>
+              <span className="arena-badge"><span className="live-dot" /> Live match</span>
+            </div>
+            <div className="card race-board" style={{ padding: 10 }}>
             <Board
               view={view}
               raceNo={phase.raceNo as RaceNumber}
@@ -65,9 +79,10 @@ export function RaceScreen() {
                 board.roll ? board.roll.racerId : upNow
               }
             />
+            </div>
           </section>
 
-          <div className="stack">
+          <div className="stack race-side-panel">
             <section className="card" aria-labelledby="field-heading">
               <h2 id="field-heading" className="section-title">
                 On the track
