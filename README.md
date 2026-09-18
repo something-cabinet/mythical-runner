@@ -35,7 +35,7 @@ npm run test:ui -w @mr/web           # a full game through the UI on phone-sized
 
 Log in to Cloudflare 
 
-```
+```bash
 cd apps/server
 npx wrangler login
 ```
@@ -44,7 +44,7 @@ This opens a browser to authorize wrangler against your Cloudflare account.
 
 Build the web client, then deploy the Worker (which serves both the static site and the API/Durable Object):
 
-```
+```bash
 npm run build -w @mr/web
 npm run deploy -w @mr/server
 ```
