@@ -95,11 +95,14 @@ export function RacerCard({
       onClick={onSelect}
     >
       <span className="racer-sprite" aria-hidden="true">
+        {hasSprite(racer) && <img className="racer-sprite-bg" src={racerSprite(racer)} alt="" loading="lazy" />}
         <img src={racerSprite(racer)} alt="" data-placeholder={!hasSprite(racer)} loading="lazy" />
       </span>
-      <span className="racer-name">{racerName(view, racer)}</span>
-      <span className="racer-power">{powerText(racer)}</span>
-      {footer}
+      <span className="racer-body">
+        <span className="racer-name">{racerName(view, racer)}</span>
+        <span className="racer-power">{powerText(racer)}</span>
+        {footer}
+      </span>
     </button>
   );
 }

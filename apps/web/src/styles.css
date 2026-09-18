@@ -557,23 +557,28 @@ select {
 
 /* ---- Racer cards -------------------------------------------------------- */
 
+/* Every row is as tall as the tallest card, so the grid reads as a set of identical cards
+   whatever the length of each racer's power text. */
 .racer-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-auto-rows: 1fr;
   gap: 10px;
 }
 
+/* Portrait, then name, then power, top to bottom. */
 .racer-card {
   appearance: none;
   text-align: left;
+  color: inherit;
+  font: inherit;
   border: 2px solid var(--border);
   background: var(--surface);
   border-radius: var(--radius);
-  padding: 12px;
+  padding: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  min-height: 120px;
   cursor: pointer;
   transition:
     border-color 120ms ease,
@@ -597,31 +602,55 @@ select {
   opacity: 0.45;
 }
 
-/* The portrait band. A fixed height keeps a grid row of cards aligned however tall or
-   wide the individual pieces of art are; `contain` means none of them is ever cropped. */
+.racer-card:hover:not(:disabled):not([aria-pressed='true']) {
+  border-color: color-mix(in srgb, var(--accent-bg) 55%, var(--border));
+}
+
+/* The portrait band: a fixed height, clipped, so every card's text starts at the same
+   line. The art is shown whole (`contain`) — the classic set is full-length figures, the
+   Dota set square busts — and a blurred copy of the same art fills the space either side. */
 .racer-card .racer-sprite {
-  display: grid;
-  place-items: center;
-  height: 96px;
-  margin: -2px -2px 2px;
-  border-radius: calc(var(--radius) - 4px);
+  position: relative;
+  flex: none;
+  height: 120px;
+  overflow: hidden;
   background:
     radial-gradient(circle at 50% 120%, color-mix(in srgb, var(--accent-bg) 22%, transparent), transparent 70%),
     color-mix(in srgb, var(--border) 45%, var(--surface));
 }
 
 .racer-card .racer-sprite img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
   display: block;
 }
 
+.racer-card .racer-sprite .racer-sprite-bg {
+  object-fit: cover;
+  filter: blur(14px) saturate(1.2);
+  opacity: 0.55;
+  transform: scale(1.2);
+}
+
+.racer-card .racer-body {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 /* The stand-in is opaque white and square, so it is cropped to a disc rather than left to
    read as a blank panel: a plain grey face where a portrait will go. */
 .racer-card .racer-sprite img[data-placeholder='true'] {
-  width: 70px;
-  height: 70px;
+  inset: 50% auto auto 50%;
+  width: 80px;
+  height: 80px;
+  transform: translate(-50%, -50%);
   object-fit: cover;
   border-radius: 50%;
   opacity: 0.7;
@@ -1051,19 +1080,22 @@ select {
 /* Racer cards as choices, e.g. Egg's three hatchlings. Tighter than the draft grid and
    capped in height: the bar has to leave the board visible on a phone. */
 .actionbar .racer-grid {
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   max-height: 40vh;
   overflow-y: auto;
 }
 
-.actionbar .racer-card {
-  min-height: 0;
-  padding: 10px;
-  gap: 4px;
+.actionbar .racer-card .racer-body {
+  padding: 8px 10px 10px;
 }
 
 /* The bar has to leave the board visible, so the portrait shrinks rather than the text. */
 .actionbar .racer-card .racer-sprite {
+  height: 72px;
+}
+
+.actionbar .racer-card .racer-sprite img[data-placeholder='true'] {
+  width: 56px;
   height: 56px;
 }
 
