@@ -53,29 +53,31 @@ export function CommitScreen() {
         </section>
 
         <section className="stack" aria-label="Your racers">
-          <div className="racer-grid">
-            {hand.map((racer) => {
-              const spent = used.includes(racer);
-              const chosen = locked.includes(racer);
-              return (
-                <RacerCard
-                  view={view}
-                  key={racer}
-                  racer={racer}
-                  selected={selected === racer || chosen}
-                  dim={spent || (done && !chosen)}
-                  disabled={spent || chosen || done || !canAct}
-                  onSelect={() => setSelected(racer)}
-                  footer={
-                    spent ? (
-                      <span className="tag">already raced</span>
-                    ) : chosen ? (
-                      <span className="tag tag-good">locked in</span>
-                    ) : null
-                  }
-                />
-              );
-            })}
+          <div className="card card-stage" style={{ padding: 10 }}>
+            <div className="racer-grid">
+              {hand.map((racer) => {
+                const spent = used.includes(racer);
+                const chosen = locked.includes(racer);
+                return (
+                  <RacerCard
+                    view={view}
+                    key={racer}
+                    racer={racer}
+                    selected={selected === racer || chosen}
+                    dim={spent || (done && !chosen)}
+                    disabled={spent || chosen || done || !canAct}
+                    onSelect={() => setSelected(racer)}
+                    footer={
+                      spent ? (
+                        <span className="tag">already raced</span>
+                      ) : chosen ? (
+                        <span className="tag tag-good">locked in</span>
+                      ) : null
+                    }
+                  />
+                );
+              })}
+            </div>
           </div>
         </section>
 

@@ -104,6 +104,82 @@ export function RacerCard({
   );
 }
 
+/**
+ * A persistent "whose move" strip: avatar, name, a live-dot in gold (you) or coral
+ * (opponent), and — for sequences with a fixed order, like the snake draft — a row of
+ * small seat chips showing where in that order this moment sits. Replaces the plain
+ * "Waiting for X" text that used to repeat across Draft, Commit and Lobby.
+ */
+export function TurnStrip({
+  view,
+  current,
+  label,
+  sub,
+  order,
+  pick,
+  countdown,
+}: {
+  view: PlayerView;
+  current: PlayerId;
+  label: string;
+  sub?: ReactNode;
+  /** The full pick sequence, one entry per pick, for a snake draft. */
+  order?: readonly PlayerId[];
+  /** Index into `order` for the pick happening right now. */
+  pick?: number;
+  countdown?: number | null;
+}) {
+  const mine = current === view.you;
+  return (
+    <div className="turnstrip" data-mine={mine}>
+      <span className="turnstrip-avatar">
+        <PlayerToken view={view} pid={current} size={44} />
+        <span className="turnstrip-live" aria-hidden="true" />
+      </span>
+      <div className="turnstrip-body">
+        <p className="turnstrip-label">{label}</p>
+        <p className="turnstrip-name">{mine ? 'You' : rawName(view, current)}</p>
+        {sub && <p className="turnstrip-sub muted">{sub}</p>}
+      </div>
+      {order && order.length > 0 && pick !== undefined && (
+        <div className="turnstrip-order" aria-hidden="true">
+          {order.map((pid, i) => (
+            <span
+              key={`${pid}-${i}`}
+              className="turnstrip-chip"
+              data-state={i < pick ? 'done' : i === pick ? 'current' : 'upcoming'}
+              style={{ background: seatColor(view, pid), color: SEAT_INK }}
+            >
+              {initials(rawName(view, pid))}
+            </span>
+          ))}
+        </div>
+      )}
+      {countdown != null && <Countdown deadline={countdown} />}
+    </div>
+  );
+}
+
+/**
+ * A building roster, shown as a horizontal row of slot frames rather than a list: a filled
+ * slot is a mini portrait and name, an empty one is a dashed placeholder. Answers "how
+ * full is my team" at a glance, and mirrors the seat-chip motif from `TurnStrip`.
+ */
+export function RosterStrip({ view, racers, slots }: { view: PlayerView; racers: readonly RacerId[]; slots: number }) {
+  return (
+    <div className="roster-strip">
+      {Array.from({ length: slots }, (_, i) => {
+        const racer = racers[i];
+        return (
+          <span key={i} className="roster-slot" data-filled={!!racer} title={racer ? racerName(view, racer) : undefined}>
+            {racer ? <img src={racerSprite(racer)} alt="" loading="lazy" /> : <span aria-hidden="true">?</span>}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Running totals, highest first. Ties share a rank. */
 export function Standings({ view }: { view: PlayerView }) {
   const rows = [...view.players]

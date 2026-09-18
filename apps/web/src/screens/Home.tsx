@@ -65,7 +65,7 @@ export function Home() {
         </div>
       </div>
 
-      <section className="card stack" aria-labelledby="create-heading">
+      <section className="card card-stage stack" aria-labelledby="create-heading">
         <h2 id="create-heading" className="section-title">
           Start a new game
         </h2>

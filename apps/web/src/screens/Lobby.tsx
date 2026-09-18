@@ -73,49 +73,47 @@ export function LobbyScreen() {
               {view.players.length}/{MAX_PLAYERS}
             </span>
           </div>
-          {view.players.map((p) => {
-            const remove = removeBots.find((a) => a.player === p.id);
-            return (
-              <div key={p.id} className={`player-row${p.connected ? '' : ' offline'}`}>
-                <PlayerToken view={view} pid={p.id} />
-                <span className="name">{p.name}</span>
-                {p.id === host?.id && <span className="tag tag-gold">host</span>}
-                {p.bot && <span className="tag">bot</span>}
-                {p.id === view.you && <span className="tag">you</span>}
-                {!p.connected && <span className="tag">away</span>}
-                {remove && (
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    style={{ minHeight: 36, padding: '0 10px' }}
-                    disabled={!canAct}
-                    onClick={() => send(remove)}
-                    aria-label={`Remove ${p.name}`}
-                  >
-                    Remove
-                  </button>
-                )}
+          <div className="seat-grid">
+            {view.players.map((p) => {
+              const remove = removeBots.find((a) => a.player === p.id);
+              return (
+                <div key={p.id} className="seat-card" data-host={p.id === host?.id} data-offline={!p.connected}>
+                  <PlayerToken view={view} pid={p.id} size={44} />
+                  <span className="name">{p.name}</span>
+                  <span className="tags">
+                    {p.id === host?.id && <span className="tag tag-gold">host</span>}
+                    {p.bot && <span className="tag">bot</span>}
+                    {p.id === view.you && <span className="tag">you</span>}
+                    {!p.connected && <span className="tag">away</span>}
+                  </span>
+                  {remove && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ minHeight: 32, padding: '0 10px', fontSize: '0.8rem' }}
+                      disabled={!canAct}
+                      onClick={() => send(remove)}
+                      aria-label={`Remove ${p.name}`}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+            {addBot && (
+              <button type="button" className="seat-empty" data-action="true" disabled={!canAct} onClick={() => send(addBot)}>
+                <span aria-hidden="true" style={{ fontSize: '1.4rem' }}>+</span>
+                Add a bot
+              </button>
+            )}
+            {Array.from({ length: Math.max(0, seatsLeft - (addBot ? 1 : 0)) }, (_, i) => (
+              <div key={i} className="seat-empty" aria-hidden="true">
+                <span style={{ fontSize: '1.4rem' }}>?</span>
+                Open seat
               </div>
-            );
-          })}
-          {seatsLeft > 0 && (
-            <div className="spread" style={{ paddingTop: 8 }}>
-              <p className="muted" style={{ fontSize: '0.85rem' }}>
-                {seatsLeft} seat{seatsLeft === 1 ? '' : 's'} open
-              </p>
-              {addBot && (
-                <button
-                  type="button"
-                  className="btn"
-                  style={{ minHeight: 40 }}
-                  disabled={!canAct}
-                  onClick={() => send(addBot)}
-                >
-                  Add a bot
-                </button>
-              )}
-            </div>
-          )}
+            ))}
+          </div>
         </section>
 
         <section className="card" aria-labelledby="sets-heading">

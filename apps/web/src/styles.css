@@ -627,6 +627,244 @@ select {
   opacity: 0.5;
 }
 
+/* ---- Turn strip ---------------------------------------------------------- */
+
+.turnstrip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+.turnstrip[data-mine='true'] {
+  border-color: color-mix(in srgb, var(--accent-bg) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent-bg) 14%, var(--surface));
+}
+
+.turnstrip-avatar {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+}
+
+.turnstrip-live {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid var(--surface);
+  background: var(--coral);
+  animation: pulse 1.1s ease-in-out infinite;
+}
+
+.turnstrip[data-mine='true'] .turnstrip-live {
+  background: var(--accent-bg);
+}
+
+.turnstrip-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.turnstrip-label {
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--coral);
+}
+
+.turnstrip[data-mine='true'] .turnstrip-label {
+  color: var(--accent);
+}
+
+.turnstrip-name {
+  font-size: 1.15rem;
+  font-weight: 850;
+  letter-spacing: -0.01em;
+}
+
+.turnstrip-sub {
+  font-size: 0.8rem;
+  margin-top: 1px;
+}
+
+.turnstrip-order {
+  display: flex;
+  gap: 5px;
+  flex: none;
+  max-width: 42vw;
+  overflow-x: auto;
+  padding: 2px;
+  scrollbar-width: none;
+}
+
+.turnstrip-order::-webkit-scrollbar {
+  display: none;
+}
+
+.turnstrip-chip {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 0.66rem;
+  font-weight: 800;
+  flex: none;
+  box-shadow: 0 0 0 2px var(--surface);
+  transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 160ms ease;
+}
+
+.turnstrip-chip[data-state='done'] {
+  opacity: 0.35;
+  transform: scale(0.82);
+}
+
+.turnstrip-chip[data-state='current'] {
+  transform: scale(1.22);
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px color-mix(in srgb, var(--accent-bg) 55%, transparent);
+}
+
+.turnstrip-chip[data-state='upcoming'] {
+  opacity: 0.75;
+}
+
+@media (max-width: 640px) {
+  .turnstrip-order {
+    display: none;
+  }
+}
+
+/* ---- Roster strip --------------------------------------------------------- */
+
+.roster-strip {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.roster-slot {
+  width: 60px;
+  height: 60px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--border);
+  color: var(--faint);
+  font-weight: 800;
+  flex: none;
+  background: var(--surface-2);
+}
+
+.roster-slot[data-filled='true'] {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--accent-bg) 50%, var(--border));
+  background:
+    radial-gradient(circle at 50% 120%, color-mix(in srgb, var(--accent-bg) 22%, transparent), transparent 70%),
+    var(--surface);
+  padding: 5px;
+}
+
+.roster-slot img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* ---- Seat grid (lobby) ---------------------------------------------------- */
+
+.seat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(126px, 1fr));
+  gap: 10px;
+}
+
+.seat-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 10px 12px;
+  border-radius: var(--radius);
+  border: 2px solid var(--border);
+  background: var(--surface-2);
+  text-align: center;
+}
+
+.seat-card[data-host='true'] {
+  border-color: color-mix(in srgb, var(--accent-bg) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent-bg) 12%, var(--surface-2));
+}
+
+.seat-card[data-offline='true'] {
+  opacity: 0.55;
+}
+
+.seat-card .name {
+  font-weight: 700;
+  font-size: 0.92rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seat-card .tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.seat-empty {
+  appearance: none;
+  cursor: default;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 16px 10px;
+  border-radius: var(--radius);
+  border: 2px dashed var(--border);
+  color: var(--faint);
+  background: transparent;
+  min-height: 106px;
+  font-weight: 700;
+  font-size: 0.85rem;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease, transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.seat-empty[data-action='true'] {
+  cursor: pointer;
+}
+
+.seat-empty[data-action='true']:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent-bg) 60%, var(--border));
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent-bg) 8%, transparent);
+  transform: translateY(-2px);
+}
+
+.seat-empty[data-action='true']:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* ---- Stage / quiet card tiers ---------------------------------------------- */
+
+.card-stage {
+  border-width: 2px;
+  border-color: color-mix(in srgb, var(--accent-bg) 42%, var(--border));
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent-bg) 6%, transparent), 0 18px 42px rgb(0 0 0 / 24%);
+}
+
 /* ---- Racer cards -------------------------------------------------------- */
 
 .racer-grid {
@@ -1205,18 +1443,43 @@ select {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+  align-items: end;
 }
 
 .podium .place {
+  position: relative;
   border-radius: var(--radius);
-  padding: 14px;
+  padding: 16px 14px;
   background: var(--surface-2);
   border: 1px solid var(--border);
   text-align: center;
+  animation: pop-in 380ms cubic-bezier(0.2, 0.85, 0.3, 1.15) both;
+}
+
+.podium .place-rank {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  font-size: 0.7rem;
+  font-weight: 850;
+  color: var(--faint);
 }
 
 .podium .place-gold {
-  background: color-mix(in srgb, var(--accent-bg) 22%, var(--surface));
+  padding-top: 30px;
+  padding-bottom: 26px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-bg) 32%, var(--surface)), var(--surface));
+  border-color: color-mix(in srgb, var(--accent-bg) 65%, var(--border));
+  box-shadow: 0 16px 32px color-mix(in srgb, var(--accent-bg) 20%, transparent);
+  transform: translateY(-10px);
+}
+
+.podium .place-gold .place-rank {
+  color: var(--accent);
+}
+
+.podium .place-silver {
+  animation-delay: 90ms;
 }
 
 .podium .medal {
@@ -1239,13 +1502,66 @@ select {
 }
 
 .winner {
+  position: relative;
   text-align: center;
-  padding: 24px 12px;
+  padding: 30px 12px 26px;
+  overflow: hidden;
 }
 
 .winner h2 {
-  font-size: 2rem;
+  font-size: 2.1rem;
   font-weight: 850;
+  animation: pop-in 460ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+.confetti {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.confetti-piece {
+  position: absolute;
+  top: -12px;
+  left: var(--x);
+  width: 8px;
+  height: 14px;
+  background: var(--c);
+  border-radius: 2px;
+  opacity: 0.9;
+  animation: confetti-fall 1600ms cubic-bezier(0.3, 0.1, 0.4, 1) both;
+  animation-delay: var(--d);
+}
+
+@keyframes confetti-fall {
+  0% {
+    transform: translateY(-10px) rotate(0deg);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(160px) rotate(280deg);
+    opacity: 0;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.stagger-in {
+  animation: pop-in 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: calc(var(--i, 0) * 55ms);
 }
 
 /* ---- Wider screens ------------------------------------------------------ */
@@ -1412,5 +1728,19 @@ select {
   .code-chip,
   .segmented button {
     transition: none;
+  }
+
+  .turnstrip-live,
+  .podium .place,
+  .winner h2,
+  .stagger-in,
+  .confetti-piece,
+  .seat-empty {
+    animation: none;
+    transition: none;
+  }
+
+  .confetti {
+    display: none;
   }
 }

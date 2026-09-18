@@ -1,4 +1,5 @@
 import { totalPoints, type RaceNumber } from '@mr/engine';
+import type { CSSProperties } from 'react';
 import { ActionBar, PlayerToken, Standings, Waiting } from '../components/bits';
 import { awardsFor, playerName, racerName, rawName, trackLabel } from '../lib/present';
 import { legalOf, useRoomContext } from '../lib/roomContext';
@@ -39,6 +40,7 @@ export function ResultsScreen() {
 
         <section className="podium" aria-label="Podium">
           <div className="place place-gold">
+            <span className="place-rank" aria-hidden="true">1</span>
             <p className="medal">1st · gold · {awards.gold} pts</p>
             {first ? (
               <>
@@ -49,7 +51,8 @@ export function ResultsScreen() {
               <p className="muted">Nobody finished</p>
             )}
           </div>
-          <div className="place">
+          <div className="place place-silver">
+            <span className="place-rank" aria-hidden="true">2</span>
             <p className="medal">2nd · silver · {awards.silver} pts</p>
             {second ? (
               <>
@@ -68,8 +71,8 @@ export function ResultsScreen() {
           <h2 id="earned-heading" className="section-title" style={{ marginBottom: 4 }}>
             Points this race
           </h2>
-          {earned.map(({ pid, pts }) => (
-            <div key={pid} className="player-row">
+          {earned.map(({ pid, pts }, i) => (
+            <div key={pid} className="player-row stagger-in" style={{ '--i': i } as CSSProperties}>
               <PlayerToken view={view} pid={pid} size={30} />
               <span className="name">
                 {rawName(view, pid)}
