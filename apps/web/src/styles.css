@@ -247,6 +247,11 @@ select {
   background: transparent;
 }
 
+.btn-ghost:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-bg) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent-bg) 40%, transparent);
+}
+
 .btn-block {
   width: 100%;
 }
@@ -457,6 +462,23 @@ select {
   font-weight: 800;
   letter-spacing: 0.14em;
   cursor: pointer;
+  transition:
+    transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-color 120ms ease,
+    background 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.code-chip:hover:not(:disabled) {
+  transform: translateY(-1px) scale(1.03);
+  border-color: color-mix(in srgb, var(--accent-bg) 60%, var(--border));
+  background: color-mix(in srgb, var(--accent-bg) 10%, var(--surface));
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.code-chip:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98);
+  transition-duration: 60ms;
 }
 
 .phase-label {
