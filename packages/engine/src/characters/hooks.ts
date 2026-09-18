@@ -91,7 +91,7 @@ export interface HookCtx {
   forfeit(player: PlayerId, value: number): number;
 
   /**
-   * Rolls `target`'s own die — a d6, or whatever `dieSides` says. For powers that make a
+   * Rolls `target`'s own die — a d6, or whatever `dieSides` or `throwDie` says. For powers that make a
    * racer roll ("they roll a die", "we roll our dice"), so Chaos Knight throws its d20 there
    * too.
    */
@@ -132,7 +132,7 @@ export interface HookCtx {
   cutInLine(): void;
 
   /**
-   * Genius, Ogre Magi: "I take another turn after this one." `self` goes again straight
+   * Genius: "I take another turn after this one." `self` goes again straight
    * after the turn now resolving — before any teammate still to move, who follows it.
    */
   extraTurn(): void;
@@ -223,10 +223,16 @@ export interface Hooks {
   beforeMainMove?(h: HookCtx): void;
 
   /**
-   * Chaos Knight: how many faces `self`'s die has. A d6 when absent. Applies to every roll
+   * Chaos Knight, Storm Spirit: how many faces `self`'s die has. A d6 when absent. Applies to every roll
    * of that racer's die — the main move, rerolls, and `HookCtx.rollDie`.
    */
   dieSides?(h: HookCtx): number;
+
+  /**
+   * Ogre Magi: throws `self`'s die some other way than one die of `dieSides` faces, and
+   * returns the face. Wins over `dieSides`, and applies everywhere it does.
+   */
+  throwDie?(h: HookCtx): number;
 
   /**
    * Replaces the main move entirely, e.g. Legs' "skip rolling and move 5 instead".
@@ -295,13 +301,6 @@ export interface Hooks {
    * not `ask`: trips happen inside hooks that can't suspend.
    */
   onRacerTripped?(h: HookCtx, target: MutableRacer): void;
-
-  /**
-   * Storm Spirit: every move `self` makes is a warp to wherever it would have ended. So no
-   * passing, nobody latching on, no stepping over spaces — it just arrives, and arriving
-   * is stopping.
-   */
-  movesByWarp?(h: HookCtx): boolean;
 
   /**
    * Dota's Alchemist: adjusts a cup or star-space chip `self` has just earned, before it is

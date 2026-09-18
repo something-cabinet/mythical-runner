@@ -166,7 +166,7 @@ export function borrowedPower(view: PlayerView, racer: RacerState): RacerId | nu
 
 /**
  * A limited-use power's remaining charges, for the lists: Templar Assassin's Refraction,
- * Faceless Void's Chronosphere and Silencer's Global Silence. Null for every other card.
+ * Faceless Void's Chronosphere, Silencer's Global Silence and Storm Spirit's d20. Null for every other card.
  *
  * `power` is the card the racer is running (see `borrowedPower`), so a Morphling borrowing
  * one shows it too. The counts come from the same `memo` keys the powers write.
@@ -187,6 +187,14 @@ export function abilityToken(
         label: used ? 'chrono used' : 'chrono ready',
         ready: !used,
         title: used ? 'Chronosphere already used this race' : 'Chronosphere ready (once per race)',
+      };
+    }
+    case 'storm-spirit': {
+      const used = racer.memo['overloadUsed'] === true;
+      return {
+        label: used ? 'd20 used' : 'd20 ready',
+        ready: !used,
+        title: used ? 'Overload (d20) already used this race' : 'Overload ready: one d20 roll this race',
       };
     }
     case 'silencer': {

@@ -394,16 +394,6 @@ function doMoveStep(ctx: Ctx, job: Extract<Job, { t: 'move' }>, rng: Rng): void 
 
   if (job.remaining <= 0 || racer.eliminated || racer.pos === FINISH) return settle();
 
-  // Storm Spirit: "All my moves are considered warp." It arrives without travelling, so
-  // nothing about the journey applies — no passing, no Suckerfish, no Stickler, no
-  // Leaptoad, no Huge Baby — only the arrival, which is a stop like any warp's.
-  if (hooksFor(ctx.s, racer).movesByWarp?.(makeHookCtx(ctx, rng, racer)) === true) {
-    const to = racer.pos + job.remaining * job.dir;
-    job.remaining = 0;
-    warpRacer(ctx, racer, to, job.resolveStop, job.triggerSpace);
-    return;
-  }
-
   if (job.started === null || racer.pos === job.origin) {
     const len = ctx.s.queue.length;
     if (!announceMoveStart(ctx, job, racer, rng)) {
@@ -768,10 +758,12 @@ function warpRacer(
   ctx.s.queue.unshift(...tail);
 }
 
-/** Rolls `racer`'s own die: a d6, unless a power (Chaos Knight) says otherwise. */
+/** Rolls `racer`'s own die: a d6, unless a power (Chaos Knight, Ogre Magi) says otherwise. */
 function rollDieOf(ctx: Ctx, rng: Rng, racer: MutableRacer): number {
-  const sides = hooksFor(ctx.s, racer).dieSides?.(makeHookCtx(ctx, rng, racer)) ?? 6;
-  return rng.roll(sides);
+  const hooks = hooksFor(ctx.s, racer);
+  const h = makeHookCtx(ctx, rng, racer);
+  if (hooks.throwDie) return hooks.throwDie(h);
+  return rng.roll(hooks.dieSides?.(h) ?? 6);
 }
 
 /**

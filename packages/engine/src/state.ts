@@ -183,8 +183,7 @@ export type Phase =
        */
       readonly nextUp: readonly RacerId[];
       /**
-       * Racers owed "another turn after this one" — Genius's correct call, Ogre Magi's
-       * multicast. Unlike `nextUp` the turn meant is the racer's own, so it is taken
+       * Racers owed "another turn after this one" — Genius's correct call. Unlike `nextUp` the turn meant is the racer's own, so it is taken
        * straight away: ahead of any teammate still waiting in `toMove`, who goes after it.
        * The head of the queue is the only racer that may go until it has.
        *

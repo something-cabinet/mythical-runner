@@ -251,7 +251,7 @@ export function endTurn(ctx: Ctx, rng: Rng): void {
     return;
   }
 
-  // "Another turn after this one" — Genius, Ogre Magi. The turn is the racer's own, so it
+  // "Another turn after this one" — Genius. The turn is the racer's own, so it
   // comes straight away, ahead of any teammate still to move: that teammate stays in
   // `toMove` and goes once the extra turn is done. A racer out of the race forfeits it.
   while (phase.extraTurns.length > 0) {

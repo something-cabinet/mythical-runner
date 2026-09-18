@@ -16,7 +16,7 @@ import { defFor, isRunning } from './shared.js';
  *    ultimates, used before the owner's main move.
  *  - "Skip my main move" powers (Earthshaker, Anti-Mage) are offered before the main move,
  *    and not at all on a tripped turn, which has no main move to skip.
- *  - A warp is not a move, so Storm Spirit passes nobody. It is still an arrival, though:
+ *  - A warp is not a move, so a warped racer passes nobody. It is still an arrival, though:
  *    "racers are stopped on a space after they've finished moving onto it, or otherwise
  *    arriving there by other means", so the space a warp lands on fires as usual.
  */
@@ -75,14 +75,17 @@ const spiritBreaker = def(
  *
  * Only racers that actually go down count: one already tripped, or a Templar Assassin
  * shrugging it off, earns nothing.
+ *
+ * Never on the Start space: every racer begins there, so an opening slam would flatten
+ * the whole field before anyone has moved.
  */
 const earthshaker = def(
   'earthshaker',
   'Earthshaker',
-  'I can skip my main move to trip the other racers on my space, and move 2 for each racer I tripped.',
+  'I can skip my main move to trip the other racers on my space, and move 2 for each racer I tripped. Not on the Start space.',
   {
     beforeMainMove: (h) => {
-      if (!isRunning(h.self) || h.self.tripped) return;
+      if (!isRunning(h.self) || h.self.tripped || h.self.pos === START) return;
       const targets = h.sharing().filter((r) => isRunning(r) && !r.tripped);
       if (targets.length === 0) return;
       h.ask({
@@ -298,26 +301,22 @@ const omniknight = def(
   },
 );
 
-/** MULTICAST — "When I roll a 1 or 2 for my main move, I can take another turn after this one." */
+/**
+ * FIREBLAST — "I roll two d3s and multiply them, so I move 1 to 9."
+ *
+ * That product is my die for anything that has me roll, like Chaos Knight's d20: rerolls,
+ * a duel, Spirit Breaker's bash. Faces run 1, 2, 3, 4, 6 and 9 — never 5, 7 or 8.
+ */
 const ogreMagi = def(
   'ogre-magi',
   'Ogre Magi',
-  'When I roll a 1 or 2 for my main move, I can take another turn after this one.',
+  'I roll two d3s and multiply them, so I move 1 to 9.',
   {
-    onMainRollFinal: (h, mover, value) => {
-      if (mover.racerId !== h.self.racerId || (value !== 1 && value !== 2)) return;
-      h.ask({
-        player: h.self.owner,
-        prompt: `You rolled a ${value}. Multicast — take another turn after this one?`,
-        options: [option('multicast', 'Multicast!'), option('pass', 'No thanks')],
-        key: 'multicast',
-        defaultChoice: 'pass' as ChoiceId,
-      });
-    },
-    resume: (h, key, choice) => {
-      if (key !== 'multicast' || choice !== ('multicast' as ChoiceId)) return;
-      h.log(`${h.nameOf(h.self)} multicasts! Another turn after this one.`);
-      h.extraTurn();
+    throwDie: (h) => {
+      const a = h.rng.roll(3);
+      const b = h.rng.roll(3);
+      h.log(`${h.nameOf(h.self)} rolls ${a} × ${b} = ${a * b}.`);
+      return a * b;
     },
   },
 );
@@ -436,14 +435,39 @@ const oracle = def(
 );
 
 /**
- * BALL LIGHTNING — "All my moves are warps."
+ * OVERLOAD — "I roll a d4. Once per race, I can roll a d20 instead."
  *
- * Every move, not just the main one: an arrow, a Cheerleader's rally or a Centaur's kick
- * all teleport it. The pipeline does the warping; see `movesByWarp`.
+ * Offered before the main move, and not on a tripped turn, which has no roll to swap. The
+ * d20 is my die for the rest of that turn — a reroll throws it again — and the d4 is back
+ * from the next.
  */
-const stormSpirit = def('storm-spirit', 'Storm Spirit', 'All my moves are warps.', {
-  movesByWarp: (h) => isRunning(h.self),
-});
+const stormSpirit = def(
+  'storm-spirit',
+  'Storm Spirit',
+  'I roll a d4. Once per race, I can roll a d20 instead.',
+  {
+    dieSides: (h) => (h.self.memo['overloading'] === true ? 20 : 4),
+    beforeMainMove: (h) => {
+      if (!isRunning(h.self) || h.self.tripped || h.self.memo['overloadUsed'] === true) return;
+      h.ask({
+        player: h.self.owner,
+        prompt: 'Overload? Roll a d20 instead of your d4 this turn. Once per race.',
+        options: [option('overload', 'Roll the d20'), option('d4', 'Roll the d4')],
+        key: 'overload',
+        defaultChoice: 'd4' as ChoiceId,
+      });
+    },
+    resume: (h, key, choice) => {
+      if (key !== 'overload' || choice !== ('overload' as ChoiceId)) return;
+      h.self.memo['overloadUsed'] = true;
+      h.self.memo['overloading'] = true;
+      h.log(`${h.nameOf(h.self)} overloads: a d20 this turn!`);
+    },
+    onTurnEnd: (h) => {
+      delete h.self.memo['overloading'];
+    },
+  },
+);
 
 /**
  * THIRST — "I get +1 to my main move for each other racer currently tripped."

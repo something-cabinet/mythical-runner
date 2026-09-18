@@ -17,7 +17,7 @@ export function RaceScreen() {
   const phase = view.phase;
   const racing = phase.t === 'racing';
   // The racer up right now, and everyone the active player still has to move this turn.
-  // An owed extra turn (Ogre Magi, Genius) is up before the player chooses between racers.
+  // An owed extra turn (Genius) is up before the player chooses between racers.
   const upNow = racing
     ? (phase.moving ?? phase.extraTurns[0] ?? (phase.toMove.length === 1 ? (phase.toMove[0] ?? null) : null))
     : null;
@@ -180,7 +180,7 @@ function StatusBanner() {
     mine = phase.active === view.you;
     // With two racers to run, the turn belongs to the player until they have moved both;
     // name whichever one is up, or say there is still a choice to make.
-    // An extra turn (Ogre Magi, Genius) is owed before the player chooses between racers.
+    // An extra turn (Genius) is owed before the player chooses between racers.
     const up = phase.moving ?? phase.extraTurns[0] ?? (phase.toMove.length === 1 ? phase.toMove[0] : null);
     const which = up ? ` — ${racerName(view, up)}` : phase.toMove.length > 1 ? ' — pick a racer' : '';
     text = mine ? `Your turn${which}` : `${playerName(view, phase.active)}'s turn${which}`;

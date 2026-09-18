@@ -1004,6 +1004,44 @@ scenario('Genius — "If I\'m right, I take another turn after this one"', () =>
   check(moverAt(wrong.state) === 'p2', 'a wrong one hands on', moverAt(wrong.state));
 });
 
+scenario('Genius — two-player variant: the extra turn comes before the teammate', () => {
+  const base = raceState(
+    [
+      { player: 'p1', racer: 'genius', pos: 1 },
+      { player: 'p1', racer: 'vanilla-02', pos: 20 },
+      { player: 'p2', racer: 'vanilla-01', pos: 25 },
+      { player: 'p2', racer: 'vanilla-03', pos: 22 },
+    ],
+    'p1',
+  );
+  // Past the opening turn, so the whole team moves.
+  const s: GameState = { ...base, phase: { ...base.phase, opened: [playerId('p1'), playerId('p2')] } as GameState['phase'] };
+
+  let right: GameState | null = null;
+  for (let seed = 1; seed < 40000 && !right; seed++) {
+    const asked = applyAction({ ...s, seed }, roll('p1', 'genius'));
+    const d = applyAction(asked.state, decide('p1', 'predict:3'));
+    const rolled = d.events.find((e) => e.t === 'dice/rolled') as { value: number } | undefined;
+    if (rolled?.value === 3) right = d.state;
+  }
+  check(right !== null, 'a correct prediction');
+  if (!right) return;
+
+  const owed = legalActions(right, playerId('p1')).filter((a) => a.t === 'race/roll');
+  check(
+    owed.length === 1 && owed[0]?.t === 'race/roll' && owed[0].racerId === racerId('genius'),
+    'the extra turn is up — the teammate waits',
+    JSON.stringify(owed),
+  );
+  let refused = false;
+  try {
+    applyAction(right, roll('p1', 'vanilla-02'));
+  } catch {
+    refused = true;
+  }
+  check(refused, 'and cannot jump ahead of it');
+});
+
 scenario('Egg — "draw 3 new racers from the deck and pick one. I have its powers"', () => {
   // Three seats: two players would be playing the variant, which asks for two racers each
   // and has nothing to do with what Egg does.
@@ -1605,6 +1643,9 @@ scenario('Earthshaker — skips the main move to trip its space, moving 2 per tr
 
   const down = applyAction({ ...s, board: s.board.map((r) => (String(r.racerId) === 'earthshaker' ? { ...r, tripped: true } : r)) }, roll('p1'));
   check(down.state.pending === null, 'a tripped Earthshaker has no main move to give up');
+
+  const atStart = applyAction({ ...s, board: s.board.map((r) => ({ ...r, pos: START })) }, roll('p1'));
+  check(atStart.state.pending === null, 'no slam on the Start space');
 });
 
 scenario('Tidehunter — rolls when tripped, and gets straight up on a 4+', () => {
@@ -1772,86 +1813,23 @@ scenario('Omniknight — other racers within 3 get -2 to their main move', () =>
   check(!logLines(rollFor(far, 'p1', 3).events).includes('aura'), '4 away is out of range');
 });
 
-scenario('Ogre Magi — a 1 or 2 can multicast into another turn', () => {
+scenario('Ogre Magi — rolls two d3s and multiplies them', () => {
   const s = raceState(
     [
       { player: 'p1', racer: 'ogre-magi', pos: 3 },
-      { player: 'p2', racer: 'vanilla-01', pos: 3 },
+      { player: 'p2', racer: 'vanilla-01', pos: 20 },
     ],
     'p1',
   );
-  const low = rollUntil(s, 'p1', (r) => r.state.pending?.prompt.includes('Multicast') === true);
-  const die = pendingDie(low.state);
-  check(die === 1 || die === 2, 'asked on a low roll', String(die));
-  const again = applyAction(low.state, decide('p1', 'multicast'));
-  check(moverAt(again.state) === 'p1', 'Ogre Magi goes again', moverAt(again.state));
+  const thrown = (events: readonly GameEvent[]): number =>
+    (events.find((e) => e.t === 'dice/thrown') as { value: number } | undefined)?.value ?? NaN;
+  const faces = new Set<number>();
+  for (let seed = 1; seed <= 400; seed++) faces.add(thrown(applyAction({ ...s, seed }, roll('p1')).events));
+  check([...faces].sort((x, y) => x - y).join(',') === '1,2,3,4,6,9', 'only products of two d3s', [...faces].sort((x, y) => x - y).join(','));
 
-  const high = rollFor(s, 'p1', 5);
-  check(high.state.pending === null && moverAt(high.state) === 'p2', 'a 5 just moves');
-
-  // "A tripped racer skips their next main move" — and the multicast turn is that next
-  // main move. Going down on the way costs the bonus turn, whatever tripped them.
-  const wilds = trackForRace(2);
-  const trap = wilds.spaces.findIndex((sp) => sp.effect.t === 'trip' && sp.index > 1);
-  const trips: [string, GameState][] = [
-    [`a TRIP space (${trap})`, raceState([{ player: 'p1', racer: 'ogre-magi', pos: trap - 1 }, { player: 'p2', racer: 'vanilla-01', pos: 25 }], 'p1', 2)],
-    ['Banana', raceState([{ player: 'p1', racer: 'ogre-magi', pos: 3 }, { player: 'p2', racer: 'banana', pos: 4 }], 'p1')],
-    ['Baba Yaga', raceState([{ player: 'p1', racer: 'ogre-magi', pos: 3 }, { player: 'p2', racer: 'baba-yaga', pos: 5 }], 'p1')],
-  ];
-  for (const [by, start] of trips) {
-    const want = by === 'Banana' || by === 'Baba Yaga' ? 2 : 1;
-    const cast = rollFor(start, 'p1', want, { by: 'p1', choice: 'multicast' });
-    check(racerAt(cast.state, 'ogre-magi')?.tripped === true, `multicasts, then goes down to ${by}`);
-    check(moverAt(cast.state) === 'p1', '  and still has the bonus turn');
-    const bonus = applyAction(cast.state, roll('p1'));
-    check(!has(bonus.events, 'dice/thrown'), '  which rolls no die');
-    check(has(bonus.events, 'racer/stoodUp'), '  and is spent standing up');
-  }
-});
-
-scenario('Ogre Magi — two-player variant: the multicast turn comes before the teammate', () => {
-  const wilds = trackForRace(2);
-  const trap = wilds.spaces.findIndex((sp) => sp.effect.t === 'trip' && sp.index > 1);
-  const base = raceState(
-    [
-      { player: 'p1', racer: 'ogre-magi', pos: trap - 1 },
-      { player: 'p1', racer: 'vanilla-02', pos: 20 },
-      { player: 'p2', racer: 'vanilla-01', pos: 25 },
-      { player: 'p2', racer: 'vanilla-03', pos: 22 },
-    ],
-    'p1',
-    2,
-  );
-  // Past the opening turn, so the whole team moves.
-  const s: GameState = { ...base, phase: { ...base.phase, opened: [playerId('p1'), playerId('p2')] } as GameState['phase'] };
-
-  let cast: GameState | null = null;
-  for (let seed = 1; seed < 40000 && !cast; seed++) {
-    const r = applyAction({ ...s, seed }, roll('p1', 'ogre-magi'));
-    if (!r.state.pending?.prompt.includes('Multicast')) continue;
-    const d = applyAction(r.state, decide('p1', 'multicast'));
-    if (racerAt(d.state, 'ogre-magi')?.tripped) cast = d.state;
-  }
-  check(cast !== null, 'multicasts, then goes down on the TRIP space');
-  if (!cast) return;
-
-  const owed = legalActions(cast, playerId('p1')).filter((a) => a.t === 'race/roll');
-  check(
-    owed.length === 1 && owed[0]?.t === 'race/roll' && owed[0].racerId === racerId('ogre-magi'),
-    'the extra turn is up — the teammate waits',
-    JSON.stringify(owed),
-  );
-  check(throws(() => applyAction(cast, roll('p1', 'vanilla-02'))), 'and cannot jump ahead of it');
-
-  const up = applyAction(cast, roll('p1'));
-  check(has(up.events, 'racer/stoodUp') && !has(up.events, 'dice/thrown'), 'spent standing up, no die');
-
-  const then = legalActions(up.state, playerId('p1')).filter((a) => a.t === 'race/roll');
-  check(
-    then.length === 1 && then[0]?.t === 'race/roll' && then[0].racerId === racerId('vanilla-02'),
-    'then the teammate still gets its move',
-    JSON.stringify(then),
-  );
+  const nine = rollUntil(s, 'p1', (r) => thrown(r.events) === 9);
+  check(posOf(nine.state, 'ogre-magi') === 12, 'a 9 moves 9', `pos ${posOf(nine.state, 'ogre-magi')}`);
+  check(logLines(nine.events).includes('3 × 3 = 9'), 'and says how it got there', logLines(nine.events));
 });
 
 scenario('Morphling — has the power of whoever is last', () => {
@@ -1961,18 +1939,35 @@ scenario('Oracle — predicts who trips first; right is worth 3', () => {
   check(racerAt(wrong.state, 'oracle')?.memo['foreseen'] === true, 'and the prediction is spent');
 });
 
-scenario('Storm Spirit — every move is a warp', () => {
+scenario('Storm Spirit — rolls a d4, and a d20 once per race', () => {
   const s = raceState(
     [
       { player: 'p1', racer: 'storm-spirit', pos: 1 },
-      { player: 'p2', racer: 'banana', pos: 3 },
+      { player: 'p2', racer: 'vanilla-01', pos: 20 },
     ],
     'p1',
   );
-  const { state, events } = rollFor(s, 'p1', 5);
-  check(posOf(state, 'storm-spirit') === 6, 'a 5 lands 5 ahead');
-  check(has(events, 'racer/warped') && !events.some((e) => e.t === 'racer/moved' && String(e.racerId) === 'storm-spirit'), 'by warping');
-  check(!has(events, 'racer/passed') && racerAt(state, 'storm-spirit')?.tripped === false, 'so it passes nobody — no Banana trip');
+  const thrown = (events: readonly GameEvent[]): number =>
+    (events.find((e) => e.t === 'dice/thrown') as { value: number } | undefined)?.value ?? NaN;
+
+  const asked = applyAction(s, roll('p1'));
+  check(asked.state.pending?.prompt.includes('Overload') === true, 'offers the d20 before rolling');
+
+  const small = new Set<number>();
+  const big = new Set<number>();
+  for (let seed = 1; seed <= 400; seed++) {
+    const at = applyAction({ ...s, seed }, roll('p1')).state;
+    small.add(thrown(applyAction(at, decide('p1', 'd4')).events));
+    big.add(thrown(applyAction(at, decide('p1', 'overload')).events));
+  }
+  check(small.size === 4 && Math.min(...small) === 1 && Math.max(...small) === 4, 'the d4: faces 1 to 4', [...small].join(','));
+  check(big.size === 20 && Math.max(...big) === 20, 'the d20: faces 1 to 20', [...big].join(','));
+
+  const used = applyAction(asked.state, decide('p1', 'overload')).state;
+  const me = racerAt(used, 'storm-spirit');
+  check(me?.memo['overloadUsed'] === true && me.memo['overloading'] === undefined, 'spent, and back to the d4 after the turn');
+  const again = raceState([{ player: 'p1', racer: 'storm-spirit', pos: 1, memo: { overloadUsed: true } }, { player: 'p2', racer: 'vanilla-01', pos: 20 }], 'p1');
+  check(applyAction(again, roll('p1')).state.pending === null, 'not offered a second time');
 });
 
 scenario('Bloodseeker — +1 to the main move for each other racer down', () => {
