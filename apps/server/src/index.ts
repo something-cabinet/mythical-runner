@@ -29,6 +29,10 @@ export default {
   async fetch(request, env): Promise<Response> {
     const url = new URL(request.url);
 
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: corsHeaders() });
+    }
+
     if (url.pathname === '/api/health') return json({ ok: true });
 
     if (url.pathname === '/api/rooms' || url.pathname === '/api/rooms/') {
@@ -84,9 +88,19 @@ function clampTurnSeconds(value: unknown): number {
   return Math.min(MAX_TURN_SECONDS, Math.max(MIN_TURN_SECONDS, Math.round(value)));
 }
 
-function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+function corsHeaders(): Headers {
+  return new Headers({
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'GET, POST, OPTIONS',
+    'access-control-allow-headers': 'content-type',
+    'access-control-max-age': '86400',
   });
+}
+
+function json(data: unknown, status = 200): Response {
+  const headers = corsHeaders();
+  headers.set('content-type', 'application/json; charset=utf-8');
+  headers.set('cache-control', 'no-store');
+
+  return new Response(JSON.stringify(data), { status, headers });
 }
