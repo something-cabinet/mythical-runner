@@ -2,7 +2,7 @@ import { FINISH, type RacerId, type RaceNumber } from '@mr/engine';
 import { useState } from 'react';
 import { Board } from '../components/Board';
 import { ActionBar, RacerCard, RacerToken, Standings, Waiting } from '../components/bits';
-import { borrowedPower, ordinal, playerName, powerText, racerName, rawName } from '../lib/present';
+import { abilityToken, borrowedPower, ordinal, playerName, powerText, racerName, rawName } from '../lib/present';
 import { legalOf, useRoomContext } from '../lib/roomContext';
 
 /**
@@ -77,6 +77,7 @@ export function RaceScreen() {
                 // and the power worth reading; its own name stays alongside, because the
                 // token on the track is still an Egg.
                 const power = borrowedPower(view, r);
+                const ability = r.finishedRank === null && !r.eliminated ? abilityToken(r, power ?? r.racerId) : null;
                 return (
                   <div key={r.racerId} className="field-row" data-out={r.eliminated}>
                     <RacerToken view={view} racer={r.racerId} owner={r.owner} />
@@ -99,6 +100,11 @@ export function RaceScreen() {
                         </span>
                       )}
                       {r.tripped && <span className="tag tag-bad">tripped</span>}
+                      {ability && (
+                        <span className={`tag${ability.ready ? ' tag-good' : ''}`} title={ability.title}>
+                          {ability.label}
+                        </span>
+                      )}
                       {upThisTurn.includes(r.racerId) && r.finishedRank === null && (
                         <span className="tag tag-gold">
                           {r.racerId === upNow ? 'turn' : opening ? 'choose' : 'to go'}

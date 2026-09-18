@@ -157,6 +157,44 @@ export function borrowedPower(view: PlayerView, racer: RacerState): RacerId | nu
   return copyTarget(view, racer);
 }
 
+/**
+ * A limited-use power's remaining charges, for the lists: Templar Assassin's Refraction,
+ * Faceless Void's Chronosphere and Silencer's Global Silence. Null for every other card.
+ *
+ * `power` is the card the racer is running (see `borrowedPower`), so a Morphling borrowing
+ * one shows it too. The counts come from the same `memo` keys the powers write.
+ */
+export function abilityToken(
+  racer: RacerState,
+  power: RacerId,
+): { label: string; ready: boolean; title: string } | null {
+  switch (power as string) {
+    case 'templar-assassin': {
+      const used = typeof racer.memo['refractions'] === 'number' ? (racer.memo['refractions'] as number) : 0;
+      const left = Math.max(0, 3 - used);
+      return { label: `refraction ${left}/3`, ready: left > 0, title: `Refraction: ignores the next ${left} trips` };
+    }
+    case 'faceless-void': {
+      const used = racer.memo['chronoUsed'] === true;
+      return {
+        label: used ? 'chrono used' : 'chrono ready',
+        ready: !used,
+        title: used ? 'Chronosphere already used this race' : 'Chronosphere ready (once per race)',
+      };
+    }
+    case 'silencer': {
+      const used = racer.memo['silenceUsed'] === true;
+      return {
+        label: used ? 'silence used' : 'silence ready',
+        ready: !used,
+        title: used ? 'Global Silence already used this race' : 'Global Silence ready (once per race)',
+      };
+    }
+    default:
+      return null;
+  }
+}
+
 /** "Classic + Dota", in the sets' canonical order. */
 export function setNames(sets: readonly CharacterSetId[]): string {
   return CHARACTER_SETS.filter((x) => sets.includes(x.id)).map((x) => x.name).join(' + ');
