@@ -744,7 +744,7 @@ const genius = def(
     onMainRollFinal: (h, mover, value) => {
       if (mover.racerId !== h.self.racerId || h.self.memo['prediction'] !== value) return;
       h.log(`${h.nameOf(h.self)} called it — a ${value}! Another turn after this one.`);
-      h.cutInLine();
+      h.extraTurn();
     },
   },
 );

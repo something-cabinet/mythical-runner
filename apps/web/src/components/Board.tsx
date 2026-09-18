@@ -159,7 +159,8 @@ const PIPS: Record<number, readonly (readonly [number, number])[]> = {
  * still null the die simply sits there — powers are mid-decision, and the player is being
  * asked about the very face they can see.
  */
-function Die({ roll, x, y, size, color, portrait }: {
+function Die({ view, roll, x, y, size, color, portrait }: {
+  view: PlayerView;
   roll: ShownRoll;
   x: number;
   y: number;
@@ -188,8 +189,8 @@ function Die({ roll, x, y, size, color, portrait }: {
 
   const pips = PIPS[face];
   const unit = size / 3.4;
-  const name = racerName(roll.racerId);
-  const by = roll.modifiedBy ? ` (${racerName(roll.modifiedBy)})` : '';
+  const name = racerName(view, roll.racerId);
+  const by = roll.modifiedBy ? ` (${racerName(view, roll.modifiedBy)})` : '';
   const delta = (roll.move ?? roll.face) - roll.face;
   // U+2212 for the minus, so "4 − 1 = 3" lines up with the digits either side of it.
   const maths =
@@ -420,6 +421,7 @@ export function Board({
         const size = g.portrait ? 96 : 120;
         return (
           <Die
+            view={view}
             key={roll.key}
             roll={roll}
             x={g.portrait ? inf.x : inf.x - 90}
@@ -459,7 +461,7 @@ export function Board({
 
         const mine = r.owner === view.you;
         const targeted = highlight.includes(r.racerId);
-        const label = `${racerName(r.racerId)} (${rawName(view, r.owner)})${
+        const label = `${racerName(view, r.racerId)} (${rawName(view, r.owner)})${
           r.tripped ? ', tripped' : ''
         }${rank ? `, finished ${ordinal(rank)}` : `, space ${pos}`}`;
 

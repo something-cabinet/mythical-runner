@@ -19,4 +19,4 @@
 - Alchemist: I received double the points from finish cup and star space.
 - Legion Commander: After my main move, I can shout DUEL! to one other racer in my space. We roll our dice and whoever rolls highest get +1 permanently to their main move. I win ties.
 - Oracle: At the start of my first turn, I predict which racer will trip first. If I'm right, I get 3 points.
-- Storm Spirit: I get -1 to my main move. All my move are considered *warp*.
+- Storm Spirit: All my move are considered *warp*.

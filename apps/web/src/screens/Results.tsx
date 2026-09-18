@@ -42,7 +42,7 @@ export function ResultsScreen() {
             <p className="medal">1st · gold · {awards.gold} pts</p>
             {first ? (
               <>
-                <p className="racer">{racerName(first.racerId)}</p>
+                <p className="racer">{racerName(view, first.racerId)}</p>
                 <p className="muted">{playerName(view, first.owner)}</p>
               </>
             ) : (
@@ -53,7 +53,7 @@ export function ResultsScreen() {
             <p className="medal">2nd · silver · {awards.silver} pts</p>
             {second ? (
               <>
-                <p className="racer">{racerName(second.racerId)}</p>
+                <p className="racer">{racerName(view, second.racerId)}</p>
                 <p className="muted">{playerName(view, second.owner)}</p>
               </>
             ) : (

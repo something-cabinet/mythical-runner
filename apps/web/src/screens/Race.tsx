@@ -17,7 +17,10 @@ export function RaceScreen() {
   const phase = view.phase;
   const racing = phase.t === 'racing';
   // The racer up right now, and everyone the active player still has to move this turn.
-  const upNow = racing ? (phase.moving ?? (phase.toMove.length === 1 ? (phase.toMove[0] ?? null) : null)) : null;
+  // An owed extra turn (Ogre Magi, Genius) is up before the player chooses between racers.
+  const upNow = racing
+    ? (phase.moving ?? phase.extraTurns[0] ?? (phase.toMove.length === 1 ? (phase.toMove[0] ?? null) : null))
+    : null;
   const upThisTurn = racing ? [...phase.toMove, ...(phase.moving ? [phase.moving] : [])] : [];
   // An opening turn moves one racer of the player's choosing, so the others are candidates
   // rather than a queue.
@@ -79,8 +82,8 @@ export function RaceScreen() {
                     <RacerToken view={view} racer={r.racerId} owner={r.owner} />
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontWeight: 750 }}>
-                        {racerName(power ?? r.racerId)}{' '}
-                        {power && <span className="who">(as {racerName(r.racerId)}) </span>}
+                        {racerName(view, power ?? r.racerId)}{' '}
+                        {power && <span className="who">(as {racerName(view, r.racerId)}) </span>}
                         <span className="who">· {r.owner === view.you ? 'you' : rawName(view, r.owner)}</span>
                       </div>
                       <p className="power">{powerText(power ?? r.racerId)}</p>
@@ -165,13 +168,14 @@ function StatusBanner() {
   let mine = false;
   if (pending) {
     mine = pending.player === view.you;
-    text = mine ? `${racerName(pending.source)} needs your decision` : `Waiting on ${playerName(view, pending.player)} — ${racerName(pending.source)}`;
+    text = mine ? `${racerName(view, pending.source)} needs your decision` : `Waiting on ${playerName(view, pending.player)} — ${racerName(view, pending.source)}`;
   } else {
     mine = phase.active === view.you;
     // With two racers to run, the turn belongs to the player until they have moved both;
     // name whichever one is up, or say there is still a choice to make.
-    const up = phase.moving ?? (phase.toMove.length === 1 ? phase.toMove[0] : null);
-    const which = up ? ` — ${racerName(up)}` : phase.toMove.length > 1 ? ' — pick a racer' : '';
+    // An extra turn (Ogre Magi, Genius) is owed before the player chooses between racers.
+    const up = phase.moving ?? phase.extraTurns[0] ?? (phase.toMove.length === 1 ? phase.toMove[0] : null);
+    const which = up ? ` — ${racerName(view, up)}` : phase.toMove.length > 1 ? ' — pick a racer' : '';
     text = mine ? `Your turn${which}` : `${playerName(view, phase.active)}'s turn${which}`;
   }
 
@@ -223,13 +227,14 @@ function RaceActions() {
           <div className="racer-grid">
             {cards.map(({ action, option, racer }) => (
               <RacerCard
+                view={view}
                 key={action.choice}
                 racer={racer}
                 disabled={held}
                 onSelect={() => send(action)}
                 footer={
                   <span className="racer-pick">
-                    {option.label === racerName(racer) ? 'Choose' : option.label}
+                    {option.label === racerName(view, racer) ? 'Choose' : option.label}
                   </span>
                 }
               />
@@ -256,12 +261,25 @@ function RaceActions() {
   }
 
   if (rolls.length > 0) {
+    // The server sends a whole turn at once, so the state handing us the next turn arrives
+    // while the previous one is still walking across the board. Offering the roll then
+    // would put a live button under a racer the player can see is still moving — and on
+    // someone else's turn, from their point of view. The bar waits for the board to catch
+    // up, the same rule the decision branch above follows.
+    if (board.animating) {
+      return (
+        <ActionBar wide>
+          <Waiting>Racing…</Waiting>
+        </ActionBar>
+      );
+    }
+
     // One button per racer still to move: "you use each of your racers in the order you
     // want", so the choice of who goes next is the player's, one at a time.
     const label = (racerId: RacerId | undefined): string => {
       const racer = racerId ? view.board.find((r) => r.racerId === racerId) : myRacers[0];
       const verb = racer?.tripped ? 'Stand up' : 'Roll';
-      return rolls.length > 1 && racer ? `${verb} · ${racerName(racer.racerId)}` : verb;
+      return rolls.length > 1 && racer ? `${verb} · ${racerName(view, racer.racerId)}` : verb;
     };
     return (
       <ActionBar wide>

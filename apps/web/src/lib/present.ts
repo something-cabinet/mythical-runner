@@ -1,7 +1,8 @@
 import {
   CHARACTER_SETS,
   currentDrafter,
-  racerName,
+  racerLabel,
+  racerName as bareRacerName,
   racerText,
   powerOf,
   copyTarget,
@@ -68,29 +69,49 @@ export function initials(name: string): string {
 }
 
 export function racerInitials(id: RacerId): string {
-  return initials(racerName(id));
+  return initials(bareRacerName(id));
 }
 
 /**
- * Racer art, keyed by racer id, under `apps/web/public/character_sprite`.
+ * Racer art, keyed by racer id, under `apps/web/public/character_sprite`. Each character
+ * set has its own folder there; the placeholder sits above them, shared by all of them.
  *
  * Only the racers whose art has been drawn are listed; the rest fall back to the
- * placeholder, so a new racer never renders a broken image. File names are listed
- * explicitly rather than derived from the id, because the art is hand-authored and its
- * names do not all match the ids, nor are they all PNGs (`lovable-loser` is a JPEG named
+ * placeholder, so a new racer never renders a broken image. Paths are listed explicitly
+ * rather than derived from the id and set, because the art is hand-authored and its names
+ * do not all match the ids, nor are they all PNGs (`lovable-loser` is a JPEG named
  * `loveableLoser`).
  *
- * To add art: drop the file in that folder and add one line here.
+ * To add art: drop the file in its set's folder and add one line here.
  */
 const SPRITE_FILES: Readonly<Record<string, string>> = {
-  banana: 'banana.png',
-  dicemonger: 'dicemonger.png',
-  duelist: 'duelist.png',
-  hare: 'hare.png',
-  heckler: 'heckler.png',
-  hypnotist: 'hypnotist.png',
-  'lovable-loser': 'loveableLoser.jpg',
-  romantic: 'romantic.png',
+  banana: 'classic/banana.png',
+  dicemonger: 'classic/dicemonger.png',
+  duelist: 'classic/duelist.png',
+  hare: 'classic/hare.png',
+  heckler: 'classic/heckler.png',
+  hypnotist: 'classic/hypnotist.png',
+  'lovable-loser': 'classic/loveableLoser.jpg',
+  romantic: 'classic/romantic.png',
+
+  // The Dota set: Valve's own hero face crops (the art Dotabuff shows as its hero
+  // avatar), squared to 144x144 so the disc's circular clip lands on the face.
+  'anti-mage': 'dota2/anti-mage.png',
+  'bounty-hunter': 'dota2/bounty-hunter.png',
+  'dota-alchemist': 'dota2/dota-alchemist.png',
+  earthshaker: 'dota2/earthshaker.png',
+  'faceless-void': 'dota2/faceless-void.png',
+  kunkka: 'dota2/kunkka.png',
+  'legion-commander': 'dota2/legion-commander.png',
+  morphling: 'dota2/morphling.png',
+  'ogre-magi': 'dota2/ogre-magi.png',
+  omniknight: 'dota2/omniknight.png',
+  oracle: 'dota2/oracle.png',
+  silencer: 'dota2/silencer.png',
+  'spirit-breaker': 'dota2/spirit-breaker.png',
+  'storm-spirit': 'dota2/storm-spirit.png',
+  'templar-assassin': 'dota2/templar-assassin.png',
+  tidehunter: 'dota2/tidehunter.png',
 };
 
 const SPRITE_DIR = '/character_sprite';
@@ -98,8 +119,8 @@ const PLACEHOLDER_SPRITE = `${SPRITE_DIR}/placeholder.png`;
 
 /** The image for a racer, or the placeholder when that racer has no art yet. */
 export function racerSprite(id: RacerId): string {
-  const file = SPRITE_FILES[id];
-  return file ? `${SPRITE_DIR}/${file}` : PLACEHOLDER_SPRITE;
+  const path = SPRITE_FILES[id];
+  return path ? `${SPRITE_DIR}/${path}` : PLACEHOLDER_SPRITE;
 }
 
 /** True when `racerSprite` is a real likeness rather than the stand-in. */
@@ -107,7 +128,20 @@ export function hasSprite(id: RacerId): boolean {
   return id in SPRITE_FILES;
 }
 
-export { racerName, racerText };
+/**
+ * A racer's name as this game should show it.
+ *
+ * Racer names are only unique within a set — the classic set and the Dota set both field
+ * an Alchemist — so once the lobby mixes sets every racer carries its set, "Genius
+ * (Classic)" next to "Morphling (Dota)". With one set in play the bare name is shown.
+ *
+ * Takes the view rather than being a bare lookup for that reason, like `playerName`.
+ */
+export function racerName(view: PlayerView, id: RacerId): string {
+  return racerLabel(id, view.racerSets);
+}
+
+export { racerText };
 
 /**
  * Whose card a racer is actually running, or null when it is running its own.
@@ -196,7 +230,7 @@ export interface LogLine {
  */
 export function describeEvent(e: GameEvent, view: PlayerView): LogLine | null {
   const who = (pid: PlayerId): string => playerName(view, pid);
-  const racer = (id: RacerId): string => racerName(id);
+  const racer = (id: RacerId): string => racerName(view, id);
 
   switch (e.t) {
     case 'player/joined':

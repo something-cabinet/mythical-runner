@@ -20,7 +20,7 @@ import {
 } from './lobby.js';
 import { CHARACTER_SETS } from '../characters/sets.js';
 import { beginCommit as _beginCommit, commitSize, raceCommit } from './commit.js';
-import { advanceAfterScoring, endTurn, raceContinue, raceRoll, takeTurn } from './racing.js';
+import { advanceAfterScoring, endTurn, owedTurn, raceContinue, raceRoll, takeTurn } from './racing.js';
 import { answerPending, runQueue } from './pipeline.js';
 import { finish, hand, makeCtx, used, type Ctx } from './working.js';
 
@@ -246,7 +246,9 @@ export function legalActions(state: GameState, player: PlayerId): Action[] {
     case 'racing': {
       // One per racer still to move: which of them goes next is the player's call.
       if (s.phase.active !== player || s.phase.moving !== null) return [];
-      return s.phase.toMove.map((racerId) => ({ t: 'race/roll', by: player, racerId }));
+      // An owed extra turn is taken before the player may choose between racers.
+      const owed = owedTurn(s.phase);
+      return (owed ? [owed] : s.phase.toMove).map((racerId) => ({ t: 'race/roll', by: player, racerId }));
     }
 
     case 'scored':

@@ -80,8 +80,17 @@ export type Job =
       started: RacerId[] | null;
       /** True if this move is the racer's main move, which some powers key off. */
       isMainMove: boolean;
-      /** False for moves caused by a space effect, so arrows do not chain forever. */
+      /**
+       * Whether arriving counts as stopping. False only for moves that are voided rather
+       * than completed, so nothing fires at a place the racer never really came to rest.
+       */
       resolveStop: boolean;
+      /**
+       * Whether the destination's own effect fires on arrival. False for the move an arrow
+       * itself causes, so arrows do not chain forever — the racer has still stopped there,
+       * so `resolveStop` stays true and stop powers fire as the rules say they do.
+       */
+      triggerSpace: boolean;
     }
   /** Resolve passing, once a move has fully completed. */
   | {

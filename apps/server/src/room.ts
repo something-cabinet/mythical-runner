@@ -116,8 +116,18 @@ export class RoomDO extends DurableObject<Env> {
       const stored = await ctx.storage.get<unknown>(['meta', 'state', 'secrets']);
       this.meta = (stored.get('meta') as Meta | undefined) ?? null;
       const saved = stored.get('state') as GameState | undefined;
-      // Rooms saved before character sets existed drafted from the classic set.
-      this.state = saved ? { ...saved, racerSets: saved.racerSets ?? DEFAULT_SETS } : null;
+      // Rooms saved before character sets existed drafted from the classic set, and a race
+      // saved before extra turns had their own queue owes none.
+      this.state = saved
+        ? {
+            ...saved,
+            racerSets: saved.racerSets ?? DEFAULT_SETS,
+            phase:
+              saved.phase.t === 'racing'
+                ? { ...saved.phase, extraTurns: saved.phase.extraTurns ?? [] }
+                : saved.phase,
+          }
+        : null;
       this.secrets = (stored.get('secrets') as Record<string, string> | undefined) ?? {};
     });
   }

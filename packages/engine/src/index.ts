@@ -28,6 +28,7 @@ export {
   getRacer,
   getHooks,
   racerName,
+  racerLabel,
   racerText,
   racersInSets,
   racerSet,

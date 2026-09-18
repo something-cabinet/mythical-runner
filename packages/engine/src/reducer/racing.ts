@@ -18,7 +18,7 @@ import { activeRacers, findRacer, racersOf, type Ctx, scoreOf, seatAt } from './
  * that out as an infinite loop in production is worse than capping it here. When it
  * trips, whoever already finished keeps their cups.
  */
-const STALL_LIMIT_PER_PLAYER = 6;
+const STALL_LIMIT_PER_PLAYER = 50;
 
 export function beginRacing(ctx: Ctx, raceNo: RaceNumber, rng: Rng): void {
   const { s } = ctx;
@@ -35,6 +35,7 @@ export function beginRacing(ctx: Ctx, raceNo: RaceNumber, rng: Rng): void {
     stalledTurns: 0,
     claimedSpaces: [],
     nextUp: [],
+    extraTurns: [],
     turn: 0,
   };
   s.queue = [{ t: 'raceStart', done: [] }];
@@ -115,12 +116,20 @@ function announceTurn(ctx: Ctx): void {
   invariant(s.phase.t === 'racing', 'announceTurn outside a race');
   s.phase.turn += 1;
   s.phase.moving = null;
-  const only = s.phase.toMove.length === 1 ? s.phase.toMove[0] : undefined;
+  const only = owedTurn(s.phase) ?? (s.phase.toMove.length === 1 ? s.phase.toMove[0] : undefined);
   ctx.emit({
     t: 'turn/began',
     player: s.phase.active,
     ...(only ? { racerId: only } : {}),
   });
+}
+
+/**
+ * The racer owed "another turn after this one", if its turn is up: the only racer that
+ * may go until it has. Null mid-turn, while the debt is still being run up.
+ */
+export function owedTurn(phase: { readonly extraTurns: readonly RacerId[]; readonly moving: RacerId | null }): RacerId | null {
+  return phase.moving === null ? (phase.extraTurns[0] ?? null) : null;
 }
 
 export function raceRoll(ctx: Ctx, a: RaceRoll, rng: Rng): void {
@@ -130,9 +139,11 @@ export function raceRoll(ctx: Ctx, a: RaceRoll, rng: Rng): void {
   if (s.phase.active !== a.by) throw new IllegalActionError(a, 'not your turn');
   if (s.phase.moving !== null) throw new IllegalActionError(a, 'a racer is already moving');
 
-  const pick = a.racerId ?? (s.phase.toMove.length === 1 ? s.phase.toMove[0] : undefined);
+  const owed = owedTurn(s.phase);
+  const pick = a.racerId ?? owed ?? (s.phase.toMove.length === 1 ? s.phase.toMove[0] : undefined);
   if (!pick) throw new IllegalActionError(a, 'say which racer is going');
   if (!s.phase.toMove.includes(pick)) throw new IllegalActionError(a, 'that racer has already gone');
+  if (owed && pick !== owed) throw new IllegalActionError(a, 'that racer is taking its extra turn first');
 
   takeTurn(ctx, rng, pick);
 }
@@ -149,8 +160,9 @@ export function takeTurn(ctx: Ctx, rng: Rng, racerId?: RacerId): void {
 
   // The timer path names nobody, so it moves whichever racer is next in board order —
   // the same racer an absent player's client would have had pre-selected.
-  const pick = racerId ?? s.phase.toMove[0];
+  const pick = racerId ?? owedTurn(s.phase) ?? s.phase.toMove[0];
   invariant(pick, 'a turn with no racer left to move');
+  if (pick === owedTurn(s.phase)) s.phase.extraTurns.shift();
   const racer = findRacer(s, pick);
   invariant(racer, `racer ${pick} is not on the board`);
   s.phase.moving = pick;
@@ -236,6 +248,20 @@ export function endTurn(ctx: Ctx, rng: Rng): void {
   if (phase.stalledTurns >= s.board.length * STALL_LIMIT_PER_PLAYER) {
     endRace(ctx, true, rng);
     return;
+  }
+
+  // "Another turn after this one" — Genius, Ogre Magi. The turn is the racer's own, so it
+  // comes straight away, ahead of any teammate still to move: that teammate stays in
+  // `toMove` and goes once the extra turn is done. A racer out of the race forfeits it.
+  while (phase.extraTurns.length > 0) {
+    const owed = findRacer(s, phase.extraTurns[0] as RacerId);
+    if (owed && owed.finishedRank === null && !owed.eliminated) {
+      phase.active = owed.owner;
+      phase.toMove = [owed.racerId, ...phase.toMove.filter((id) => id !== owed.racerId)];
+      announceTurn(ctx);
+      return;
+    }
+    phase.extraTurns.shift();
   }
 
   // The rest of the active player's team goes before the turn passes on.

@@ -105,11 +105,17 @@ export interface HookCtx {
   addMainMoveBonus(target: MutableRacer, amount: number): void;
 
   /**
-   * Skipper: "I go next in turn order." Genius: "I take another turn after this one."
-   * The same thing — `self` takes the next turn, then turn order continues clockwise from
-   * `self`. Several calls in one turn queue up in the order they were made.
+   * Skipper: "I go next in turn order." `self` takes the next turn once the current
+   * player's team has gone, then turn order continues clockwise from `self`. Several
+   * calls in one turn queue up in the order they were made.
    */
   cutInLine(): void;
+
+  /**
+   * Genius, Ogre Magi: "I take another turn after this one." `self` goes again straight
+   * after the turn now resolving — before any teammate still to move, who follows it.
+   */
+  extraTurn(): void;
 
   /**
    * Mastermind: puts `self` into the next finishing place right now, whether or not it has

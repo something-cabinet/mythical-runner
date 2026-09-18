@@ -1,4 +1,4 @@
-import { racerName, racersInSets } from '../characters/registry.js';
+import { racerLabel, racersInSets } from '../characters/registry.js';
 import type { AskRequest, HookCtx, MutableRacer } from '../characters/hooks.js';
 import {
   BORROWED,
@@ -90,7 +90,7 @@ export function queueMove(
   racer: MutableRacer,
   distance: number,
   reason: MoveReason,
-  opts: { isMainMove?: boolean; resolveStop?: boolean; front?: boolean } = {},
+  opts: { isMainMove?: boolean; resolveStop?: boolean; triggerSpace?: boolean; front?: boolean } = {},
 ): void {
   // "Moving 0 doesn't count as moving" — not even enough to trigger a pass check.
   if (distance === 0) return;
@@ -110,6 +110,7 @@ export function queueMove(
     startBehind: behindOf(ctx, racer),
     isMainMove: opts.isMainMove ?? false,
     resolveStop: opts.resolveStop ?? true,
+    triggerSpace: opts.triggerSpace ?? opts.resolveStop ?? true,
     started: null,
   };
 
@@ -385,7 +386,7 @@ function doMoveStep(ctx: Ctx, job: Extract<Job, { t: 'move' }>, rng: Rng): void 
     // space by Stickler would swoon forever — re-collecting that space's star on every
     // pass — until the queue guard tripped.
     if (job.resolveStop && racer.pos !== job.origin) {
-      tail.push({ t: 'spaceEffect', racer: job.racer, pos: racer.pos });
+      if (job.triggerSpace) tail.push({ t: 'spaceEffect', racer: job.racer, pos: racer.pos });
       tail.push({ t: 'stopHooks', racer: job.racer, done: [], pos: racer.pos });
     }
     if (tail.length > 0) ctx.s.queue.unshift(...tail);
@@ -399,7 +400,7 @@ function doMoveStep(ctx: Ctx, job: Extract<Job, { t: 'move' }>, rng: Rng): void 
   if (hooksFor(ctx.s, racer).movesByWarp?.(makeHookCtx(ctx, rng, racer)) === true) {
     const to = racer.pos + job.remaining * job.dir;
     job.remaining = 0;
-    warpRacer(ctx, racer, to, job.resolveStop);
+    warpRacer(ctx, racer, to, job.resolveStop, job.triggerSpace);
     return;
   }
 
@@ -435,7 +436,7 @@ function doMoveStep(ctx: Ctx, job: Extract<Job, { t: 'move' }>, rng: Rng): void 
         rng,
         stickler,
         'blocksOvershoot',
-        `Actually… ${racerName(racer.racerId)} would overshoot the finish, so they don't move.`,
+        `Actually… ${racerLabel(racer.racerId, ctx.s.racerSets)} would overshoot the finish, so they don't move.`,
       );
       return settle();
     }
@@ -467,7 +468,7 @@ function doMoveStep(ctx: Ctx, job: Extract<Job, { t: 'move' }>, rng: Rng): void 
         rng,
         racer,
         'skipsOccupiedSpaces',
-        `${racerName(racer.racerId)} jumpfrogs over space ${next}.`,
+        `${racerLabel(racer.racerId, ctx.s.racerSets)} jumpfrogs over space ${next}.`,
       );
       next += job.dir;
     }
@@ -524,7 +525,7 @@ function applyDisplacement(ctx: Ctx, racer: MutableRacer, rng: Rng): void {
       rng,
       blocker,
       'blocksSpace',
-      `${racerName(racer.racerId)} can't fit past ${racerName(blocker.racerId)} and settles behind them.`,
+      `${racerLabel(racer.racerId, ctx.s.racerSets)} can't fit past ${racerLabel(blocker.racerId, ctx.s.racerSets)} and settles behind them.`,
     );
   }
 }
@@ -593,12 +594,15 @@ function doSpaceEffect(ctx: Ctx, job: Extract<Job, { t: 'spaceEffect' }>, rng: R
         hook: 'space',
         text:
           amount > 0
-            ? `${racerName(racer.racerId)} is swept ${amount} forward!`
-            : `${racerName(racer.racerId)} is knocked ${-amount} back!`,
+            ? `${racerLabel(racer.racerId, ctx.s.racerSets)} is swept ${amount} forward!`
+            : `${racerLabel(racer.racerId, ctx.s.racerSets)} is knocked ${-amount} back!`,
       });
       // "A separate move than how you got there, and never part of your main move."
-      // resolveStop false, or two arrows facing each other would loop forever.
-      queueMove(ctx, racer, amount, 'space', { resolveStop: false });
+      // The racer really does come to rest where the arrow puts them — "racers are stopped
+      // on a space after they've finished moving onto it" — so stop powers fire there.
+      // What must not repeat is the space's own effect, or two arrows facing each other
+      // would loop forever.
+      queueMove(ctx, racer, amount, 'space', { triggerSpace: false });
       return;
     }
 
@@ -727,18 +731,35 @@ function tripRacer(ctx: Ctx, rng: Rng, target: MutableRacer, by: RacerId | null)
 
 /**
  * Puts a racer on a space without moving it there: "don't count it as moving for
- * triggering powers, passing racers, etc." Arriving is still stopping, so stop powers fire
- * unless `resolveStop` is false — a warp standing in for an arrow's knock, which must not
- * re-trigger anything, just as the arrow's own move doesn't.
+ * triggering powers, passing racers, etc."
+ *
+ * A warp skips the journey, not the arrival. "Racers are stopped on a space after they've
+ * finished moving onto it, or otherwise arriving there by other means, like through Flip
+ * Flop's warping power" — so the space they land on pays out, trips them or knocks them on
+ * exactly as it would had they walked there, and stop powers fire.
+ *
+ * `resolveStop` is false only where the arrival is not a stop at all, and `triggerSpace`
+ * false where the racer has stopped but the space must not fire again — a warp standing in
+ * for an arrow's knock, just as the arrow's own move does not re-trigger.
  */
-function warpRacer(ctx: Ctx, target: MutableRacer, pos: number, resolveStop = true): void {
+function warpRacer(
+  ctx: Ctx,
+  target: MutableRacer,
+  pos: number,
+  resolveStop = true,
+  triggerSpace = true,
+): void {
   const to = Math.max(START, Math.min(FINISH, pos));
   if (to === target.pos) return;
   target.pos = to;
   ctx.emit({ t: 'racer/warped', racerId: target.racerId, to });
-  if (resolveStop) {
-    ctx.s.queue.unshift({ t: 'stopHooks', racer: target.racerId, done: [], pos: target.pos });
-  }
+  if (!resolveStop) return;
+  // Unshifted together so the space resolves before the stop hooks, matching the order a
+  // walked move settles in: racetrack, then current player, then other players.
+  const tail: Job[] = [];
+  if (triggerSpace) tail.push({ t: 'spaceEffect', racer: target.racerId, pos: target.pos });
+  tail.push({ t: 'stopHooks', racer: target.racerId, done: [], pos: target.pos });
+  ctx.s.queue.unshift(...tail);
 }
 
 /**
@@ -828,7 +849,8 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
       return field.filter((r) => r.pos === worst);
     },
 
-    nameOf: (racer) => racerName(typeof racer === 'string' ? racer : racer.racerId),
+    nameOf: (racer) =>
+      racerLabel(typeof racer === 'string' ? racer : racer.racerId, ctx.s.racerSets),
 
     emit: (event) => ctx.emit(event),
     log: (text) => powerHappened(ctx, rng, self, 'power', text),
@@ -897,9 +919,14 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
     cutInLine: () => {
       const phase = ctx.s.phase;
       if (phase.t !== 'racing') return;
-      // The racer cuts in, not its owner: a teammate does not inherit Skipper's place in
-      // the queue or Genius's extra turn.
+      // The racer cuts in, not its owner: a teammate does not inherit Skipper's place.
       phase.nextUp.push(self.racerId);
+    },
+
+    extraTurn: () => {
+      const phase = ctx.s.phase;
+      if (phase.t !== 'racing') return;
+      phase.extraTurns.push(self.racerId);
     },
 
     takePlace: () => {
@@ -938,7 +965,7 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
         t: 'ability/triggered',
         racerId: roll.racer,
         hook: 'reroll',
-        text: `${racerName(roll.racer)} rerolls the ${was}… and gets ${roll.value}.`,
+        text: `${racerLabel(roll.racer, ctx.s.racerSets)} rerolls the ${was}… and gets ${roll.value}.`,
       });
     },
 

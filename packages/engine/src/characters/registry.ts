@@ -51,6 +51,23 @@ export function racerName(id: RacerId): string {
   return BY_ID.get(id)?.name ?? String(id);
 }
 
+/**
+ * A racer's name as it should be shown in a game drawing on `sets`.
+ *
+ * Names are only unique within a set — the classic set and the Dota set both field an
+ * Alchemist — so with more than one set in play every racer is qualified by its set,
+ * "Genius (Classic)" alongside "Morphling (Dota)". With a single set there is nothing to
+ * tell apart, and the bare name reads better.
+ *
+ * Stand-ins like `vanilla-01` belong to no set and are never qualified.
+ */
+export function racerLabel(id: RacerId, sets: readonly CharacterSetId[]): string {
+  const name = racerName(id);
+  if (sets.length < 2) return name;
+  const set = CHARACTER_SETS.find((s) => s.id === BY_ID.get(id)?.set);
+  return set ? `${name} (${set.name})` : name;
+}
+
 export function racerText(id: RacerId): string {
   return BY_ID.get(id)?.text ?? '';
 }

@@ -98,6 +98,7 @@ function Picking() {
           <div className="racer-grid">
             {phase.layout.map((racer) => (
               <RacerCard
+                view={view}
                 key={racer}
                 racer={racer}
                 selected={selected === racer}
@@ -117,7 +118,7 @@ function Picking() {
           ) : (
             <div className="racer-grid">
               {myHand.map((racer) => (
-                <RacerCard key={racer} racer={racer} />
+                <RacerCard key={racer} view={view} racer={racer} />
               ))}
             </div>
           )}
@@ -136,7 +137,7 @@ function Picking() {
                   {pid === view.you && <span className="muted"> (you)</span>}
                 </div>
                 <div className="muted" style={{ fontSize: '0.85rem' }}>
-                  {(view.hands[pid] ?? []).map(racerName).join(' · ') || '—'}
+                  {(view.hands[pid] ?? []).map((r) => racerName(view, r)).join(' · ') || '—'}
                 </div>
               </div>
               {pid === picker && <span className="tag tag-gold">picking</span>}
@@ -148,7 +149,7 @@ function Picking() {
       <ActionBar>
         {myTurn ? (
           <button type="button" className="btn btn-primary btn-lg btn-block" disabled={!selected || !canAct} onClick={choose}>
-            {selected ? `Draft ${racerName(selected)}` : 'Tap a racer to choose'}
+            {selected ? `Draft ${racerName(view, selected)}` : 'Tap a racer to choose'}
           </button>
         ) : (
           <Waiting>{playerName(view, picker)} {picker === view.you ? 'are' : 'is'} picking…</Waiting>

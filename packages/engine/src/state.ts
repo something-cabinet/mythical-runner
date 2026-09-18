@@ -170,14 +170,23 @@ export type Phase =
       readonly claimedSpaces: readonly number[];
       /**
        * Racers that take the next turns out of order, first to last: Skipper's "I go next
-       * in turn order" and Genius's "I take another turn after this one". Consumed one per
-       * hand-off; once empty, turn order continues clockwise from whoever went last, which
-       * is what "after I go, turn order continues to my left" asks for.
+       * in turn order". Consumed one per hand-off, once the current player's team has
+       * gone; turn order then continues clockwise from whoever went last, which is what
+       * "after I go, turn order continues to my left" asks for.
        *
-       * Racers rather than players, because that is what the powers say: a Genius sharing a
-       * team with another racer earns the extra turn for itself, not for its teammate.
+       * Racers rather than players, because that is what the powers say.
        */
       readonly nextUp: readonly RacerId[];
+      /**
+       * Racers owed "another turn after this one" — Genius's correct call, Ogre Magi's
+       * multicast. Unlike `nextUp` the turn meant is the racer's own, so it is taken
+       * straight away: ahead of any teammate still waiting in `toMove`, who goes after it.
+       * The head of the queue is the only racer that may go until it has.
+       *
+       * It is a turn like any other, so a racer that went down on the way spends it
+       * standing up.
+       */
+      readonly extraTurns: readonly RacerId[];
       /**
        * Counts turns begun this race. A turn can span many actions while powers wait on
        * questions, so this — not `step` — is what "this turn" means to a power that has to

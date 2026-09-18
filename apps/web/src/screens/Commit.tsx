@@ -59,6 +59,7 @@ export function CommitScreen() {
               const chosen = locked.includes(racer);
               return (
                 <RacerCard
+                  view={view}
                   key={racer}
                   racer={racer}
                   selected={selected === racer || chosen}
@@ -101,7 +102,7 @@ export function CommitScreen() {
       <ActionBar>
         {!done && legal.length > 0 ? (
           <button type="button" className="btn btn-primary btn-lg btn-block" disabled={!selected || !canAct} onClick={lockIn}>
-            {selected ? `Lock in ${racerName(selected)}` : 'Tap a racer to choose'}
+            {selected ? `Lock in ${racerName(view, selected)}` : 'Tap a racer to choose'}
           </button>
         ) : (
           <Waiting>{others.length > 0 ? `Waiting for ${listNames(view, others)}` : 'Revealing…'}</Waiting>

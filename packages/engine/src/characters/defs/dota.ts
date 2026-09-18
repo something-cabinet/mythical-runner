@@ -16,8 +16,9 @@ import { defFor, isRunning } from './shared.js';
  *    ultimates, used before the owner's main move.
  *  - "Skip my main move" powers (Earthshaker, Anti-Mage) are offered before the main move,
  *    and not at all on a tripped turn, which has no main move to skip.
- *  - A warp is not a move, so Storm Spirit passes nobody, and — like every warp in this
- *    engine — arrives without triggering the space it lands on.
+ *  - A warp is not a move, so Storm Spirit passes nobody. It is still an arrival, though:
+ *    "racers are stopped on a space after they've finished moving onto it, or otherwise
+ *    arriving there by other means", so the space a warp lands on fires as usual.
  */
 
 const def = defFor('dota');
@@ -316,7 +317,7 @@ const ogreMagi = def(
     resume: (h, key, choice) => {
       if (key !== 'multicast' || choice !== ('multicast' as ChoiceId)) return;
       h.log(`${h.nameOf(h.self)} multicasts! Another turn after this one.`);
-      h.cutInLine();
+      h.extraTurn();
     },
   },
 );
@@ -341,7 +342,7 @@ const morphling = def(
  */
 const dotaAlchemist = def(
   'dota-alchemist',
-  'Alchemist (Dota)',
+  'Alchemist',
   'I get double points from finish cups and star spaces.',
   {
     modifyAward: (h, value, source) => {
@@ -435,18 +436,12 @@ const oracle = def(
 );
 
 /**
- * BALL LIGHTNING — "I get -1 to my main move. All my moves are warps."
+ * BALL LIGHTNING — "All my moves are warps."
  *
  * Every move, not just the main one: an arrow, a Cheerleader's rally or a Centaur's kick
  * all teleport it. The pipeline does the warping; see `movesByWarp`.
  */
-const stormSpirit = def('storm-spirit', 'Storm Spirit', 'I get -1 to my main move. All my moves are warps.', {
-  modifyMainMove: (h, value, mover) => {
-    if (!isRunning(h.self) || mover.racerId !== h.self.racerId) return value;
-    const next = Math.max(0, value - 1);
-    if (next !== value) h.log(`${h.nameOf(h.self)} crackles: -1.`);
-    return next;
-  },
+const stormSpirit = def('storm-spirit', 'Storm Spirit', 'All my moves are warps.', {
   movesByWarp: (h) => isRunning(h.self),
 });
 

@@ -66,6 +66,7 @@ export function RacerToken({
  * to become unplayable.
  */
 export function RacerCard({
+  view,
   racer,
   selected = false,
   disabled = false,
@@ -73,6 +74,7 @@ export function RacerCard({
   footer,
   onSelect,
 }: {
+  view: PlayerView;
   racer: RacerId;
   selected?: boolean;
   disabled?: boolean;
@@ -95,7 +97,7 @@ export function RacerCard({
       <span className="racer-sprite" aria-hidden="true">
         <img src={racerSprite(racer)} alt="" data-placeholder={!hasSprite(racer)} loading="lazy" />
       </span>
-      <span className="racer-name">{racerName(racer)}</span>
+      <span className="racer-name">{racerName(view, racer)}</span>
       <span className="racer-power">{powerText(racer)}</span>
       {footer}
     </button>
