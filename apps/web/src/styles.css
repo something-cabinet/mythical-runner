@@ -305,6 +305,19 @@ select {
   font-weight: 600;
   color: var(--muted);
   cursor: pointer;
+  transition:
+    background 80ms ease,
+    color 80ms ease,
+    transform 80ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.segmented button:hover:not([aria-pressed='true']):not(:disabled) {
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+  color: var(--text);
+}
+
+.segmented button:active:not(:disabled) {
+  transform: scale(0.95);
 }
 
 .segmented button[aria-pressed='true'] {
