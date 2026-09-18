@@ -8,6 +8,13 @@ import {
 } from '@mr/engine';
 import type { Credentials } from './identity';
 
+/**
+ * TEMPORARY: pinned to the deployed Worker so this preview sandbox (which has no local
+ * wrangler) can be tested end-to-end. Revert to `location.host` once local wrangler is
+ * available again.
+ */
+const API_HOST = 'mythical-runner.khoalamvn.workers.dev';
+
 export type ConnectionStatus = 'connecting' | 'open' | 'reconnecting';
 
 export interface RoomSnapshot {
@@ -119,13 +126,12 @@ export class RoomClient {
   // --- Internals ---------------------------------------------------------------
 
   private open(): void {
-    const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const query = new URLSearchParams({
       playerId: this.credentials.playerId,
       secret: this.credentials.secret,
       name: this.name,
     });
-    const socket = new WebSocket(`${scheme}//${location.host}/api/rooms/${this.code}/ws?${query}`);
+    const socket = new WebSocket(`wss://${API_HOST}/api/rooms/${this.code}/ws?${query}`);
     this.socket = socket;
     this.lastError = null;
 

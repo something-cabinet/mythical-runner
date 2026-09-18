@@ -1,12 +1,16 @@
 import type { CreateRoomResponse, RoomInfoResponse } from '@mr/engine';
 
 /**
- * HTTP calls. Always relative: in production the SPA and API share an origin, and in
+ * HTTP calls. Normally relative: in production the SPA and API share an origin, and in
  * development Vite proxies `/api` to wrangler, so there is no base URL to configure.
+ *
+ * TEMPORARY: pinned to the deployed Worker so this preview sandbox (which has no local
+ * wrangler) can be tested end-to-end. Revert to '' once local wrangler is available again.
  */
+const API_BASE = 'https://mythical-runner.khoalamvn.workers.dev';
 
 export async function createRoom(turnSeconds: number): Promise<string> {
-  const res = await fetch('/api/rooms', {
+  const res = await fetch(`${API_BASE}/api/rooms`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ turnSeconds }),
@@ -16,7 +20,7 @@ export async function createRoom(turnSeconds: number): Promise<string> {
 }
 
 export async function fetchRoomInfo(code: string): Promise<RoomInfoResponse> {
-  const res = await fetch(`/api/rooms/${encodeURIComponent(code)}`);
+  const res = await fetch(`${API_BASE}/api/rooms/${encodeURIComponent(code)}`);
   if (res.status === 404) {
     return { code, exists: false, phase: null, playerCount: 0, maxPlayers: 6, joinable: false };
   }
