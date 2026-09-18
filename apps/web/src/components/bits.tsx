@@ -180,6 +180,83 @@ export function RosterStrip({ view, racers, slots }: { view: PlayerView; racers:
   );
 }
 
+/**
+ * A dense, always-visible stat readout — race number, racers home vs. still running, the
+ * current leader, your own points — in the compact icon+value idiom of a competitive HUD
+ * (Dota's top bar, a broadcast scoreboard), rather than a sentence you have to read.
+ */
+export function HudBar({
+  raceNo,
+  totalRaces,
+  home,
+  running,
+  leader,
+  you,
+}: {
+  raceNo: number;
+  totalRaces: number;
+  home: number;
+  running: number;
+  leader: { name: string; pts: number; mine: boolean } | null;
+  you: { pts: number; rank: number } | null;
+}) {
+  return (
+    <div className="hud-bar" role="status" aria-label="Match status">
+      <div className="hud-stat">
+        <span className="hud-icon" aria-hidden="true">
+          ✦
+        </span>
+        <span className="hud-value num">
+          {raceNo}
+          <span className="hud-of">/{totalRaces}</span>
+        </span>
+        <span className="hud-label">Heat</span>
+      </div>
+      <span className="hud-sep" aria-hidden="true" />
+      <div className="hud-stat">
+        <span className="hud-icon" aria-hidden="true">
+          ⚑
+        </span>
+        <span className="hud-value num">
+          {home}
+          <span className="hud-of">/{home + running}</span>
+        </span>
+        <span className="hud-label">Home</span>
+      </div>
+      {leader && (
+        <>
+          <span className="hud-sep" aria-hidden="true" />
+          <div className="hud-stat" data-tone={leader.mine ? 'gold' : undefined}>
+            <span className="hud-icon" aria-hidden="true">
+              ♛
+            </span>
+            <span className="hud-value num">{leader.pts}</span>
+            <span className="hud-label">{leader.mine ? 'You lead' : `${leader.name} leads`}</span>
+          </div>
+        </>
+      )}
+      {you && (
+        <>
+          <span className="hud-sep" aria-hidden="true" />
+          <div className="hud-stat" data-tone="gold">
+            <span className="hud-icon" aria-hidden="true">
+              ●
+            </span>
+            <span className="hud-value num">{you.pts}</span>
+            <span className="hud-label">You · {ordinalShort(you.rank)}</span>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ordinalShort(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
+}
+
 /** Running totals, highest first. Ties share a rank. */
 export function Standings({ view }: { view: PlayerView }) {
   const rows = [...view.players]

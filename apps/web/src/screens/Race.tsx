@@ -1,8 +1,8 @@
-import { FINISH, type RacerId, type RaceNumber } from '@mr/engine';
+import { FINISH, RACE_COUNT, type RacerId, type RaceNumber } from '@mr/engine';
 import { useState } from 'react';
 import { Board } from '../components/Board';
-import { ActionBar, RacerCard, RacerToken, Standings, Waiting } from '../components/bits';
-import { abilityToken, borrowedPower, ordinal, playerName, powerText, racerName, rawName } from '../lib/present';
+import { ActionBar, HudBar, RacerCard, RacerToken, Standings, Waiting } from '../components/bits';
+import { abilityToken, borrowedPower, ordinal, playerName, points, powerText, racerName, rawName } from '../lib/present';
 import { legalOf, useRoomContext } from '../lib/roomContext';
 
 /**
@@ -47,6 +47,18 @@ export function RaceScreen() {
 
   const visibleLog = showFullLog ? log : log.slice(0, 6);
 
+  // Dota-style HUD readout: how many racers are home vs. still running this heat, who is
+  // leading the whole match on points, and where you personally stand.
+  const home = view.board.filter((r) => arrived(r)).length;
+  const running = view.board.length - home;
+  const standings = [...view.players]
+    .map((p) => ({ p, pts: points(view, p.id) }))
+    .sort((a, b) => b.pts - a.pts);
+  const leaderRow = standings[0] ?? null;
+  const leader = leaderRow ? { name: rawName(view, leaderRow.p.id), pts: leaderRow.pts, mine: leaderRow.p.id === view.you } : null;
+  const youRow = standings.find((s) => s.p.id === view.you) ?? null;
+  const you = youRow ? { pts: youRow.pts, rank: standings.findIndex((s) => s.pts === youRow.pts) + 1 } : null;
+
   return (
     <>
       <main className="page page-wide race-page">
@@ -56,6 +68,14 @@ export function RaceScreen() {
           <span className="race-kicker-rule" aria-hidden="true" />
           <span className="num">Race {phase.raceNo}</span>
         </div>
+        <HudBar
+          raceNo={phase.raceNo}
+          totalRaces={RACE_COUNT}
+          home={home}
+          running={running}
+          leader={leader}
+          you={you}
+        />
         <StatusBanner />
         <div className="race-layout">
           <section className="race-arena">
