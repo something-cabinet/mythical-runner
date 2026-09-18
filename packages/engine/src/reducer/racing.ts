@@ -7,8 +7,8 @@ import { goldToken, silverToken, totalPoints, type Token } from '../scoring.js';
 import { FINISH, START, type RaceNumber } from '../tracks/index.js';
 import { FINISHERS_PER_RACE, RACE_COUNT, racersPerRace } from '../state.js';
 import { beginCommit } from './commit.js';
-import { hooksFor } from '../characters/powers.js';
-import { makeHookCtx, runQueue } from './pipeline.js';
+import { hooksFor, SILENCED } from '../characters/powers.js';
+import { awardFor, makeHookCtx, runQueue } from './pipeline.js';
 import { activeRacers, findRacer, racersOf, type Ctx, scoreOf, seatAt } from './working.js';
 
 /**
@@ -219,18 +219,22 @@ export function endTurn(ctx: Ctx, rng: Rng): void {
       });
   phase.moving = null;
 
+  // Silencer's hush lasts one turn, and that turn is over.
+  const hushed = moved ? findRacer(s, moved) : undefined;
+  if (hushed) delete hushed.memo[SILENCED];
+
   if (phase.finished.length >= FINISHERS_PER_RACE) {
-    endRace(ctx, false);
+    endRace(ctx, false, rng);
     return;
   }
 
   const remaining = activeRacers(s);
   if (remaining.length === 0) {
-    endRace(ctx, false);
+    endRace(ctx, false, rng);
     return;
   }
   if (phase.stalledTurns >= s.board.length * STALL_LIMIT_PER_PLAYER) {
-    endRace(ctx, true);
+    endRace(ctx, true, rng);
     return;
   }
 
@@ -275,23 +279,22 @@ export function endTurn(ctx: Ctx, rng: Rng): void {
  * Only the first two across the line score. Everyone else gets nothing, which is what
  * makes holding a strong racer for a high-value race a real decision.
  */
-function endRace(ctx: Ctx, byStalemate: boolean): void {
+function endRace(ctx: Ctx, byStalemate: boolean, rng: Rng): void {
   const { s } = ctx;
   invariant(s.phase.t === 'racing', 'endRace outside a race');
   const raceNo = s.phase.raceNo as RaceNumber;
   const podium = [...s.phase.finished];
 
-  const first = podium[0];
-  if (first !== undefined) {
-    const token = goldToken(raceNo);
-    scoreOf(s, first).push(token);
-    ctx.emit({ t: 'token/awarded', player: first, token });
-  }
-  const second = podium[1];
-  if (second !== undefined) {
-    const token = silverToken(raceNo);
-    scoreOf(s, second).push(token);
-    ctx.emit({ t: 'token/awarded', player: second, token });
+  const cups = [goldToken(raceNo), silverToken(raceNo)];
+  for (const [i, player] of podium.slice(0, cups.length).entries()) {
+    const cup = cups[i];
+    invariant(cup, 'unreachable: sliced to the cups');
+    // The racer that earned it, for powers that change a cup's worth. None for a place
+    // that came from a power rather than a racer crossing the line in it.
+    const earner = s.board.find((r) => r.owner === player && r.finishedRank === i + 1);
+    const token = earner ? { ...cup, value: awardFor(ctx, rng, earner, cup.value, 'cup') } : cup;
+    scoreOf(s, player).push(token);
+    ctx.emit({ t: 'token/awarded', player, token });
   }
 
   s.trailingPlayer = nextLeaderOf(ctx, raceNo);

@@ -14,6 +14,8 @@ import { makeRng } from '../rng.js';
 import { totalPoints } from '../scoring.js';
 import { MAX_PLAYERS, MIN_PLAYERS } from '../state.js';
 import type { PlayerId } from '../ids.js';
+import type { CharacterSetId } from '../characters/sets.js';
+import { enoughRacers } from '../reducer/lobby.js';
 
 interface Failure {
   readonly seed: number;
@@ -30,6 +32,7 @@ export function fuzz(games: number, baseSeed: number): void {
   let totalActions = 0;
   let timeoutGames = 0;
   let autoDecisions = 0;
+  const setCounts = new Map<string, number>();
 
   for (let g = 0; g < games; g++) {
     const seed = (baseSeed + g * 7919) >>> 0;
@@ -42,11 +45,17 @@ export function fuzz(games: number, baseSeed: number): void {
       const timeoutRate = g % 3 === 0 ? 0.15 : 0;
       // A quarter of games fill some seats with bots.
       const bots = g % 4 === 1 ? 1 + pick.nextInt(playerCount - 1) : 0;
+      // Classic, Dota and both, in turn. Dota alone is 16 racers — enough for four players.
+      const sets: CharacterSetId[][] = [['classic'], ['dota'], ['classic', 'dota']];
+      let chosen = sets[g % 3] ?? ['classic'];
+      if (!enoughRacers(chosen, playerCount)) chosen = ['classic', 'dota'];
+      setCounts.set(chosen.join('+'), (setCounts.get(chosen.join('+')) ?? 0) + 1);
       const result = playGame({
         seed,
         playerCount,
         timeoutRate,
         bots,
+        sets: chosen,
         choose: (options: Action[]) => options[rng.nextInt(options.length)] as Action,
       });
       timeoutGames += timeoutRate > 0 ? 1 : 0;
@@ -93,6 +102,7 @@ export function fuzz(games: number, baseSeed: number): void {
   console.log(`stalemate races:  ${stalemates}`);
   console.log(`avg actions/game: ${(totalActions / Math.max(1, games - failures.length)).toFixed(1)}`);
   console.log(`timeout games:    ${timeoutGames} (auto-answered decisions: ${autoDecisions})`);
+  console.log(`racer sets:       ${[...setCounts].map(([k, n]) => `${k} ${n}`).join(', ')}`);
 
   console.log('\nwins by seat index (all player counts pooled):');
   const seats = [...winsBySeat.keys()].sort((a, b) => a - b);

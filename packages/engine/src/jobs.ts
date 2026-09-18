@@ -18,6 +18,8 @@ export type Job =
    * powers."
    */
   | { t: 'raceStart'; done: string[] }
+  /** "After my main move" powers. Queued behind the main move, so it runs once that settles. */
+  | { t: 'afterMainMove'; racer: RacerId; from: number }
   /** "Before my main move" powers. */
   | { t: 'beforeMove'; racer: RacerId }
   /** Determine the main move: `replaceMainMove`, else d6, then hand off to `roll`. */

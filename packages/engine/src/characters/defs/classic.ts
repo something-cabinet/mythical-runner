@@ -1,15 +1,16 @@
 import { racerId, type ChoiceId } from '../../ids.js';
-import { option, racerTarget, type HookCtx, type Hooks, type MutableRacer } from '../hooks.js';
+import { option, racerTarget } from '../hooks.js';
 import type { RacerDef } from '../types.js';
 import { FINISH, START, trackForRace, type RaceNumber } from '../../tracks/index.js';
+import { defFor, firstLap, isRunning } from './shared.js';
 
 /**
- * Implemented racers.
+ * The classic set: all 36 racers from the Magical Athlete box.
  *
  * Power text is taken verbatim from `docs/magical-athlete-rules.md`, which is the
  * authority. Where a power is quoted in a comment, that quote is the card.
  *
- * All 36. The first nine were chosen to cover every hook between them: a replaced main
+ * The first nine were chosen to cover every hook between them: a replaced main
  * move, a modified main move, a pass trigger on the passer, a pass trigger on the passed,
  * a stop trigger on self, a stop trigger on others, spatial displacement, and one power
  * that questions a player who is not taking the turn. Phase 5 added the rest in two waves.
@@ -18,37 +19,7 @@ import { FINISH, START, trackForRace, type RaceNumber } from '../../tracks/index
  * Cat, Egg and Twin run these same hooks under their own names.
  */
 
-function def(id: string, name: string, text: string, hooks: Hooks): RacerDef {
-  return { id: racerId(id), name, text, hooks: hooks as unknown as Record<string, unknown> };
-}
-
-const isRunning = (r: MutableRacer): boolean => !r.eliminated && r.finishedRank === null;
-
-/**
- * Rule 8: "If you run into an infinite loop, e.g. Scoocher stopping on the Huge Baby,
- * complete the loop once in the order it takes place, then end it."
- *
- * A loop is the same trigger firing again with every racer exactly where they were last
- * time. Returns false for such a repeat within the current turn, so a power that reacts
- * to its own consequences runs each lap once and then stops.
- *
- * The same turn, not the same action: a loop through Suckerfish asks a question on every
- * lap, and each answer is a new action.
- */
-function firstLap(h: HookCtx, trigger: string): boolean {
-  const phase = h.state.phase;
-  if (phase.t !== 'racing') return true;
-  const board = h
-    .racers()
-    .map((r) => (r.eliminated ? 'x' : String(r.pos)))
-    .join(',');
-  const cause = `${trigger}|${board}`;
-  const prior = h.self.memo['loopCauses'] as { turn: number; causes: string[] } | undefined;
-  const seen = prior?.turn === phase.turn ? prior.causes : [];
-  if (seen.includes(cause)) return false;
-  h.self.memo['loopCauses'] = { turn: phase.turn, causes: [...seen, cause] };
-  return true;
-}
+const def = defFor('classic');
 
 // ---------------------------------------------------------------------------
 
@@ -989,7 +960,7 @@ const twin = def(
   },
 );
 
-export const SLICE_RACERS: readonly RacerDef[] = [
+export const CLASSIC_RACERS: readonly RacerDef[] = [
   legs,
   banana,
   centaur,

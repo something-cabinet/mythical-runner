@@ -4,6 +4,7 @@ import {
   botAction,
   CLIENT_ACTION_TYPES,
   CLOSE_CODES,
+  DEFAULT_SETS,
   IllegalActionError,
   initGame,
   legalActions,
@@ -114,7 +115,9 @@ export class RoomDO extends DurableObject<Env> {
     ctx.blockConcurrencyWhile(async () => {
       const stored = await ctx.storage.get<unknown>(['meta', 'state', 'secrets']);
       this.meta = (stored.get('meta') as Meta | undefined) ?? null;
-      this.state = (stored.get('state') as GameState | undefined) ?? null;
+      const saved = stored.get('state') as GameState | undefined;
+      // Rooms saved before character sets existed drafted from the classic set.
+      this.state = saved ? { ...saved, racerSets: saved.racerSets ?? DEFAULT_SETS } : null;
       this.secrets = (stored.get('secrets') as Record<string, string> | undefined) ?? {};
     });
   }

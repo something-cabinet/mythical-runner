@@ -1,3 +1,4 @@
+import type { CharacterSetId } from './characters/sets.js';
 import type { ChoiceId, PlayerId, RacerId } from './ids.js';
 
 /**
@@ -39,6 +40,16 @@ export interface LobbyStart {
 export interface LobbyAddBot {
   readonly t: 'lobby/addBot';
   readonly by: PlayerId;
+}
+
+/**
+ * Host only, lobby only: adds a character set to the draft deck, or takes it out. The
+ * last set can't be taken out.
+ */
+export interface LobbyToggleSet {
+  readonly t: 'lobby/toggleSet';
+  readonly by: PlayerId;
+  readonly set: CharacterSetId;
 }
 
 /** Host only, lobby only: unseats a computer player. */
@@ -117,6 +128,7 @@ export type Action =
   | LobbyStart
   | LobbyAddBot
   | LobbyRemoveBot
+  | LobbyToggleSet
   | LobbyRematch
   | DraftRoll
   | DraftPick

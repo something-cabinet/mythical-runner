@@ -1,12 +1,13 @@
 import {
+  CHARACTER_SETS,
   currentDrafter,
   racerName,
   racerText,
-  racerId,
   powerOf,
   copyTarget,
   RACE_AWARDS,
   totalPoints,
+  type CharacterSetId,
   type GameEvent,
   type PlayerId,
   type PlayerView,
@@ -108,19 +109,23 @@ export function hasSprite(id: RacerId): boolean {
 
 export { racerName, racerText };
 
-const COPY_CAT = racerId('copy-cat');
-
 /**
  * Whose card a racer is actually running, or null when it is running its own.
  *
- * Egg and Twin borrow a power for the whole race; Copy Cat has whoever leads right now.
+ * Egg and Twin borrow a power for the whole race; Copy Cat has whoever leads right now,
+ * and Morphling whoever is last.
  * The lists show the borrowed card, since that — not the name on the token — is what the
  * racer will actually do.
  */
 export function borrowedPower(view: PlayerView, racer: RacerState): RacerId | null {
   const power = powerOf(racer);
   if (power !== racer.racerId) return power;
-  return racer.racerId === COPY_CAT ? copyTarget(view, racer) : null;
+  return copyTarget(view, racer);
+}
+
+/** "Classic + Dota", in the sets' canonical order. */
+export function setNames(sets: readonly CharacterSetId[]): string {
+  return CHARACTER_SETS.filter((x) => sets.includes(x.id)).map((x) => x.name).join(' + ');
 }
 
 /** Placeholder racers have no power yet; the UI says so rather than showing a blank. */
@@ -200,6 +205,8 @@ export function describeEvent(e: GameEvent, view: PlayerView): LogLine | null {
       return { text: `${who(e.player)} left`, tone: 'plain' };
     case 'game/rematch':
       return { text: `${who(e.by)} started a rematch`, tone: 'turn' };
+    case 'lobby/setsChanged':
+      return { text: `Racer sets: ${setNames(e.sets)}`, tone: 'plain' };
     case 'game/started':
       return { text: 'The game has started', tone: 'turn' };
     case 'draft/rolled':

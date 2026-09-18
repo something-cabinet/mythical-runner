@@ -6,11 +6,14 @@ import type {
   LobbyRemoveBot,
   LobbySetConnected,
   LobbyStart,
+  LobbyToggleSet,
 } from '../actions.js';
+import { racersInSets } from '../characters/registry.js';
+import { CHARACTER_SETS, isCharacterSetId, type CharacterSetId } from '../characters/sets.js';
 import { IllegalActionError } from '../errors.js';
 import { playerId, type PlayerId } from '../ids.js';
 import type { Rng } from '../rng.js';
-import { MAX_PLAYERS, MIN_PLAYERS, type Player } from '../state.js';
+import { draftSize, MAX_PLAYERS, MIN_PLAYERS, type Player } from '../state.js';
 import type { Ctx } from './working.js';
 
 /**
@@ -61,6 +64,9 @@ export function start(ctx: Ctx, a: LobbyStart): void {
     throw new IllegalActionError(a, `need at least ${MIN_PLAYERS} players`);
   }
   if (hostOf(s.players)?.id !== a.by) throw new IllegalActionError(a, 'only the host may start');
+  if (!enoughRacers(s.racerSets, s.players.length)) {
+    throw new IllegalActionError(a, 'the chosen sets have too few racers for this many players');
+  }
 
   s.seatOrder = s.players.map((p) => p.id) as PlayerId[];
   ctx.emit({ t: 'game/started', seatOrder: [...s.seatOrder] });
@@ -70,6 +76,32 @@ export function start(ctx: Ctx, a: LobbyStart): void {
     t: 'draftRoll',
     rolls: Object.fromEntries(s.seatOrder.map((p) => [p, null])),
   };
+}
+
+/** Whether the chosen sets hold enough racers for everyone to draft a full team. */
+export function enoughRacers(sets: readonly CharacterSetId[], playerCount: number): boolean {
+  return racersInSets(sets).length >= draftSize(playerCount);
+}
+
+/**
+ * Adds a character set to the draft deck, or takes it out.
+ *
+ * A set that is too small for the table can still be chosen — the host may be waiting on
+ * a friend to leave, or about to add another set — and Start simply stays unavailable
+ * until the deck is big enough.
+ */
+export function toggleSet(ctx: Ctx, a: LobbyToggleSet): void {
+  const { s } = ctx;
+  if (s.phase.t !== 'lobby') throw new IllegalActionError(a, 'game already started');
+  if (hostOf(s.players)?.id !== a.by) throw new IllegalActionError(a, 'only the host may pick sets');
+  if (!isCharacterSetId(a.set)) throw new IllegalActionError(a, 'no such set');
+
+  const on = !s.racerSets.includes(a.set);
+  if (!on && s.racerSets.length === 1) throw new IllegalActionError(a, 'at least one set must stay in');
+  const chosen = new Set(on ? [...s.racerSets, a.set] : s.racerSets.filter((x) => x !== a.set));
+  // Kept in the canonical order, so the same choice always looks the same.
+  s.racerSets = CHARACTER_SETS.map((x) => x.id).filter((id) => chosen.has(id));
+  ctx.emit({ t: 'lobby/setsChanged', sets: [...s.racerSets] });
 }
 
 /**

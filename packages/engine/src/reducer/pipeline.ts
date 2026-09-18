@@ -1,6 +1,15 @@
-import { ALL_RACER_IDS, racerName } from '../characters/registry.js';
+import { racerName, racersInSets } from '../characters/registry.js';
 import type { AskRequest, HookCtx, MutableRacer } from '../characters/hooks.js';
-import { BORROWED, COPY_CAT, copyTarget, hooksFor, powerOf } from '../characters/powers.js';
+import {
+  BORROWED,
+  copyTarget,
+  hooksFor,
+  isMimic,
+  MAIN_MOVE_BONUS,
+  powerOf,
+  SILENCED,
+  SKIP_MAIN,
+} from '../characters/powers.js';
 import { invariant } from '../errors.js';
 import type { ChoiceId, PlayerId, RacerId } from '../ids.js';
 import type { Job, MoveReason, ResumeDescriptor } from '../jobs.js';
@@ -35,6 +44,8 @@ function runJob(ctx: Ctx, job: Job, rng: Rng): void {
       return doRaceStart(ctx, job, rng);
     case 'beforeMove':
       return fireSelf(ctx, rng, job.racer, 'beforeMainMove');
+    case 'afterMainMove':
+      return doAfterMainMove(ctx, job, rng);
     case 'mainMove':
       return doMainMove(ctx, job.racer, rng);
     case 'roll':
@@ -44,7 +55,7 @@ function runJob(ctx: Ctx, job: Job, rng: Rng): void {
     case 'passCheck':
       return doPassCheck(ctx, job, rng);
     case 'spaceEffect':
-      return doSpaceEffect(ctx, job);
+      return doSpaceEffect(ctx, job, rng);
     case 'stopHooks':
       return doStopHooks(ctx, job, rng);
     case 'turnEnd':
@@ -173,6 +184,13 @@ function doMainMove(ctx: Ctx, racerId: RacerId, rng: Rng): void {
   invariant(racer, `main move for missing racer ${racerId}`);
   if (racer.eliminated || racer.finishedRank !== null) return;
 
+  // Given up for a power (Earthshaker, Anti-Mage). Ahead of the trip check: a racer that
+  // trips after choosing to skip has skipped this main move, and the trip costs the next.
+  if (racer.memo[SKIP_MAIN] === true) {
+    delete racer.memo[SKIP_MAIN];
+    return;
+  }
+
   if (racer.tripped) {
     // "A tripped racer skips their next main move! You don't even roll your die, though
     // your powers can still trigger and you can still move in other ways."
@@ -279,6 +297,13 @@ function doRoll(ctx: Ctx, job: Extract<Job, { t: 'roll' }>, rng: Rng): void {
     // A skipped move is not a move of 0 that Coach could hustle back into a move of 1.
     value = 0;
   } else {
+    // Legion Commander's duel prize: "+1 permanently to their main move". Not a power the
+    // racer has, so it applies first and every power adjusts the total.
+    const bonus = racer.memo[MAIN_MOVE_BONUS];
+    if (typeof bonus === 'number' && bonus !== 0) {
+      value += bonus;
+      modifiedBy ??= racer.racerId;
+    }
     // Every racer on the board may adjust the main move — Gunk goops opponents, Coach
     // hustles anyone sharing his space. Self applies last so its own bonus is not lost.
     // `modifiedBy` names whichever racer's hook actually changed the value, not the mover.
@@ -312,7 +337,17 @@ function doRoll(ctx: Ctx, job: Extract<Job, { t: 'roll' }>, rng: Rng): void {
     ...(modifiedBy ? { modifiedBy } : {}),
   });
 
-  if (!cancelled) queueMove(ctx, racer, value, 'main', { isMainMove: true });
+  if (!cancelled) {
+    const from = racer.pos;
+    queueMove(ctx, racer, value, 'main', { isMainMove: true });
+    // "After my main move" waits behind the move, and so behind everything the move sets off
+    // — passes, space effects and stop powers are all queued ahead of it as the move settles.
+    // A move of 0 queues nothing, and a main move that went nowhere never happened.
+    const head = ctx.s.queue[0];
+    if (head?.t === 'move' && head.racer === racer.racerId) {
+      ctx.s.queue.splice(1, 0, { t: 'afterMainMove', racer: racer.racerId, from });
+    }
+  }
   // Re-insert the reactions now, ahead of the main move job just queued.
   ctx.s.queue.unshift(...reactionJobs);
 }
@@ -357,6 +392,16 @@ function doMoveStep(ctx: Ctx, job: Extract<Job, { t: 'move' }>, rng: Rng): void 
   };
 
   if (job.remaining <= 0 || racer.eliminated || racer.pos === FINISH) return settle();
+
+  // Storm Spirit: "All my moves are considered warp." It arrives without travelling, so
+  // nothing about the journey applies — no passing, no Suckerfish, no Stickler, no
+  // Leaptoad, no Huge Baby — only the arrival, which is a stop like any warp's.
+  if (hooksFor(ctx.s, racer).movesByWarp?.(makeHookCtx(ctx, rng, racer)) === true) {
+    const to = racer.pos + job.remaining * job.dir;
+    job.remaining = 0;
+    warpRacer(ctx, racer, to, job.resolveStop);
+    return;
+  }
 
   if (job.started === null || racer.pos === job.origin) {
     const len = ctx.s.queue.length;
@@ -525,7 +570,7 @@ function doPassCheck(ctx: Ctx, job: Extract<Job, { t: 'passCheck' }>, rng: Rng):
   }
 }
 
-function doSpaceEffect(ctx: Ctx, job: Extract<Job, { t: 'spaceEffect' }>): void {
+function doSpaceEffect(ctx: Ctx, job: Extract<Job, { t: 'spaceEffect' }>, rng: Rng): void {
   const racer = findRacer(ctx.s, job.racer);
   if (!racer || racer.eliminated || job.pos === FINISH) return;
 
@@ -558,16 +603,14 @@ function doSpaceEffect(ctx: Ctx, job: Extract<Job, { t: 'spaceEffect' }>): void 
     }
 
     case 'trip':
-      if (!racer.tripped) {
-        racer.tripped = true;
-        ctx.emit({ t: 'racer/tripped', racerId: racer.racerId, by: null });
-      }
+      tripRacer(ctx, rng, racer, null);
       return;
 
     case 'star': {
       if (phase.claimedSpaces.includes(racer.pos)) return;
       phase.claimedSpaces.push(racer.pos);
-      const token = pointsToken(space.effect.value, phase.raceNo as RaceNumber);
+      const value = awardFor(ctx, rng, racer, space.effect.value, 'star');
+      const token = pointsToken(value, phase.raceNo as RaceNumber);
       scoreOf(ctx.s, racer.owner).push(token);
       ctx.emit({ t: 'token/awarded', player: racer.owner, token });
       return;
@@ -655,6 +698,67 @@ function doTurnEnd(ctx: Ctx, job: Extract<Job, { t: 'turnEnd' }>, rng: Rng): voi
   }
 }
 
+function doAfterMainMove(ctx: Ctx, job: Extract<Job, { t: 'afterMainMove' }>, rng: Rng): void {
+  const racer = findRacer(ctx.s, job.racer);
+  if (!racer || racer.eliminated) return;
+  hooksFor(ctx.s, racer).afterMainMove?.(makeHookCtx(ctx, rng, racer), job.from);
+}
+
+/**
+ * Trips a racer, from a power (`by`) or a TRIP space (null). Every trip goes through here,
+ * so Templar Assassin can refuse one and Tidehunter and Oracle hear about each.
+ *
+ * Returns whether the racer actually went down.
+ */
+function tripRacer(ctx: Ctx, rng: Rng, target: MutableRacer, by: RacerId | null): boolean {
+  if (target.tripped || target.eliminated) return false;
+  if (hooksFor(ctx.s, target).ignoresTrip?.(makeHookCtx(ctx, rng, target)) === true) return false;
+
+  target.tripped = true;
+  ctx.emit({ t: 'racer/tripped', racerId: target.racerId, by });
+
+  for (const r of [target, ...ctx.s.board.filter((o) => o.racerId !== target.racerId)]) {
+    if (r.eliminated) continue;
+    hooksFor(ctx.s, r).onRacerTripped?.(makeHookCtx(ctx, rng, r), target);
+    invariant(!ctx.s.pending, `${r.racerId} asked a question from onRacerTripped`);
+  }
+  return true;
+}
+
+/**
+ * Puts a racer on a space without moving it there: "don't count it as moving for
+ * triggering powers, passing racers, etc." Arriving is still stopping, so stop powers fire
+ * unless `resolveStop` is false — a warp standing in for an arrow's knock, which must not
+ * re-trigger anything, just as the arrow's own move doesn't.
+ */
+function warpRacer(ctx: Ctx, target: MutableRacer, pos: number, resolveStop = true): void {
+  const to = Math.max(START, Math.min(FINISH, pos));
+  if (to === target.pos) return;
+  target.pos = to;
+  ctx.emit({ t: 'racer/warped', racerId: target.racerId, to });
+  if (resolveStop) {
+    ctx.s.queue.unshift({ t: 'stopHooks', racer: target.racerId, done: [], pos: target.pos });
+  }
+}
+
+/**
+ * A cup or star chip's value once the earner's powers have had their say — Dota's
+ * Alchemist doubles both.
+ */
+export function awardFor(
+  ctx: Ctx,
+  rng: Rng,
+  earner: MutableRacer,
+  value: number,
+  source: 'cup' | 'star',
+): number {
+  const fn = hooksFor(ctx.s, earner).modifyAward;
+  if (!fn) return value;
+  const next = fn(makeHookCtx(ctx, rng, earner), value, source);
+  invariant(!ctx.s.pending, `${earner.racerId} asked a question from modifyAward`);
+  return next;
+}
+
 function doResume(ctx: Ctx, job: Extract<Job, { t: 'resume' }>, rng: Rng): void {
   const racer = findRacer(ctx.s, job.racer);
   if (!racer) return; // the power's owner left the board while we waited
@@ -737,19 +841,13 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
       queueMove(ctx, target, distance, reason, { resolveStop: true });
     },
 
-    warp: (target, pos) => {
-      const to = Math.max(START, Math.min(FINISH, pos));
-      if (to === target.pos) return;
-      target.pos = to;
-      // A warp is explicitly not a move, so no racer/moved event and no pass check.
-      ctx.emit({ t: 'racer/warped', racerId: target.racerId, to });
-      ctx.s.queue.unshift({ t: 'stopHooks', racer: target.racerId, done: [], pos: target.pos });
-    },
+    // A warp is explicitly not a move, so no racer/moved event and no pass check.
+    warp: (target, pos) => warpRacer(ctx, target, pos),
 
-    trip: (target) => {
-      if (target.tripped || target.eliminated) return;
-      target.tripped = true;
-      ctx.emit({ t: 'racer/tripped', racerId: target.racerId, by: self.racerId });
+    trip: (target) => tripRacer(ctx, rng, target, self.racerId),
+
+    skipMainMove: () => {
+      self.memo[SKIP_MAIN] = true;
     },
 
     eliminate: (target) => {
@@ -784,6 +882,16 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
       }
       const lost = value - owed;
       if (lost > 0) ctx.emit({ t: 'token/lost', player, value: lost });
+      return lost;
+    },
+
+    silence: (target) => {
+      target.memo[SILENCED] = true;
+    },
+
+    addMainMoveBonus: (target, amount) => {
+      const had = target.memo[MAIN_MOVE_BONUS];
+      target.memo[MAIN_MOVE_BONUS] = (typeof had === 'number' ? had : 0) + amount;
     },
 
     cutInLine: () => {
@@ -859,7 +967,8 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
 
     undrafted: () => {
       const drafted = new Set(Object.values(ctx.s.hands).flat());
-      return ALL_RACER_IDS.filter((id) => !drafted.has(id));
+      // The deck is the chosen sets, so Egg never hatches into a racer from a set not in play.
+      return racersInSets(ctx.s.racerSets).filter((id) => !drafted.has(id));
     },
 
     previousWinners: () => {
@@ -899,7 +1008,7 @@ function ask(ctx: Ctx, self: MutableRacer, req: AskRequest): void {
     racer: self.racerId,
     key: req.key,
     data: req.data ?? null,
-    ...(powerOf(self) === COPY_CAT ? { copy: copyTarget(ctx.s, self) } : {}),
+    ...(isMimic(powerOf(self)) ? { copy: copyTarget(ctx.s, self) } : {}),
   };
 
   ctx.s.pending = {

@@ -1,5 +1,5 @@
 import type { DraftPick, DraftRoll } from '../actions.js';
-import { ALL_RACER_IDS } from '../characters/registry.js';
+import { racersInSets } from '../characters/registry.js';
 import { IllegalActionError, invariant } from '../errors.js';
 import type { PlayerId, RacerId } from '../ids.js';
 import type { Rng } from '../rng.js';
@@ -51,7 +51,7 @@ export function draftRoll(ctx: Ctx, a: DraftRoll, rng: Rng): void {
 
 function beginDraft(ctx: Ctx, order: PlayerId[], rng: Rng): void {
   const { s } = ctx;
-  const deck = rng.shuffle(ALL_RACER_IDS) as RacerId[];
+  const deck = rng.shuffle(racersInSets(s.racerSets)) as RacerId[];
   s.phase = { t: 'draft', deck, layout: [], order, pick: 0 };
   dealWaveIfNeeded(ctx);
 }

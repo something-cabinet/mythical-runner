@@ -193,7 +193,7 @@ Things that cost time once and will again.
 
 ### Phase 5 — done
 
-All 36 racers are in [characters/defs/index.ts](../packages/engine/src/characters/defs/index.ts),
+All 36 racers are in [characters/defs/classic.ts](../packages/engine/src/characters/defs/classic.ts),
 each with scenario checks in [scenarios.ts](../packages/engine/src/dev/scenarios.ts). Engine
 pieces added for wave 2, worth knowing before touching a power:
 
@@ -231,7 +231,22 @@ pieces added for wave 2, worth knowing before touching a power:
   and broadcast like a human move. Bot ids (`bot-N`) are too short for a browser to connect
   with, so a bot seat can't be hijacked. The host is now the first *human* (`hostOf`).
 
-**Still to do:** spectators, a replay viewer, sound.
+- **Character sets.** The host toggles sets in the lobby (`lobby/toggleSet`); the draft
+  deck and Egg's draw come from `state.racerSets` only. At least one set stays on, and
+  Start is withheld until the sets hold `draftSize(players)` racers — Dota alone (16) seats
+  at most four. Sets live in [characters/sets.ts](../packages/engine/src/characters/sets.ts);
+  each racer names its set in its def.
+- **The Dota set** — 16 heroes in
+  [characters/defs/dota.ts](../packages/engine/src/characters/defs/dota.ts), designed in
+  [new-character-set.md](./new-character-set.md). Engine pieces added for them: every trip
+  goes through `tripRacer` (`ignoresTrip`, `onRacerTripped`); `afterMainMove` is a job
+  queued behind the main move; `movesByWarp` turns any move into a warp; `modifyAward`
+  adjusts cups and star chips; `h.skipMainMove`, `h.silence` and `h.addMainMoveBonus` keep
+  their state on the racer under engine-owned memo keys, so it survives a borrowed power
+  changing. Copy Cat's machinery is now shared by Morphling (a "mimic" of last place).
+  "Once per round" was ruled to mean once per race.
+
+**Still to do:** spectators, a replay viewer, sound, art for the Dota racers.
 
 ### Deploying
 

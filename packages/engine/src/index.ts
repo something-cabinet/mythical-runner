@@ -19,6 +19,7 @@ export * from './events.js';
 export * from './errors.js';
 export * from './jobs.js';
 export * from './characters/types.js';
+export * from './characters/sets.js';
 export type { Hooks, HookCtx, HookName, AskRequest, MutableRacer } from './characters/hooks.js';
 export {
   RACERS,
@@ -28,11 +29,13 @@ export {
   getHooks,
   racerName,
   racerText,
+  racersInSets,
+  racerSet,
 } from './characters/registry.js';
 export { powerOf, copyTarget } from './characters/powers.js';
 export { initGame, applyAction, legalActions, type ApplyResult } from './reducer/index.js';
 export { currentDrafter } from './reducer/draft.js';
-export { hostOf } from './reducer/lobby.js';
+export { enoughRacers, hostOf } from './reducer/lobby.js';
 export { redact } from './redact.js';
 export { botAction } from './bots.js';
 export * from './protocol.js';

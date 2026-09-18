@@ -3,9 +3,22 @@ import { IllegalActionError, invariant } from '../errors.js';
 import type { PlayerId } from '../ids.js';
 import { makeRng, type Rng } from '../rng.js';
 import type { GameEvent } from '../events.js';
+import { DEFAULT_SETS } from '../characters/sets.js';
 import { MAX_PLAYERS, MIN_PLAYERS, type GameState } from '../state.js';
 import { currentDrafter, draftPick, draftRoll } from './draft.js';
-import { addBot, hostOf, join, leave, rematch, removeBot, setConnected, start } from './lobby.js';
+import {
+  addBot,
+  enoughRacers,
+  hostOf,
+  join,
+  leave,
+  rematch,
+  removeBot,
+  setConnected,
+  start,
+  toggleSet,
+} from './lobby.js';
+import { CHARACTER_SETS } from '../characters/sets.js';
 import { beginCommit as _beginCommit, commitSize, raceCommit } from './commit.js';
 import { advanceAfterScoring, endTurn, raceContinue, raceRoll, takeTurn } from './racing.js';
 import { answerPending, runQueue } from './pipeline.js';
@@ -26,6 +39,7 @@ export function initGame(seed: number): GameState {
     hands: {},
     used: {},
     scores: {},
+    racerSets: [...DEFAULT_SETS],
     trailingPlayer: null,
     phase: { t: 'lobby' },
     board: [],
@@ -76,6 +90,8 @@ function route(ctx: Ctx, action: Action, rng: Rng): void {
       return addBot(ctx, action);
     case 'lobby/removeBot':
       return removeBot(ctx, action);
+    case 'lobby/toggleSet':
+      return toggleSet(ctx, action);
     case 'lobby/rematch':
       return rematch(ctx, action, rng);
     case 'draft/roll':
@@ -196,7 +212,14 @@ export function legalActions(state: GameState, player: PlayerId): Action[] {
       if (s.players.some((p) => p.id === player && p.bot)) return [];
       const out: Action[] = [{ t: 'lobby/leave', by: player }];
       if (hostOf(s.players)?.id === player) {
-        if (s.players.length >= MIN_PLAYERS) out.push({ t: 'lobby/start', by: player });
+        if (s.players.length >= MIN_PLAYERS && enoughRacers(s.racerSets, s.players.length)) {
+          out.push({ t: 'lobby/start', by: player });
+        }
+        for (const set of CHARACTER_SETS) {
+          // The last set stays on: a draft needs a deck.
+          const only = s.racerSets.length === 1 && s.racerSets[0] === set.id;
+          if (!only) out.push({ t: 'lobby/toggleSet', by: player, set: set.id });
+        }
         if (s.players.length < MAX_PLAYERS) out.push({ t: 'lobby/addBot', by: player });
         for (const bot of s.players.filter((p) => p.bot)) {
           out.push({ t: 'lobby/removeBot', by: player, player: bot.id });

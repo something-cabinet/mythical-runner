@@ -283,6 +283,63 @@ select {
   box-shadow: var(--shadow);
 }
 
+/* A set in the lobby: a whole-row toggle, so it is an easy target on a phone. */
+.set-toggle {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.set-toggle[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--accent-bg) 22%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent-bg) 60%, var(--border));
+}
+
+.set-toggle:disabled {
+  cursor: default;
+}
+
+.set-check {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  border: 2px solid var(--border);
+  display: grid;
+  place-items: center;
+  font-weight: 850;
+  font-size: 0.9rem;
+}
+
+.set-toggle[aria-pressed='true'] .set-check {
+  background: var(--accent-bg);
+  border-color: transparent;
+  color: var(--accent-ink);
+}
+
+.set-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 0.85rem;
+}
+
+.set-name {
+  font-weight: 700;
+  font-size: 1rem;
+}
+
 /* ---- Home --------------------------------------------------------------- */
 
 .hero {

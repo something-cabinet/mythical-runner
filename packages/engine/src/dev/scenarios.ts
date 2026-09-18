@@ -19,6 +19,9 @@ import type { GameEvent } from '../events.js';
 import { choiceId, playerId, racerId } from '../ids.js';
 import { FINISH, START } from '../tracks/index.js';
 import type { GameState, RacerState } from '../state.js';
+import type { CharacterSetId } from '../characters/sets.js';
+import { racerSet } from '../characters/registry.js';
+import { pointsToken } from '../scoring.js';
 
 // --- Harness ----------------------------------------------------------------
 
@@ -1412,6 +1415,440 @@ scenario('2 players — "the player who received the lower number of points goes
   check(s.phase.t === 'scored', 'the race is over', s.phase.t);
   check(pointsOf(s, 'p1') > pointsOf(s, 'p2'), 'p1 scored more', `${pointsOf(s, 'p1')} vs ${pointsOf(s, 'p2')}`);
   check(String(s.trailingPlayer) === 'p2', 'so p2 leads off the next race', String(s.trailingPlayer));
+});
+
+// --- Character sets -----------------------------------------------------------
+
+const toggle = (by: string, set: CharacterSetId): Action => ({ t: 'lobby/toggleSet', by: playerId(by), set });
+
+scenario('Sets — a new room drafts from the classic set, and the host can mix in Dota', () => {
+  const s = lobbyWith('p1', 'p2', 'p3');
+  check(s.racerSets.join(',') === 'classic', 'classic by default', s.racerSets.join(','));
+
+  const both = applyAction(s, toggle('p1', 'dota'));
+  check(both.state.racerSets.join(',') === 'classic,dota', 'Dota added', both.state.racerSets.join(','));
+  check(has(both.events, 'lobby/setsChanged'), 'announced');
+
+  const dotaOnly = applyAction(both.state, toggle('p1', 'classic')).state;
+  check(dotaOnly.racerSets.join(',') === 'dota', 'classic taken out', dotaOnly.racerSets.join(','));
+
+  check(throws(() => applyAction(dotaOnly, toggle('p1', 'dota'))), 'the last set cannot be taken out');
+  const offered = legalActions(dotaOnly, playerId('p1')).filter((a) => a.t === 'lobby/toggleSet');
+  check(
+    offered.length === 1 && offered[0]?.t === 'lobby/toggleSet' && offered[0].set === 'classic',
+    'so the host is only offered adding classic back',
+    JSON.stringify(offered),
+  );
+  check(throws(() => applyAction(s, toggle('p2', 'dota'))), 'only the host picks sets');
+  check(
+    legalActions(s, playerId('p2')).every((a) => a.t !== 'lobby/toggleSet'),
+    'and nobody else is offered it',
+  );
+});
+
+scenario('Sets — Dota alone has 16 racers: enough for four players, not five', () => {
+  const lobby = lobbyWith('p1', 'p2', 'p3', 'p4');
+  const four = applyAction(applyAction(lobby, toggle('p1', 'dota')).state, toggle('p1', 'classic')).state;
+  check(
+    legalActions(four, playerId('p1')).some((a) => a.t === 'lobby/start'),
+    'four players may start',
+  );
+
+  const five = applyAction(four, { t: 'lobby/join', by: playerId('p5'), name: 'P5' }).state;
+  check(
+    legalActions(five, playerId('p1')).every((a) => a.t !== 'lobby/start'),
+    'five players are not offered Start',
+  );
+  check(throws(() => applyAction(five, { t: 'lobby/start', by: playerId('p1') })), 'and cannot start');
+
+  const mixed = applyAction(five, toggle('p1', 'classic')).state;
+  check(
+    legalActions(mixed, playerId('p1')).some((a) => a.t === 'lobby/start'),
+    'adding classic back makes room for them',
+  );
+});
+
+scenario('Sets — the draft deals only from the chosen sets', () => {
+  const dota = playGame({ seed: 9001, playerCount: 3, sets: ['dota'] }).state;
+  const drafted = Object.values(dota.hands).flat();
+  check(drafted.length === 12, 'three full hands', String(drafted.length));
+  check(
+    drafted.every((r) => racerSet(r) === 'dota'),
+    'every one of them a Dota racer',
+    drafted.filter((r) => racerSet(r) !== 'dota').join(','),
+  );
+
+  const mixed = playGame({ seed: 9002, playerCount: 6, sets: ['classic', 'dota'] }).state;
+  const pool = Object.values(mixed.hands).flat();
+  check(pool.length === 24, 'six full hands from the mixed deck', String(pool.length));
+  check(pool.every((r) => racerSet(r) !== undefined), 'all real racers');
+  check(mixed.racerSets.join(',') === 'classic,dota', 'the choice survives the game');
+
+  const rematch = applyAction(dota, { t: 'lobby/rematch', by: playerId('p1') }).state;
+  check(rematch.racerSets.join(',') === 'dota', 'and a rematch keeps it', rematch.racerSets.join(','));
+});
+
+// --- Dota racers --------------------------------------------------------------
+
+const withChips = (s: GameState, player: string, value: number): GameState => ({
+  ...s,
+  scores: { ...s.scores, [playerId(player)]: [pointsToken(value, 1)] },
+});
+
+scenario('Bounty Hunter — "I steal 1 point" from the one racer I stop with', () => {
+  const s = withChips(
+    raceState(
+      [
+        { player: 'p1', racer: 'bounty-hunter', pos: 1 },
+        { player: 'p2', racer: 'vanilla-01', pos: 4 },
+      ],
+      'p1',
+    ),
+    'p2',
+    2,
+  );
+  const { state, events } = rollFor(s, 'p1', 3);
+  check(pointsOf(state, 'p1') === 1, 'Bounty Hunter gains 1', String(pointsOf(state, 'p1')));
+  check(pointsOf(state, 'p2') === 1, 'the victim loses 1', String(pointsOf(state, 'p2')));
+  check(logLines(events).includes('pocket'), 'logged');
+
+  const broke = rollFor({ ...s, scores: { ...s.scores, [playerId('p2')]: [] } }, 'p1', 3);
+  check(pointsOf(broke.state, 'p1') === 0, 'nothing to steal from an empty pocket');
+  check(!logLines(broke.events).includes('pocket'), 'and nothing logged');
+});
+
+scenario('Spirit Breaker — whoever it passes rolls, and trips on a 1', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'spirit-breaker', pos: 1 },
+      { player: 'p2', racer: 'vanilla-01', pos: 3 },
+    ],
+    'p1',
+  );
+  const bashed = rollUntil(s, 'p1', (r) => posOf(r.state, 'spirit-breaker') > 3 && racerAt(r.state, 'vanilla-01')?.tripped === true);
+  check(logLines(bashed.events).includes('rolls a 1'), 'a 1 trips them', logLines(bashed.events));
+
+  const missed = rollUntil(s, 'p1', (r) => posOf(r.state, 'spirit-breaker') > 3 && racerAt(r.state, 'vanilla-01')?.tripped === false);
+  check(logLines(missed.events).includes('keeps their feet'), 'anything else does not', logLines(missed.events));
+
+  const short = rollFor(s, 'p1', 1);
+  check(!logLines(short.events).includes('rolls'), 'no pass, no roll');
+});
+
+scenario('Earthshaker — skips the main move to trip its space, moving 2 per trip', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'earthshaker', pos: 3 },
+      { player: 'p2', racer: 'vanilla-01', pos: 3 },
+      { player: 'p3', racer: 'vanilla-02', pos: 3, tripped: true },
+      { player: 'p4', racer: 'vanilla-03', pos: 3 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(s, roll('p1'));
+  check(asked.state.pending?.prompt.includes('Echo Slam') === true, 'asks before rolling');
+
+  const slam = applyAction(asked.state, decide('p1', 'slam'));
+  check(racerAt(slam.state, 'vanilla-01')?.tripped === true, 'trips the racers on its space');
+  check(posOf(slam.state, 'earthshaker') === 7, 'two fresh trips: moves 4 — the one already down earns nothing', `pos ${posOf(slam.state, 'earthshaker')}`);
+  check(!has(slam.events, 'dice/thrown'), 'and never rolls');
+
+  const declined = applyAction(asked.state, decide('p1', 'roll'));
+  check(has(declined.events, 'dice/rolled'), 'declining rolls as normal');
+
+  const down = applyAction({ ...s, board: s.board.map((r) => (String(r.racerId) === 'earthshaker' ? { ...r, tripped: true } : r)) }, roll('p1'));
+  check(down.state.pending === null, 'a tripped Earthshaker has no main move to give up');
+});
+
+scenario('Tidehunter — rolls when tripped, and gets straight up on a 4+', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'tidehunter', pos: 1 },
+      { player: 'p2', racer: 'banana', pos: 3 },
+    ],
+    'p1',
+  );
+  const passedBanana = (r: { state: GameState; events: readonly GameEvent[] }): boolean =>
+    has(r.events, 'racer/tripped') && posOf(r.state, 'tidehunter') > 3;
+  const up = rollUntil(s, 'p1', (r) => passedBanana(r) && racerAt(r.state, 'tidehunter')?.tripped === false);
+  check(has(up.events, 'racer/stoodUp'), 'stands up', logLines(up.events));
+
+  const down = rollUntil(s, 'p1', (r) => passedBanana(r) && racerAt(r.state, 'tidehunter')?.tripped === true);
+  check(logLines(down.events).includes('stays down'), 'or stays down', logLines(down.events));
+});
+
+scenario('Templar Assassin — "I ignore the first 3 trips I receive"', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'templar-assassin', pos: 1 },
+      { player: 'p2', racer: 'banana', pos: 3 },
+    ],
+    'p1',
+  );
+  const first = rollFor(s, 'p1', 5);
+  check(racerAt(first.state, 'templar-assassin')?.tripped === false, 'passes Banana still standing');
+  check(!has(first.events, 'racer/tripped'), 'the trip never happened');
+  check(logLines(first.events).includes('2 left'), 'two refractions left', logLines(first.events));
+
+  const spent = raceState(
+    [
+      { player: 'p1', racer: 'templar-assassin', pos: 1, memo: { refractions: 3 } },
+      { player: 'p2', racer: 'banana', pos: 3 },
+    ],
+    'p1',
+  );
+  check(racerAt(rollFor(spent, 'p1', 5).state, 'templar-assassin')?.tripped === true, 'the fourth trip lands');
+});
+
+scenario('Anti-Mage — can skip the main move to warp up to 3 ahead', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'anti-mage', pos: 5 },
+      { player: 'p2', racer: 'banana', pos: 6 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(s, roll('p1'));
+  const ids = asked.state.pending?.options.map((o) => String(o.id)).join(',');
+  check(ids === 'blink:6,blink:7,blink:8,roll', 'offers the next three spaces', ids);
+
+  const blinked = applyAction(asked.state, decide('p1', 'blink:8'));
+  check(posOf(blinked.state, 'anti-mage') === 8, 'warps', `pos ${posOf(blinked.state, 'anti-mage')}`);
+  check(!has(blinked.events, 'dice/thrown'), 'without rolling');
+  check(racerAt(blinked.state, 'anti-mage')?.tripped === false, 'a warp passes nobody — Banana has no say');
+  check(moverAt(blinked.state) === 'p2', 'and the turn is over');
+});
+
+scenario('Faceless Void — once per race, trips everyone within 5', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'faceless-void', pos: 10 },
+      { player: 'p2', racer: 'vanilla-01', pos: 5 },
+      { player: 'p3', racer: 'vanilla-02', pos: 15 },
+      { player: 'p4', racer: 'vanilla-03', pos: 16 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(s, roll('p1'));
+  check(asked.state.pending?.options[0]?.label === 'Trip 2', 'two in the bubble', asked.state.pending?.options[0]?.label);
+
+  const chrono = applyAction(asked.state, decide('p1', 'chrono'));
+  check(racerAt(chrono.state, 'vanilla-01')?.tripped === true, '5 behind: tripped');
+  check(racerAt(chrono.state, 'vanilla-02')?.tripped === true, '5 ahead: tripped');
+  check(racerAt(chrono.state, 'vanilla-03')?.tripped === false, '6 ahead: safe');
+  check(has(chrono.events, 'dice/rolled'), 'and Void still takes its main move');
+
+  const used = raceState(
+    [
+      { player: 'p1', racer: 'faceless-void', pos: 10, memo: { chronoUsed: true } },
+      { player: 'p2', racer: 'vanilla-01', pos: 5 },
+    ],
+    'p1',
+  );
+  check(applyAction(used, roll('p1')).state.pending === null, 'not offered a second time');
+});
+
+scenario('Silencer — once per race, everyone else loses their powers for their next turn', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'silencer', pos: 0 },
+      { player: 'p2', racer: 'legs', pos: 0 },
+      { player: 'p3', racer: 'gunk', pos: 0 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(s, roll('p1'));
+  check(asked.state.pending?.prompt.includes('Global Silence') === true, 'offered before the main move');
+  const hushed = applyAction(asked.state, decide('p1', 'silence'));
+  check(logLines(hushed.events).includes('goops'), "Gunk's goop still works on Silencer's turn", logLines(hushed.events));
+
+  const legsTurn = applyAction(hushed.state, roll('p2'));
+  check(legsTurn.state.pending === null, "Legs isn't offered its jog");
+  check(has(legsTurn.events, 'dice/rolled'), 'it just rolls');
+  check(racerAt(legsTurn.state, 'legs')?.memo['silenced'] === undefined, 'and the silence lifts after that turn');
+  check(racerAt(legsTurn.state, 'gunk')?.memo['silenced'] === true, "Gunk's turn is still to come");
+
+  const again = raceState([{ player: 'p1', racer: 'silencer', pos: 0, memo: { silenceUsed: true } }, { player: 'p2', racer: 'legs', pos: 0 }], 'p1');
+  check(applyAction(again, roll('p1')).state.pending === null, 'not offered a second time');
+});
+
+scenario('Kunkka — after the main move, can warp back to where it started', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'kunkka', pos: 3 },
+      { player: 'p2', racer: 'vanilla-01', pos: 20 },
+    ],
+    'p1',
+  );
+  const back = rollFor(s, 'p1', 4, { by: 'p1', choice: 'return' });
+  check(posOf(back.state, 'kunkka') === 3, 'back on the X', `pos ${posOf(back.state, 'kunkka')}`);
+  check(has(back.events, 'racer/warped'), 'by warping');
+
+  const stay = rollFor(s, 'p1', 4, { by: 'p1', choice: 'stay' });
+  check(posOf(stay.state, 'kunkka') === 7, 'or it stays', `pos ${posOf(stay.state, 'kunkka')}`);
+});
+
+scenario('Omniknight — other racers within 3 get -2 to their main move', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: 3 },
+      { player: 'p2', racer: 'omniknight', pos: 6 },
+    ],
+    'p1',
+  );
+  const near = rollFor(s, 'p1', 3);
+  const rolled = near.events.find((e) => e.t === 'dice/rolled') as { natural?: number };
+  check(rolled.natural === 5, 'a 5 becomes a move of 3', JSON.stringify(rolled));
+
+  const far = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: 2 },
+      { player: 'p2', racer: 'omniknight', pos: 6 },
+    ],
+    'p1',
+  );
+  check(!logLines(rollFor(far, 'p1', 3).events).includes('aura'), '4 away is out of range');
+});
+
+scenario('Ogre Magi — a 1 or 2 can multicast into another turn', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'ogre-magi', pos: 3 },
+      { player: 'p2', racer: 'vanilla-01', pos: 3 },
+    ],
+    'p1',
+  );
+  const low = rollUntil(s, 'p1', (r) => r.state.pending?.prompt.includes('Multicast') === true);
+  const die = pendingDie(low.state);
+  check(die === 1 || die === 2, 'asked on a low roll', String(die));
+  const again = applyAction(low.state, decide('p1', 'multicast'));
+  check(moverAt(again.state) === 'p1', 'Ogre Magi goes again', moverAt(again.state));
+
+  const high = rollFor(s, 'p1', 5);
+  check(high.state.pending === null && moverAt(high.state) === 'p2', 'a 5 just moves');
+});
+
+scenario('Morphling — has the power of whoever is last', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'morphling', pos: 5 },
+      { player: 'p2', racer: 'vanilla-01', pos: 10 },
+      { player: 'p3', racer: 'gunk', pos: 2 },
+    ],
+    'p2',
+  );
+  const { events } = rollFor(s, 'p2', 3);
+  const rolled = events.find((e) => e.t === 'dice/rolled') as { natural?: number };
+  check(rolled.natural === 5, 'Gunk and a Gunk-shaped Morphling: -2', JSON.stringify(rolled));
+
+  const tied = raceState(
+    [
+      { player: 'p1', racer: 'morphling', pos: 5 },
+      { player: 'p2', racer: 'legs', pos: 2 },
+      { player: 'p3', racer: 'gunk', pos: 2 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(tied, roll('p1'));
+  check(asked.state.pending?.prompt.includes('Last place is tied') === true, 'a tie for last is its pick');
+  const legs = applyAction(asked.state, decide('p1', 'copy:legs'));
+  check(legs.state.pending?.prompt.includes('Jog') === true, "and it gets that racer's power", legs.state.pending?.prompt);
+});
+
+scenario('Alchemist (Dota) — double points from star spaces and cups', () => {
+  const star = raceState(
+    [
+      { player: 'p1', racer: 'dota-alchemist', pos: 0 },
+      { player: 'p2', racer: 'vanilla-01', pos: 20 },
+    ],
+    'p1',
+    2,
+  );
+  const landed = rollFor(star, 'p1', 1);
+  check(pointsOf(landed.state, 'p1') === 2, "the Wild Wilds' 1-point star pays 2", String(pointsOf(landed.state, 'p1')));
+
+  let s = raceState(
+    [
+      { player: 'p1', racer: 'dota-alchemist', pos: FINISH - 1 },
+      { player: 'p2', racer: 'vanilla-01', pos: FINISH - 1 },
+    ],
+    'p1',
+  );
+  s = applyAction(s, roll('p1')).state;
+  s = applyAction(s, roll('p2')).state;
+  check(s.phase.t === 'scored', 'the race is over', s.phase.t);
+  check(pointsOf(s, 'p1') === 6, 'a 3-point gold cup pays 6', String(pointsOf(s, 'p1')));
+  check(pointsOf(s, 'p2') === 1, 'the silver is untouched', String(pointsOf(s, 'p2')));
+});
+
+scenario('Legion Commander — DUEL! after the main move; the winner gets +1 for the race', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'legion-commander', pos: 3 },
+      { player: 'p2', racer: 'vanilla-01', pos: 7 },
+    ],
+    'p1',
+  );
+  const duel = rollFor(s, 'p1', 4, { by: 'p1', choice: 'duel:vanilla-01' });
+  const bonuses = ['legion-commander', 'vanilla-01'].map((r) => racerAt(duel.state, r)?.memo['mainMoveBonus'] ?? 0);
+  check(bonuses.filter((b) => b === 1).length === 1, 'exactly one of them wins +1', bonuses.join(','));
+  check(logLines(duel.events).includes('DUEL!'), 'logged');
+
+  const prize = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: 3, memo: { mainMoveBonus: 1 } },
+      { player: 'p2', racer: 'vanilla-02', pos: 20 },
+    ],
+    'p1',
+  );
+  const next = applyAction(prize, roll('p1'));
+  const rolled = next.events.find((e) => e.t === 'dice/rolled') as { value: number; natural?: number };
+  check(rolled.value === (rolled.natural ?? NaN) + 1, 'and every main move after it is one longer', JSON.stringify(rolled));
+});
+
+scenario('Oracle — predicts who trips first; right is worth 3', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'oracle', pos: 0 },
+      { player: 'p2', racer: 'vanilla-01', pos: 0 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(s, roll('p1'));
+  check(asked.state.pending?.prompt === 'Who will trip first?', 'asks on its first turn');
+  check(asked.state.pending?.options.length === 2, 'anyone may be named, itself included');
+
+  const board = (prediction: string): GameState =>
+    raceState(
+      [
+        { player: 'p1', racer: 'oracle', pos: 0, memo: { prediction } },
+        { player: 'p2', racer: 'vanilla-01', pos: 1 },
+        { player: 'p3', racer: 'banana', pos: 3 },
+      ],
+      'p2',
+    );
+  const right = rollFor(board('vanilla-01'), 'p2', 5);
+  check(pointsOf(right.state, 'p1') === 3, 'called it: +3', String(pointsOf(right.state, 'p1')));
+
+  const wrong = rollFor(board('banana'), 'p2', 5);
+  check(pointsOf(wrong.state, 'p1') === 0, 'wrong: nothing');
+  check(racerAt(wrong.state, 'oracle')?.memo['foreseen'] === true, 'and the prediction is spent');
+});
+
+scenario('Storm Spirit — -1 to the main move, and every move is a warp', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'storm-spirit', pos: 1 },
+      { player: 'p2', racer: 'banana', pos: 3 },
+    ],
+    'p1',
+  );
+  const { state, events } = rollFor(s, 'p1', 5);
+  const rolled = events.find((e) => e.t === 'dice/rolled') as { natural?: number };
+  check(rolled.natural === 6, 'a 6 is a move of 5', JSON.stringify(rolled));
+  check(posOf(state, 'storm-spirit') === 6, 'lands 5 ahead');
+  check(has(events, 'racer/warped') && !events.some((e) => e.t === 'racer/moved' && String(e.racerId) === 'storm-spirit'), 'by warping');
+  check(!has(events, 'racer/passed') && racerAt(state, 'storm-spirit')?.tripped === false, 'so it passes nobody — no Banana trip');
 });
 
 // --- Report -----------------------------------------------------------------

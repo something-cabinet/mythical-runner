@@ -1,8 +1,16 @@
-import { hostOf, MAX_PLAYERS } from '@mr/engine';
+import {
+  CHARACTER_SETS,
+  draftSize,
+  enoughRacers,
+  hostOf,
+  MAX_PLAYERS,
+  MIN_PLAYERS,
+  racersInSets,
+} from '@mr/engine';
 import { useState } from 'react';
 import { ActionBar, PlayerToken, Waiting } from '../components/bits';
 import { forgetCredentials } from '../lib/identity';
-import { playerName } from '../lib/present';
+import { playerName, setNames } from '../lib/present';
 import { legalOf, useRoomContext } from '../lib/roomContext';
 import { navigate, roomLink } from '../lib/router';
 
@@ -15,7 +23,10 @@ export function LobbyScreen() {
   const canStart = legalOf(message, 'lobby/start').length > 0;
   const addBot = legalOf(message, 'lobby/addBot')[0];
   const removeBots = legalOf(message, 'lobby/removeBot');
+  const toggles = legalOf(message, 'lobby/toggleSet');
   const seatsLeft = MAX_PLAYERS - view.players.length;
+  const deckSize = racersInSets(view.racerSets).length;
+  const deckTooSmall = !enoughRacers(view.racerSets, view.players.length);
 
   const share = async (): Promise<void> => {
     const url = roomLink(code);
@@ -107,6 +118,52 @@ export function LobbyScreen() {
           )}
         </section>
 
+        <section className="card" aria-labelledby="sets-heading">
+          <div className="spread" style={{ marginBottom: 8 }}>
+            <h2 id="sets-heading" className="section-title">
+              Racer sets
+            </h2>
+            <span className="muted num" style={{ fontSize: '0.85rem' }}>
+              {deckSize} racers
+            </span>
+          </div>
+          <div className="stack" style={{ gap: 8 }}>
+            {CHARACTER_SETS.map((set) => {
+              const on = view.racerSets.includes(set.id);
+              const toggle = toggles.find((a) => a.set === set.id);
+              return (
+                <button
+                  key={set.id}
+                  type="button"
+                  className="set-toggle"
+                  aria-pressed={on}
+                  disabled={!toggle || !canAct}
+                  onClick={() => toggle && send(toggle)}
+                >
+                  <span className="set-check" aria-hidden="true">
+                    {on ? '✓' : ''}
+                  </span>
+                  <span className="set-text">
+                    <span className="set-name">{set.name}</span>
+                    <span className="muted">{set.text}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {deckTooSmall && (
+            <p className="banner banner-warn" style={{ marginTop: 10, fontSize: '0.85rem' }}>
+              {setNames(view.racerSets)} has {deckSize} racers, but {view.players.length} players draft{' '}
+              {draftSize(view.players.length)}.{isHost ? ' Add another set to start.' : ''}
+            </p>
+          )}
+          {!isHost && (
+            <p className="muted" style={{ marginTop: 8, fontSize: '0.85rem' }}>
+              The host picks which sets go into the draft.
+            </p>
+          )}
+        </section>
+
         <button type="button" className="btn btn-ghost btn-block" onClick={leave}>
           Leave room
         </button>
@@ -123,7 +180,13 @@ export function LobbyScreen() {
             >
               Start game
             </button>
-            {!canStart && <p className="muted" style={{ textAlign: 'center', fontSize: '0.85rem' }}>Add a bot or wait for at least one more player</p>}
+            {!canStart && (
+              <p className="muted" style={{ textAlign: 'center', fontSize: '0.85rem' }}>
+                {view.players.length < MIN_PLAYERS
+                  ? 'Add a bot or wait for at least one more player'
+                  : 'Add another racer set — this one is too small for the table'}
+              </p>
+            )}
           </>
         ) : (
           <Waiting>Waiting for {host ? playerName(view, host.id) : 'the host'} to start</Waiting>

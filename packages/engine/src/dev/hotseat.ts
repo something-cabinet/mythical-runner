@@ -19,6 +19,7 @@ import type { GameEvent } from '../events.js';
 import { playerId, type PlayerId } from '../ids.js';
 import { makeRng } from '../rng.js';
 import { totalPoints } from '../scoring.js';
+import type { CharacterSetId } from '../characters/sets.js';
 import type { GameState } from '../state.js';
 
 export interface PlayOptions {
@@ -41,6 +42,8 @@ export interface PlayOptions {
    * played by `botAction` exactly as the server plays them. At least one seat stays human.
    */
   readonly bots?: number;
+  /** Character sets the host picks in the lobby. Defaults to whatever a new room has. */
+  readonly sets?: readonly CharacterSetId[];
 }
 
 export interface PlayResult {
@@ -77,6 +80,16 @@ export function playGame(opts: PlayOptions): PlayResult {
     apply({ t: 'lobby/join', by: p, name: `Player ${i + 1}` });
   }
   for (let i = 0; i < botCount; i++) apply({ t: 'lobby/addBot', by: players[0] as PlayerId });
+  if (opts.sets) {
+    const host = players[0] as PlayerId;
+    // Add before removing, since the last set in can't be taken out.
+    for (const set of opts.sets) {
+      if (!state.racerSets.includes(set)) apply({ t: 'lobby/toggleSet', by: host, set });
+    }
+    for (const set of state.racerSets) {
+      if (!opts.sets.includes(set)) apply({ t: 'lobby/toggleSet', by: host, set });
+    }
+  }
   apply({ t: 'lobby/start', by: players[0] as PlayerId });
 
   while (state.phase.t !== 'gameOver') {

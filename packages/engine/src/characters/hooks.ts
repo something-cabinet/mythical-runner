@@ -71,11 +71,38 @@ export interface HookCtx {
    */
   warp(target: MutableRacer, pos: number): void;
 
-  trip(target: MutableRacer): void;
+  /**
+   * Trips a racer. False when nothing happened: they were already down, or shrugged it off
+   * (Templar Assassin), so a power counting its trips counts only real ones.
+   */
+  trip(target: MutableRacer): boolean;
+
+  /**
+   * "I can skip my main move and…" — `self` gives up this turn's main move. Called before
+   * the roll, from `beforeMainMove` or its `resume`.
+   */
+  skipMainMove(): void;
   eliminate(target: MutableRacer): void;
   award(player: PlayerId, value: number): void;
-  /** Takes back up to `value` points from a player's point chips. Cups are never touched. */
-  forfeit(player: PlayerId, value: number): void;
+  /**
+   * Takes back up to `value` points from a player's point chips. Cups are never touched.
+   * Returns how many points were actually taken, which is less when the chips run out.
+   */
+  forfeit(player: PlayerId, value: number): number;
+
+  /**
+   * Silencer: `target` has no powers at all during its next turn — "they can only roll for
+   * main move". Lifted when that turn ends.
+   */
+  silence(target: MutableRacer): void;
+
+  /**
+   * Legion Commander's duel prize: `target` gets `amount` more on every main move for the
+   * rest of the race. Held by the engine rather than the granting power, so the bonus
+   * outlives it — a racer that wins a duel keeps the prize even if the Commander is
+   * eliminated, silenced or borrowed away.
+   */
+  addMainMoveBonus(target: MutableRacer, amount: number): void;
 
   /**
    * Skipper: "I go next in turn order." Genius: "I take another turn after this one."
@@ -216,6 +243,39 @@ export interface Hooks {
    * May queue movement but must not `ask`: the roll is already committed at this point.
    */
   onAnyMainMoveRolled?(h: HookCtx, mover: MutableRacer, rolled: number): number | void;
+
+  /**
+   * "After my main move" — fires once the main move and everything it set off have
+   * resolved. `from` is where `self` stood before the main move. Only for a main move that
+   * actually went somewhere: a cancelled or zero-length one never happened.
+   */
+  afterMainMove?(h: HookCtx, from: number): void;
+
+  /**
+   * Templar Assassin: `self` is about to be tripped. Return true to shrug it off, in which
+   * case the trip never happened — nothing reacts to it.
+   */
+  ignoresTrip?(h: HookCtx): boolean;
+
+  /**
+   * A racer was just tripped. Fires for every racer still in, the tripped one first, so
+   * `target` may be `self` (Tidehunter getting up) or anyone (Oracle's prediction). Must
+   * not `ask`: trips happen inside hooks that can't suspend.
+   */
+  onRacerTripped?(h: HookCtx, target: MutableRacer): void;
+
+  /**
+   * Storm Spirit: every move `self` makes is a warp to wherever it would have ended. So no
+   * passing, nobody latching on, no stepping over spaces — it just arrives, and arriving
+   * is stopping.
+   */
+  movesByWarp?(h: HookCtx): boolean;
+
+  /**
+   * Dota's Alchemist: adjusts a cup or star-space chip `self` has just earned, before it is
+   * handed over. Other point chips — a power's award — are not affected.
+   */
+  modifyAward?(h: HookCtx, value: number, source: 'cup' | 'star'): number;
 
   /** `self` stopped on a space, after any space effect resolved. */
   onStop?(h: HookCtx): void;

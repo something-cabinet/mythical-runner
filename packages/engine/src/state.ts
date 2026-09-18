@@ -1,3 +1,4 @@
+import type { CharacterSetId } from './characters/sets.js';
 import type { ChoiceId, PlayerId, RacerId } from './ids.js';
 import type { Job } from './jobs.js';
 import type { Token } from './scoring.js';
@@ -22,6 +23,11 @@ export function racersPerRace(playerCount: number): number {
 /** How many racers each player drafts: enough for every race. */
 export function racersPerPlayer(playerCount: number): number {
   return RACE_COUNT * racersPerRace(playerCount);
+}
+
+/** How many racers the whole table drafts, which the chosen sets must be able to supply. */
+export function draftSize(playerCount: number): number {
+  return playerCount * racersPerPlayer(playerCount);
 }
 
 /** Racers that must cross the line before a race ends. */
@@ -193,6 +199,11 @@ export interface GameState {
   readonly step: number;
 
   readonly players: readonly Player[];
+  /**
+   * Which character sets the draft deck is built from. Chosen by the host in the lobby;
+   * never empty, and kept across a rematch.
+   */
+  readonly racerSets: readonly CharacterSetId[];
   /** Seat order, fixed at game start. Turn order within a race follows this. */
   readonly seatOrder: readonly PlayerId[];
 

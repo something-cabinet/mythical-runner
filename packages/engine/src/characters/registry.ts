@@ -1,20 +1,29 @@
 import type { RacerId } from '../ids.js';
-import { SLICE_RACERS } from './defs/index.js';
+import { CLASSIC_RACERS } from './defs/classic.js';
+import { DOTA_RACERS } from './defs/dota.js';
 import type { Hooks } from './hooks.js';
+import { CHARACTER_SETS, type CharacterSetId } from './sets.js';
 import type { RacerDef } from './types.js';
 
 /**
- * The racer roster: all 36 racers from the rulebook, defined in `defs/index.ts`.
+ * The racer roster: every racer in every set. The classic 36 are in `defs/classic.ts`,
+ * the Dota heroes in `defs/dota.ts`.
  *
  * Lookups are keyed by id and tolerate unknown ids — an unknown racer simply has no power
  * — which is what lets scenario tests field powerless stand-ins like `vanilla-01`.
  */
-const ROSTER_SIZE = 36;
+export const RACERS: readonly RacerDef[] = [...CLASSIC_RACERS, ...DOTA_RACERS];
 
-export const RACERS: readonly RacerDef[] = SLICE_RACERS;
+const SET_SIZES: Readonly<Record<CharacterSetId, number>> = { classic: 36, dota: 16 };
 
-if (RACERS.length !== ROSTER_SIZE) {
-  throw new Error(`Expected ${ROSTER_SIZE} racers, found ${RACERS.length}`);
+for (const set of CHARACTER_SETS) {
+  const found = RACERS.filter((r) => r.set === set.id).length;
+  if (found !== SET_SIZES[set.id]) {
+    throw new Error(`Expected ${SET_SIZES[set.id]} racers in set '${set.id}', found ${found}`);
+  }
+}
+if (new Set(RACERS.map((r) => r.id)).size !== RACERS.length) {
+  throw new Error('Two racers share an id');
 }
 
 const BY_ID = new Map<RacerId, RacerDef>(RACERS.map((r) => [r.id, r]));
@@ -47,6 +56,16 @@ export function racerText(id: RacerId): string {
 }
 
 export const ALL_RACER_IDS: readonly RacerId[] = RACERS.map((r) => r.id);
+
+/** Every racer in the given sets, in roster order: the draft deck before shuffling. */
+export function racersInSets(sets: readonly CharacterSetId[]): RacerId[] {
+  return RACERS.filter((r) => sets.includes(r.set)).map((r) => r.id);
+}
+
+/** The set a racer ships in, or undefined for a stand-in like `vanilla-01`. */
+export function racerSet(id: RacerId): CharacterSetId | undefined {
+  return BY_ID.get(id)?.set;
+}
 
 /** Racers with at least one hook. Used by tests and by the fuzzer's reporting. */
 export const RACERS_WITH_ABILITIES: readonly RacerId[] = RACERS.filter(

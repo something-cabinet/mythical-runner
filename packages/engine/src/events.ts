@@ -1,3 +1,4 @@
+import type { CharacterSetId } from './characters/sets.js';
 import type { ChoiceId, PlayerId, RacerId } from './ids.js';
 import type { Token } from './scoring.js';
 import type { RaceNumber } from './tracks/index.js';
@@ -33,6 +34,12 @@ export interface PlayerLeft {
 export interface GameRematch {
   readonly t: 'game/rematch';
   readonly by: PlayerId;
+}
+
+/** The host changed which character sets the draft deck is built from. */
+export interface LobbySetsChanged {
+  readonly t: 'lobby/setsChanged';
+  readonly sets: readonly CharacterSetId[];
 }
 
 export interface GameStarted {
@@ -252,6 +259,7 @@ export type GameEvent =
   | PlayerLeft
   | GameStarted
   | GameRematch
+  | LobbySetsChanged
   | DraftRolled
   | DraftOrderSet
   | DraftPicked
