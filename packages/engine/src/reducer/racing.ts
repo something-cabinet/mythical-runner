@@ -184,6 +184,7 @@ export function endTurn(ctx: Ctx, rng: Rng): void {
 
   // Anyone who crossed the line this turn is placed now, in board order. Abilities can
   // push more than one racer over at once, so this is a sweep, not a single check.
+  const prevFinishedCount = phase.finished.length;
   for (const racer of s.board) {
     // Mastermind can fill the podium from inside this loop.
     if (phase.finished.length >= FINISHERS_PER_RACE) break;
@@ -202,9 +203,8 @@ export function endTurn(ctx: Ctx, rng: Rng): void {
   }
 
   const moved = phase.moving;
-  const mover = moved ? findRacer(s, moved) : undefined;
-  const progressed = mover !== undefined && mover.pos > s.turnStartPos;
-  phase.stalledTurns = progressed ? 0 : phase.stalledTurns + 1;
+  const newFinisher = phase.finished.length > prevFinishedCount;
+  phase.stalledTurns = newFinisher ? 0 : phase.stalledTurns + 1;
 
   // That racer has had its turn. A player's opening turn ends after one racer whatever
   // else they have waiting; later turns run through the rest of the team.

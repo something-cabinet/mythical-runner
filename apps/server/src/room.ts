@@ -87,6 +87,13 @@ const OFFLINE_TURN_SECONDS = 8;
  */
 const BOT_MOVE_DELAY_MS = 900;
 
+/**
+ * How long a player gets to pick which racer goes next when they have multiple
+ * racers to move (two-player variant). Shorter than the full turn timer because
+ * there's no die roll or power interaction involved — just a selection.
+ */
+const RACER_SELECTION_SECONDS = 15;
+
 /** How long an empty room lingers before deleting itself. */
 const EMPTY_ROOM_TTL_MS = 6 * 60 * 60 * 1000;
 
@@ -364,6 +371,19 @@ export class RoomDO extends DurableObject<Env> {
   private deadlineFor(state: GameState): number | null {
     if (!this.meta || this.meta.turnSeconds <= 0) return null;
     if (state.phase.t === 'lobby' || state.phase.t === 'gameOver') return null;
+
+    // Racer selection: the active player needs to pick which racer goes next.
+    // No dice roll or power is pending yet — just a choice, so a shorter timer is fine.
+    const ph = state.phase;
+    if (ph.t === 'racing' && ph.toMove.length > 1 && ph.moving === null) {
+      const player = state.players.find((p) => p.id === ph.active);
+      if (player?.bot) {
+        // Bot: almost immediate; botAction picks one via the alarm anyway.
+        return Date.now() + 100;
+      }
+      return Date.now() + Math.min(RACER_SELECTION_SECONDS, this.meta.turnSeconds) * 1000;
+    }
+
     const seconds = waitingOnlyOnAbsent(state)
       ? Math.min(OFFLINE_TURN_SECONDS, this.meta.turnSeconds)
       : this.meta.turnSeconds;
