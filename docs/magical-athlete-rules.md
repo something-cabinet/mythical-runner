@@ -93,7 +93,7 @@ The 2nd place racer takes the top silver. Then...
 
 Magical Athlete is a simple game, but the interactions can get wild! It helps to know a few key concepts. But don't stress—most of this will come up naturally as you play.
 
-To the right, you'll find a quick guide to important terms, what happens on the track, and how certain racers work. If something unexpected happens, check here or just roll with it. Embrace the chaos and rules discussions—it's all part of the fun!
+To the below, you'll find a quick guide to important terms, what happens on the track, and how certain racers work. If something unexpected happens, check here or just roll with it. Embrace the chaos and rules discussions—it's all part of the fun!
 
 And if you're ever completely stumped, roll off to decide who's right.
 

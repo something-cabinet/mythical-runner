@@ -271,7 +271,7 @@ const gunk = def('gunk', 'Gunk', 'Other racers get -1 to their main move.', {
     // The card is explicit that the goop "reduces the move amount, not the die roll
     // number", so it applies after the roll and can take a move below zero conceptually —
     // clamped at 0, since a negative main move is not a thing.
-    if (!isRunning(h.self)) return value;
+    if (!isRunning(h.self) || mover.racerId === h.self.racerId) return value;
     const gooped = Math.max(0, value - 1);
     if (gooped !== value) h.log(`${h.nameOf(h.self)} goops ${h.nameOf(mover)}: -1.`);
     return gooped;
