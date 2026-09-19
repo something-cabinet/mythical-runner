@@ -121,6 +121,49 @@ const decide = (by: string, choice: string): Action => ({
   choice: choiceId(choice),
 });
 
+/** A power's roll waiting on its player: one option, Roll. */
+const rollAsked = (s: GameState): boolean =>
+  s.pending?.options.length === 1 && String(s.pending.options[0]?.id) === 'roll';
+
+/**
+ * Presses Roll for every power's roll that comes up, whoever it is asked of, and records
+ * who was asked, in order.
+ */
+function pressRolls(res: { state: GameState; events: readonly GameEvent[] }): {
+  state: GameState;
+  events: GameEvent[];
+  asked: string[];
+} {
+  let { state } = res;
+  const events = [...res.events];
+  const asked: string[] = [];
+  while (rollAsked(state)) {
+    const by = String(state.pending!.player);
+    asked.push(by);
+    const next = applyAction(state, decide(by, 'roll'));
+    state = next.state;
+    events.push(...next.events);
+  }
+  return { state, events, asked };
+}
+
+/** `rollUntil`, pressing Roll for any power's roll along the way. */
+function rollThrough(
+  state: GameState,
+  by: string,
+  found: (res: { state: GameState; events: readonly GameEvent[]; asked: string[] }) => boolean,
+): { state: GameState; events: GameEvent[]; asked: string[] } {
+  for (let seed = 1; seed < 40000; seed++) {
+    const res = pressRolls(applyAction({ ...state, seed }, roll(by)));
+    if (found(res)) return res;
+  }
+  throw new Error('could not find a seed producing the wanted rolls');
+}
+
+/** The faces thrown for powers in these events, in order. */
+const powerThrows = (events: readonly GameEvent[]): number[] =>
+  events.flatMap((e) => (e.t === 'dice/thrown' && e.power ? [e.value] : []));
+
 /**
  * Rolls, forcing a specific die result by searching seeds.
  *
@@ -484,7 +527,11 @@ scenario('Duelist — the winner moves 2, the loser is untouched', () => {
     'p1',
   );
   const { state: mid } = rollFor(s, 'p1', 3);
-  const res = applyAction(mid, decide('p2', 'duel'));
+  const shouted = applyAction(mid, decide('p2', 'duel'));
+  check(rollAsked(shouted.state) && shouted.state.pending?.player === playerId('p2'), 'the Duelist rolls first');
+  const res = pressRolls(shouted);
+  check(res.asked.join(',') === 'p2,p1', 'then the other racer rolls their own', res.asked.join(','));
+  check(powerThrows(res.events).length === 2, 'both dice are thrown for the board to show');
 
   const text = logLines(res.events);
   check(text.includes('DUEL!'), 'duel was rolled');
@@ -1609,14 +1656,27 @@ scenario('Spirit Breaker — whoever it passes rolls, and trips on a 1', () => {
     ],
     'p1',
   );
-  const bashed = rollUntil(s, 'p1', (r) => posOf(r.state, 'spirit-breaker') > 3 && racerAt(r.state, 'vanilla-01')?.tripped === true);
-  check(logLines(bashed.events).includes('rolls a 1'), 'a 1 trips them', logLines(bashed.events));
+  const bashed = rollThrough(s, 'p1', (r) => posOf(r.state, 'spirit-breaker') > 3 && racerAt(r.state, 'vanilla-01')?.tripped === true);
+  check(bashed.asked.join(',') === 'p2', "the victim's player throws it", bashed.asked.join(','));
+  check(powerThrows(bashed.events).join(',') === '1', 'a 1 on the die', powerThrows(bashed.events).join(','));
+  check(logLines(bashed.events).includes('rolls a 1'), 'trips them', logLines(bashed.events));
 
-  const missed = rollUntil(s, 'p1', (r) => posOf(r.state, 'spirit-breaker') > 3 && racerAt(r.state, 'vanilla-01')?.tripped === false);
+  const missed = rollThrough(s, 'p1', (r) => posOf(r.state, 'spirit-breaker') > 3 && racerAt(r.state, 'vanilla-01')?.tripped === false);
   check(logLines(missed.events).includes('keeps their feet'), 'anything else does not', logLines(missed.events));
 
   const short = rollFor(s, 'p1', 1);
-  check(!logLines(short.events).includes('rolls'), 'no pass, no roll');
+  check(!logLines(short.events).includes('rolls') && short.state.pending === null, 'no pass, no roll');
+
+  // The bash roll stops the game mid-pass; the racer passed still gets its own say after.
+  const peel = raceState(
+    [
+      { player: 'p1', racer: 'spirit-breaker', pos: 1 },
+      { player: 'p2', racer: 'banana', pos: 3 },
+    ],
+    'p1',
+  );
+  const slipped = rollThrough(peel, 'p1', (r) => posOf(r.state, 'spirit-breaker') > 3);
+  check(racerAt(slipped.state, 'spirit-breaker')?.tripped === true, 'Banana still trips Spirit Breaker', logLines(slipped.events));
 });
 
 scenario('Earthshaker — skips the main move to trip its space, moving 2 per trip', () => {
@@ -1657,10 +1717,11 @@ scenario('Tidehunter — rolls when tripped, and gets straight up on a 4+', () =
   );
   const passedBanana = (r: { state: GameState; events: readonly GameEvent[] }): boolean =>
     has(r.events, 'racer/tripped') && posOf(r.state, 'tidehunter') > 3;
-  const up = rollUntil(s, 'p1', (r) => passedBanana(r) && racerAt(r.state, 'tidehunter')?.tripped === false);
-  check(has(up.events, 'racer/stoodUp'), 'stands up', logLines(up.events));
+  const up = rollThrough(s, 'p1', (r) => passedBanana(r) && racerAt(r.state, 'tidehunter')?.tripped === false);
+  check(up.asked.join(',') === 'p1', 'its player throws the die', up.asked.join(','));
+  check(has(up.events, 'racer/stoodUp') && (powerThrows(up.events)[0] ?? 0) >= 4, 'a 4+ stands it up', logLines(up.events));
 
-  const down = rollUntil(s, 'p1', (r) => passedBanana(r) && racerAt(r.state, 'tidehunter')?.tripped === true);
+  const down = rollThrough(s, 'p1', (r) => passedBanana(r) && racerAt(r.state, 'tidehunter')?.tripped === true);
   check(logLines(down.events).includes('stays down'), 'or stays down', logLines(down.events));
 });
 
@@ -1892,7 +1953,9 @@ scenario('Legion Commander — DUEL! whenever a racer shares its space; the winn
     ],
     'p1',
   );
-  const duel = rollFor(s, 'p1', 4, { by: 'p1', choice: 'duel:vanilla-01' });
+  const asked = rollFor(s, 'p1', 4, { by: 'p1', choice: 'duel:vanilla-01' });
+  const duel = pressRolls(asked);
+  check(duel.asked.join(',') === 'p1,p2', 'each side throws its own die, the Commander first', duel.asked.join(','));
   const bonuses = ['legion-commander', 'vanilla-01'].map((r) => racerAt(duel.state, r)?.memo['mainMoveBonus'] ?? 0);
   check(bonuses.filter((b) => b === 1).length === 1, 'exactly one of them wins +1', bonuses.join(','));
   check(logLines(duel.events).includes('DUEL!'), 'logged');
@@ -1913,7 +1976,7 @@ scenario('Legion Commander — DUEL! whenever a racer shares its space; the winn
     "the NON-active player (Legion Commander's owner) is asked",
     `asked ${String(mid.pending?.player)}`,
   );
-  const shouted = applyAction(mid, decide('p2', 'duel:vanilla-01'));
+  const shouted = pressRolls(applyAction(mid, decide('p2', 'duel:vanilla-01')));
   const won = ['legion-commander', 'vanilla-01'].map((r) => racerAt(shouted.state, r)?.memo['mainMoveBonus'] ?? 0);
   check(won.filter((b) => b === 1).length === 1, 'and the duel still pays +1 to exactly one of them', won.join(','));
 
@@ -2044,7 +2107,7 @@ scenario('Clockwerk — pushes every racer 1 away before the main move', () => {
   check(posOf(none.state, 'vanilla-01') === 0 && !logLines(none.events).includes('Cogs'), 'nobody is pushed off Start');
 });
 
-scenario('Pudge — can skip the main move to hook a racer onto its space and trip them', () => {
+scenario('Pudge — can skip the main move to throw a hook, landing it on a 4+', () => {
   const s = raceState(
     [
       { player: 'p1', racer: 'pudge', pos: 10 },
@@ -2057,12 +2120,34 @@ scenario('Pudge — can skip the main move to hook a racer onto its space and tr
   const ids = asked.state.pending?.options.map((o) => String(o.id)).join(',');
   check(ids === 'hook:vanilla-01,hook:vanilla-02,roll', 'offers every other racer', ids);
 
-  const hooked = applyAction(asked.state, decide('p1', 'hook:vanilla-01'));
-  check(posOf(hooked.state, 'vanilla-01') === 10, 'warped onto Pudge', `pos ${posOf(hooked.state, 'vanilla-01')}`);
+  const aimed = applyAction(asked.state, decide('p1', 'hook:vanilla-01'));
+  check(rollAsked(aimed.state) && aimed.state.pending?.player === playerId('p1'), 'then waits for Pudge to roll');
+  check(posOf(aimed.state, 'vanilla-01') === 3, 'nothing lands before the roll');
+
+  const throwHook = (found: (face: number) => boolean) => {
+    for (let seed = 1; seed < 40000; seed++) {
+      const res = applyAction({ ...aimed.state, seed }, decide('p1', 'roll'));
+      const face = powerThrows(res.events)[0];
+      if (face !== undefined && found(face)) return res;
+    }
+    throw new Error('could not find a seed producing the wanted hook roll');
+  };
+
+  const hooked = throwHook((v) => v >= 4);
+  check(posOf(hooked.state, 'vanilla-01') === 10, 'a 4+ warps them onto Pudge', `pos ${posOf(hooked.state, 'vanilla-01')}`);
   check(has(hooked.events, 'racer/warped'), 'by a warp');
   check(racerAt(hooked.state, 'vanilla-01')?.tripped === true, 'and tripped');
-  check(!has(hooked.events, 'dice/thrown') && posOf(hooked.state, 'pudge') === 10, 'Pudge never rolls');
+  check(!has(hooked.events, 'dice/rolled') && posOf(hooked.state, 'pudge') === 10, 'Pudge takes no main move');
   check(moverAt(hooked.state) === 'p2', 'and the turn is over');
+
+  const missed = throwHook((v) => v < 4);
+  check(
+    posOf(missed.state, 'vanilla-01') === 3 && racerAt(missed.state, 'vanilla-01')?.tripped === false,
+    'below 4 the hook misses',
+    `pos ${posOf(missed.state, 'vanilla-01')}`,
+  );
+  check(logLines(missed.events).includes('misses'), 'logged', logLines(missed.events));
+  check(posOf(missed.state, 'pudge') === 10 && moverAt(missed.state) === 'p2', 'and the turn is wasted');
 
   check(has(applyAction(asked.state, decide('p1', 'roll')).events, 'dice/rolled'), 'declining rolls as normal');
 
@@ -2197,7 +2282,11 @@ scenario('Abaddon — can help a tripped racer up, and moves 3 for it', () => {
     ],
     'p1',
   );
-  const asked = applyAction(applyAction(hook, roll('p1')).state, decide('p1', 'hook:vanilla-01'));
+  const aimed = applyAction(applyAction(hook, roll('p1')).state, decide('p1', 'hook:vanilla-01')).state;
+  let asked = applyAction(aimed, decide('p1', 'roll'));
+  for (let seed = 1; seed < 40000 && racerAt(asked.state, 'vanilla-01')?.tripped !== true; seed++) {
+    asked = applyAction({ ...aimed, seed }, decide('p1', 'roll'));
+  }
   check(asked.state.pending?.player === playerId('p2'), 'Abaddon is asked after a Meat Hook', asked.state.pending?.prompt);
   const saved = applyAction(asked.state, decide('p2', 'help'));
   check(

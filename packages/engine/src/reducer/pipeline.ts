@@ -534,27 +534,34 @@ function doPassCheck(ctx: Ctx, job: Extract<Job, { t: 'passCheck' }>, rng: Rng):
   if (!racer || racer.eliminated) return;
 
   for (const id of job.startBehind) {
-    if (job.done.includes(id)) continue;
+    // `done` holds the id once the pass is announced and `onPass` has fired, then an
+    // `id:passed` marker once `onPassed` has too — so a question from `onPass` (Spirit
+    // Breaker's bash roll) does not cost the passed racer its own reaction (Banana).
+    const passedMark = `${id}:passed` as RacerId;
+    if (job.done.includes(passedMark)) continue;
     const other = findRacer(ctx.s, id);
     if (!other || other.eliminated) continue;
 
-    // Must now be strictly ahead. Sharing a space is "neither ahead nor behind".
-    if (racer.pos <= other.pos) continue;
+    if (!job.done.includes(id)) {
+      // Must now be strictly ahead. Sharing a space is "neither ahead nor behind".
+      if (racer.pos <= other.pos) continue;
 
-    job.done.push(id);
+      job.done.push(id);
 
-    ctx.emit({
-      t: 'racer/passed',
-      racerId: racer.racerId,
-      passed: other.racerId,
-    });
+      ctx.emit({
+        t: 'racer/passed',
+        racerId: racer.racerId,
+        passed: other.racerId,
+      });
 
-    hooksFor(ctx.s, racer).onPass?.(makeHookCtx(ctx, rng, racer), other);
-    if (ctx.s.pending) {
-      ctx.s.queue.unshift(job);
-      return;
+      hooksFor(ctx.s, racer).onPass?.(makeHookCtx(ctx, rng, racer), other);
+      if (ctx.s.pending) {
+        ctx.s.queue.unshift(job);
+        return;
+      }
     }
 
+    job.done.push(passedMark);
     hooksFor(ctx.s, other).onPassed?.(makeHookCtx(ctx, rng, other), racer);
     if (ctx.s.pending) {
       ctx.s.queue.unshift(job);
@@ -611,6 +618,7 @@ function doSpaceEffect(ctx: Ctx, job: Extract<Job, { t: 'spaceEffect' }>, rng: R
     case 'star': {
       if (phase.claimedSpaces.includes(racer.pos)) return;
       phase.claimedSpaces.push(racer.pos);
+      ctx.emit({ t: 'space/claimed', racerId: racer.racerId, pos: racer.pos });
       const value = awardFor(ctx, rng, racer, space.effect.value, 'star');
       const token = pointsToken(value, phase.raceNo as RaceNumber);
       scoreOf(ctx.s, racer.owner).push(token);
@@ -780,8 +788,8 @@ function rollDieOf(ctx: Ctx, rng: Rng, racer: MutableRacer): Thrown {
   return { face: rng.roll(sides), die: sides };
 }
 
-/** A d6 is the default, so its throw leaves `die` out. */
-function thrownEvent(racer: MutableRacer, thrown: Thrown): GameEvent {
+/** A d6 is the default, so its throw leaves `die` out. `power` marks a roll a power asked for. */
+function thrownEvent(racer: MutableRacer, thrown: Thrown, power?: RacerId): GameEvent {
   return {
     t: 'dice/thrown',
     player: racer.owner,
@@ -789,6 +797,7 @@ function thrownEvent(racer: MutableRacer, thrown: Thrown): GameEvent {
     value: thrown.face,
     ...(thrown.die === 6 ? {} : { die: thrown.die }),
     ...(thrown.dice ? { dice: [...thrown.dice] } : {}),
+    ...(power ? { power } : {}),
   };
 }
 
@@ -937,7 +946,20 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
       return lost;
     },
 
-    rollDie: (target) => rollDieOf(ctx, rng, target).face,
+    rollDie: (target) => {
+      const thrown = rollDieOf(ctx, rng, target);
+      ctx.emit(thrownEvent(target, thrown, self.racerId));
+      return thrown.face;
+    },
+
+    askRoll: (roller, req) =>
+      ask(ctx, self, {
+        player: roller.owner,
+        prompt: req.prompt,
+        options: [{ id: 'roll' as ChoiceId, label: 'Roll' }],
+        key: req.key,
+        ...(req.data !== undefined ? { data: req.data } : {}),
+      }),
 
     mineSpace: (pos) => {
       const phase = ctx.s.phase;
@@ -945,6 +967,7 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
       if (phase.tripSpaces.includes(pos)) return false;
       if (trackForRace(phase.raceNo as RaceNumber).spaces[pos]?.effect.t === 'trip') return false;
       phase.tripSpaces.push(pos);
+      ctx.emit({ t: 'space/mined', racerId: self.racerId, pos });
       return true;
     },
 

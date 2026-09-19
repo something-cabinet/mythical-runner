@@ -103,9 +103,19 @@ export interface HookCtx {
   /**
    * Rolls `target`'s own die — a d6, or whatever `dieSides` or `throwDie` says. For powers that make a
    * racer roll ("they roll a die", "we roll our dice"), so Chaos Knight throws its d20 there
-   * too.
+   * too. The throw is announced, so the board tumbles the die like a main move's.
+   *
+   * Call it from the `resume` of an `askRoll`, so the player whose die it is throws it.
    */
   rollDie(target: MutableRacer): number;
+
+  /**
+   * Stops the game until `roller`'s player presses Roll, then calls this power's `resume`
+   * with `key` and `data` — where it calls `rollDie(roller)`. The pause is the point: an
+   * ability's roll is a moment everyone watches, and the player it matters to throws it.
+   * Same rules as `ask`, since it is one.
+   */
+  askRoll(roller: MutableRacer, request: { readonly prompt: string; readonly key: string; readonly data?: unknown }): void;
 
   /**
    * Techies: space `pos` is a TRIP space for the rest of the race, whatever it was before.

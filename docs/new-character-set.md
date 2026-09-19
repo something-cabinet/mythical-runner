@@ -22,7 +22,7 @@
 - Storm Spirit: I roll a d4. Once per race, I can roll a d20 instead.
 - Bloodseeker: I get +1 to my main move for each other racer currently tripped.
 - Clockwerk: Before my main move, I push every racer 1 space away from me.
-- Pudge: I can skip my main move to warp any racer to my space and trip them.
+- Pudge: I can skip my main move to throw my hook at any racer. I roll a die: on a 4 or higher, I warp them to my space and trip them. Otherwise I miss.
 - Techies: Every space I stop on becomes a TRIP space.
 - Chaos Knight: I roll a d20, and get -9 to my main move. It can take me backwards.
 - Abaddon: Whenever another racer trips, I can help them up at once. If I do, I move 3.

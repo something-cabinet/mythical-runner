@@ -115,7 +115,7 @@ export interface TurnBegan {
  * Powers that ask about a roll (Magician's reroll, Alchemist's transmute) ask between this
  * and `dice/rolled`, so the client can put the die on the table before the question. A
  * reroll throws again and emits a second one; a replaced main move throws nothing and emits
- * none at all.
+ * none at all. A roll a power asks for (`power` set) stands alone: no `dice/rolled` follows.
  */
 export interface DiceThrown {
   readonly t: 'dice/thrown';
@@ -133,6 +133,12 @@ export interface DiceThrown {
    * d3 × d3. `die` is then the sides of each one.
    */
   readonly dice?: readonly number[];
+  /**
+   * The racer whose power called for this roll — Pudge's hook, a Spirit Breaker victim's
+   * bash roll, either side of a duel. Absent for a main move, which is the only roll a
+   * `dice/rolled` follows.
+   */
+  readonly power?: RacerId;
 }
 
 /** The settled main move: what the racer will actually move, die or no die. */
@@ -197,6 +203,23 @@ export interface RacerTripped {
 export interface RacerStoodUp {
   readonly t: 'racer/stoodUp';
   readonly racerId: RacerId;
+}
+
+/**
+ * A space became a TRIP space for the rest of the race (Techies' mines). Emitted where it
+ * happens in the turn, so the client can draw the mine once the racer is seen to get there.
+ */
+export interface SpaceMined {
+  readonly t: 'space/mined';
+  readonly racerId: RacerId;
+  readonly pos: number;
+}
+
+/** A star space was taken: it scores nobody else this race. */
+export interface SpaceClaimed {
+  readonly t: 'space/claimed';
+  readonly racerId: RacerId;
+  readonly pos: number;
 }
 
 export interface RacerEliminated {
@@ -285,6 +308,8 @@ export type GameEvent =
   | RacerWarped
   | RacerTripped
   | RacerStoodUp
+  | SpaceMined
+  | SpaceClaimed
   | RacerEliminated
   | AbilityTriggered
   | DecisionRequested

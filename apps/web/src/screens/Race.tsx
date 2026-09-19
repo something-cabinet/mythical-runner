@@ -10,8 +10,19 @@ import { legalOf, useRoomContext } from '../lib/roomContext';
  * finishes animating — see `useFinishHold`.
  */
 export function RaceScreen() {
-  const { view, log, board } = useRoomContext();
+  const { view: trueView, log, board } = useRoomContext();
   const [showFullLog, setShowFullLog] = useState(false);
+
+  // The board and the list describe what is *drawn*, which lags the true state while moves
+  // animate — a racer isn't tripped or out until it is seen to happen.
+  const view = {
+    ...trueView,
+    board: trueView.board.map((r) => ({
+      ...r,
+      tripped: board.tripped.includes(r.racerId),
+      eliminated: board.eliminated.includes(r.racerId),
+    })),
+  };
 
   if (view.phase.t !== 'racing' && view.phase.t !== 'scored') return null;
   const phase = view.phase;
@@ -59,8 +70,8 @@ export function RaceScreen() {
               raceNo={phase.raceNo as RaceNumber}
               positions={board.positions}
               highlight={targets}
-              claimedSpaces={racing ? phase.claimedSpaces : []}
-              tripSpaces={racing ? phase.tripSpaces : []}
+              claimedSpaces={racing ? board.claimedSpaces : []}
+              tripSpaces={racing ? board.tripSpaces : []}
               roll={board.roll}
               power={board.power}
               activeRacer={
@@ -160,6 +171,11 @@ export function RaceScreen() {
   );
 }
 
+/** A power's roll waiting on its player (Pudge's hook, a duel): the one choice is Roll. */
+function isRollAsk(pending: { readonly options: readonly { readonly id: string }[] }): boolean {
+  return pending.options.length === 1 && pending.options[0]?.id === 'roll';
+}
+
 function StatusBanner() {
   const { view } = useRoomContext();
   if (view.phase.t === 'scored') {
@@ -177,7 +193,10 @@ function StatusBanner() {
   let mine = false;
   if (pending) {
     mine = pending.player === view.you;
-    text = mine ? `${racerName(view, pending.source)} needs your decision` : `Waiting on ${playerName(view, pending.player)} — ${racerName(view, pending.source)}`;
+    const verb = isRollAsk(pending) ? 'roll' : 'decision';
+    text = mine
+      ? `${racerName(view, pending.source)} needs your ${verb}`
+      : `Waiting on ${playerName(view, pending.player)} to ${isRollAsk(pending) ? 'roll' : 'decide'} — ${racerName(view, pending.source)}`;
   } else {
     mine = phase.active === view.you;
     // With two racers to run, the turn belongs to the player until they have moved both;
@@ -251,12 +270,13 @@ function RaceActions() {
           </div>
         )}
         {plain.length > 0 && (
-          <div className="options">
+          // A power's roll is one big Roll button, like the main move's.
+          <div className={isRollAsk(pending) ? undefined : 'options'}>
             {plain.map(({ action, option }, i) => (
               <button
                 key={action.choice}
                 type="button"
-                className={`btn btn-lg${cards.length === 0 && i === 0 ? ' btn-primary' : ''}`}
+                className={`btn btn-lg${cards.length === 0 && i === 0 ? ' btn-primary' : ''}${isRollAsk(pending) ? ' btn-block' : ''}`}
                 disabled={held}
                 onClick={() => send(action)}
               >
@@ -318,7 +338,7 @@ function RaceActions() {
     <ActionBar wide>
       <Waiting>
         {pending
-          ? `${playerName(view, pending.player)} ${pending.player === view.you ? 'are' : 'is'} deciding…`
+          ? `${playerName(view, pending.player)} ${pending.player === view.you ? 'are' : 'is'} ${isRollAsk(pending) ? 'rolling' : 'deciding'}…`
           : done
             ? `Your ${myRacers.length > 1 ? 'racers are' : 'racer is'} ${out ? 'out' : 'home'} — ${playerName(view, phase.active)}'s turn`
             : `${playerName(view, phase.active)}'s turn`}

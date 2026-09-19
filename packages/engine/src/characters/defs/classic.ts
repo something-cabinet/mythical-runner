@@ -217,13 +217,33 @@ const duelist = def(
       });
     },
 
+    // Each side throws its own die: the Duelist's player first, then the target's.
     resume: (h, key, choice, data) => {
-      if (key !== 'duel' || choice !== ('duel' as ChoiceId)) return;
-      const targetId = (data as { target: string }).target;
+      const { target: targetId, mine: rolled } = data as { target: string; mine?: number };
       const target = h.racers().find((r) => r.racerId === targetId);
       if (!target || !isRunning(target)) return;
 
-      const mine = h.rollDie(h.self);
+      if (key === 'duel') {
+        if (choice !== ('duel' as ChoiceId)) return;
+        h.askRoll(h.self, {
+          prompt: `DUEL against ${h.nameOf(target)}! Roll for ${h.nameOf(h.self)}.`,
+          key: 'duelMine',
+          data: { target: targetId },
+        });
+        return;
+      }
+      if (key === 'duelMine') {
+        const mine = h.rollDie(h.self);
+        h.askRoll(target, {
+          prompt: `${h.nameOf(h.self)} rolled ${mine} in the DUEL. Roll for ${h.nameOf(target)} — you need to beat it.`,
+          key: 'duelTheirs',
+          data: { target: targetId, mine },
+        });
+        return;
+      }
+      if (key !== 'duelTheirs' || rolled === undefined) return;
+
+      const mine = rolled;
       const theirs = h.rollDie(target);
       // "I win ties."
       const winner = mine >= theirs ? h.self : target;

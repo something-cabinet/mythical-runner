@@ -52,7 +52,11 @@ const bountyHunter = def(
   },
 );
 
-/** GREATER BASH — "When I pass another racer, they roll a die. On a 1, they trip." */
+/**
+ * GREATER BASH — "When I pass another racer, they roll a die. On a 1, they trip."
+ *
+ * The victim's player throws it.
+ */
 const spiritBreaker = def(
   'spirit-breaker',
   'Spirit Breaker',
@@ -60,13 +64,23 @@ const spiritBreaker = def(
   {
     onPass: (h, passed) => {
       if (!isRunning(passed)) return;
-      const roll = h.rollDie(passed);
+      h.askRoll(passed, {
+        prompt: `${h.nameOf(h.self)} charges past ${h.nameOf(passed)}! Roll for ${h.nameOf(passed)}: on a 1, they trip.`,
+        key: 'bash',
+        data: { victim: passed.racerId },
+      });
+    },
+    resume: (h, key, _choice, data) => {
+      if (key !== 'bash') return;
+      const victim = h.racers().find((r) => r.racerId === (data as { victim: string }).victim);
+      if (!victim || !isRunning(victim)) return;
+      const roll = h.rollDie(victim);
       h.log(
         roll === 1
-          ? `${h.nameOf(h.self)} bashes ${h.nameOf(passed)}, who rolls a 1 and goes down!`
-          : `${h.nameOf(h.self)} charges past ${h.nameOf(passed)}, who rolls a ${roll} and keeps their feet.`,
+          ? `${h.nameOf(h.self)} bashes ${h.nameOf(victim)}, who rolls a 1 and goes down!`
+          : `${h.nameOf(h.self)} charges past ${h.nameOf(victim)}, who rolls a ${roll} and keeps their feet.`,
       );
-      if (roll === 1) h.trip(passed);
+      if (roll === 1) h.trip(victim);
     },
   },
 );
@@ -112,7 +126,12 @@ const earthshaker = def(
   },
 );
 
-/** KRAKEN SHELL — "Each time I'm tripped, I roll a die. On a 4 or higher, I stand right back up." */
+/**
+ * KRAKEN SHELL — "Each time I'm tripped, I roll a die. On a 4 or higher, I stand right back up."
+ *
+ * A trip can't stop the game, so the roll is deferred until the work that tripped me is
+ * done, then asked for. Nothing to roll for if someone (Abaddon) already helped me up.
+ */
 const tidehunter = def(
   'tidehunter',
   'Tidehunter',
@@ -120,7 +139,19 @@ const tidehunter = def(
   {
     onRacerTripped: (h, target) => {
       if (target.racerId !== h.self.racerId || !h.self.tripped) return;
-      const roll = h.rng.rollD6();
+      h.defer('kraken');
+    },
+    resume: (h, key) => {
+      if (!h.self.tripped || !isRunning(h.self)) return;
+      if (key === 'kraken') {
+        h.askRoll(h.self, {
+          prompt: `${h.nameOf(h.self)} is down! Roll: on a 4 or higher, they stand right back up.`,
+          key: 'krakenRoll',
+        });
+        return;
+      }
+      if (key !== 'krakenRoll') return;
+      const roll = h.rollDie(h.self);
       if (roll < 4) {
         h.log(`${h.nameOf(h.self)} rolls a ${roll} and stays down.`);
         return;
@@ -399,11 +430,33 @@ const legionCommander = def(
         defaultChoice: 'pass' as ChoiceId,
       });
     },
-    resume: (h, key, choice) => {
-      if (key !== 'duel' || choice === ('pass' as ChoiceId)) return;
-      const foe = h.racers().find((r) => choice === (`duel:${r.racerId}` as ChoiceId));
+    // Each side throws its own die: the Commander's player first, then the foe's.
+    resume: (h, key, choice, data) => {
+      if (key === 'duel') {
+        if (choice === ('pass' as ChoiceId)) return;
+        const foe = h.racers().find((r) => choice === (`duel:${r.racerId}` as ChoiceId));
+        if (!foe || !isRunning(foe)) return;
+        h.askRoll(h.self, {
+          prompt: `DUEL against ${h.nameOf(foe)}! Roll for ${h.nameOf(h.self)}.`,
+          key: 'duelMine',
+          data: { foe: foe.racerId },
+        });
+        return;
+      }
+      const { foe: foeId, mine: rolled } = data as { foe: string; mine?: number };
+      const foe = h.racers().find((r) => r.racerId === foeId);
       if (!foe || !isRunning(foe)) return;
-      const mine = h.rollDie(h.self);
+      if (key === 'duelMine') {
+        const mine = h.rollDie(h.self);
+        h.askRoll(foe, {
+          prompt: `${h.nameOf(h.self)} rolled ${mine} in the DUEL. Roll for ${h.nameOf(foe)} — you need to beat it.`,
+          key: 'duelTheirs',
+          data: { foe: foeId, mine },
+        });
+        return;
+      }
+      if (key !== 'duelTheirs' || rolled === undefined) return;
+      const mine = rolled;
       const theirs = h.rollDie(foe);
       // "I win ties."
       const winner = mine >= theirs ? h.self : foe;
@@ -536,16 +589,18 @@ const clockwerk = def(
 );
 
 /**
- * MEAT HOOK — "I can skip my main move to warp any racer to my space and trip them."
+ * MEAT HOOK — "I can skip my main move to throw my hook at any racer. I roll a die: on a 4
+ * or higher, I warp them to my space and trip them. Otherwise I miss."
  *
- * A warp passes nobody, but the racer does arrive: my space's effect and
- * stop powers fire for them. Offered like Earthshaker's slam: before the roll, and not on a
- * tripped turn.
+ * The main move is gone either way; a miss wastes the turn. The throw is my die, like any
+ * power that has me roll. A warp passes nobody, but the racer does arrive: my space's
+ * effect and stop powers fire for them. Offered like Earthshaker's slam: before the roll,
+ * and not on a tripped turn.
  */
 const pudge = def(
   'pudge',
   'Pudge',
-  'I can skip my main move to warp any racer to my space and trip them.',
+  'I can skip my main move to throw my hook at any racer. I roll a die: on a 4 or higher, I warp them to my space and trip them. Otherwise I miss.',
   {
     beforeMainMove: (h) => {
       if (!isRunning(h.self) || h.self.tripped) return;
@@ -553,7 +608,7 @@ const pudge = def(
       if (targets.length === 0) return;
       h.ask({
         player: h.self.owner,
-        prompt: 'Meat Hook? Warp a racer to your space and trip them, instead of rolling.',
+        prompt: 'Meat Hook? Instead of moving, roll to hook a racer: on a 4+, warp them to your space and trip them.',
         options: [
           ...targets.map((r) => option(`hook:${r.racerId}`, `Hook ${h.nameOf(r)}`, racerTarget(r.racerId))),
           option('roll', 'Roll normally'),
@@ -562,12 +617,28 @@ const pudge = def(
         defaultChoice: 'roll' as ChoiceId,
       });
     },
-    resume: (h, key, choice) => {
-      if (key !== 'hook' || choice === ('roll' as ChoiceId)) return;
-      const victim = h.racers().find((r) => choice === (`hook:${r.racerId}` as ChoiceId));
+    resume: (h, key, choice, data) => {
+      if (key === 'hook') {
+        if (choice === ('roll' as ChoiceId)) return;
+        const victim = h.racers().find((r) => choice === (`hook:${r.racerId}` as ChoiceId));
+        if (!victim || !isRunning(victim)) return;
+        h.skipMainMove();
+        h.askRoll(h.self, {
+          prompt: `Meat Hook at ${h.nameOf(victim)}! Roll: on a 4 or higher, it lands.`,
+          key: 'hookRoll',
+          data: { victim: victim.racerId },
+        });
+        return;
+      }
+      if (key !== 'hookRoll') return;
+      const victim = h.racers().find((r) => r.racerId === (data as { victim: string }).victim);
       if (!victim || !isRunning(victim)) return;
-      h.skipMainMove();
-      h.log(`${h.nameOf(h.self)} hooks ${h.nameOf(victim)}!`);
+      const roll = h.rollDie(h.self);
+      if (roll < 4) {
+        h.log(`${h.nameOf(h.self)} throws the hook at ${h.nameOf(victim)}, rolls a ${roll}, and misses.`);
+        return;
+      }
+      h.log(`${h.nameOf(h.self)} rolls a ${roll} and hooks ${h.nameOf(victim)}!`);
       h.warp(victim, h.self.pos);
       h.trip(victim);
     },

@@ -52,13 +52,22 @@ export interface ShownRoll {
   /** The move stands in place of the face (Alchemist) rather than adjusting it (Blimp). */
   readonly replaced: boolean;
   readonly modifiedBy?: RacerId | undefined;
+  /** The racer whose power asked for this roll (Pudge's hook, a duel), when it isn't a main move. */
+  readonly power?: RacerId | undefined;
   /** Shown without the tumble, e.g. under reduced motion. */
   readonly instant: boolean;
 }
 
 type Step =
   | { readonly t: 'move'; readonly racer: RacerId; readonly to: number; readonly hop: boolean }
-  | { readonly t: 'throw'; readonly racer: RacerId; readonly value: number; readonly die: number; readonly dice?: readonly number[] | undefined }
+  | {
+      readonly t: 'throw';
+      readonly racer: RacerId;
+      readonly value: number;
+      readonly die: number;
+      readonly dice?: readonly number[] | undefined;
+      readonly power?: RacerId | undefined;
+    }
   | {
       readonly t: 'roll';
       readonly racer: RacerId;
@@ -68,6 +77,7 @@ type Step =
       readonly modifiedBy?: RacerId | undefined;
     }
   | { readonly t: 'power'; readonly racer: RacerId; readonly text: string }
+  | { readonly t: 'mark'; readonly apply: (d: Drawn) => Drawn }
   | { readonly t: 'turn' }
   | { readonly t: 'cue'; readonly sound: Sound };
 
@@ -101,6 +111,57 @@ function truth(message: StateMessage | null): Positions {
 }
 
 /**
+ * Everything the board draws that can change mid-turn, as it should look right now. Each
+ * part lags the true state the same way positions do, so a racer isn't shown tripped, a
+ * mine isn't laid and a star isn't taken until the racer is seen to get there.
+ */
+interface Drawn {
+  readonly positions: Positions;
+  readonly tripped: readonly RacerId[];
+  readonly eliminated: readonly RacerId[];
+  /** Techies' mines. */
+  readonly tripSpaces: readonly number[];
+  /** Stars already taken this race. */
+  readonly claimedSpaces: readonly number[];
+}
+
+function drawnTruth(message: StateMessage | null): Drawn {
+  const board = message?.view.board ?? [];
+  const phase = message?.view.phase;
+  const racing = phase?.t === 'racing' ? phase : null;
+  return {
+    positions: truth(message),
+    tripped: board.filter((r) => r.tripped).map((r) => r.racerId),
+    eliminated: board.filter((r) => r.eliminated).map((r) => r.racerId),
+    tripSpaces: racing?.tripSpaces ?? [],
+    claimedSpaces: racing?.claimedSpaces ?? [],
+  };
+}
+
+function withItem<T>(list: readonly T[], item: T, on: boolean): readonly T[] {
+  if (list.includes(item) === on) return list;
+  return on ? [...list, item] : list.filter((x) => x !== item);
+}
+
+/** How an event changes what is drawn, beyond moving a racer. */
+function markFor(e: GameEvent): ((d: Drawn) => Drawn) | null {
+  switch (e.t) {
+    case 'racer/tripped':
+      return (d) => ({ ...d, tripped: withItem(d.tripped, e.racerId, true) });
+    case 'racer/stoodUp':
+      return (d) => ({ ...d, tripped: withItem(d.tripped, e.racerId, false) });
+    case 'racer/eliminated':
+      return (d) => ({ ...d, eliminated: withItem(d.eliminated, e.racerId, true) });
+    case 'space/mined':
+      return (d) => ({ ...d, tripSpaces: withItem(d.tripSpaces, e.pos, true) });
+    case 'space/claimed':
+      return (d) => ({ ...d, claimedSpaces: withItem(d.claimedSpaces, e.pos, true) });
+    default:
+      return null;
+  }
+}
+
+/**
  * Folds a settled main move into the die already on the table, when it is that die's own
  * result — so the number the player watched land stays put and only the label grows. A
  * replaced main move (Legs jogging a fixed 5) never threw anything, so it gets a die of
@@ -127,6 +188,11 @@ function settle(
 export interface BoardAnimation {
   /** Where to draw each racer right now. */
   readonly positions: Positions;
+  /** Who to draw tripped, out, mined and taken — see `Drawn`. */
+  readonly tripped: readonly RacerId[];
+  readonly eliminated: readonly RacerId[];
+  readonly tripSpaces: readonly number[];
+  readonly claimedSpaces: readonly number[];
   /** True while queued moves are still playing out. */
   readonly animating: boolean;
   readonly roll: ShownRoll | null;
@@ -156,7 +222,9 @@ function isPower(e: GameEvent): e is Extract<GameEvent, { t: 'ability/triggered'
  *
  *  - `racer/warped` snaps rather than hops. The rules say a warp "doesn't count as moving",
  *    and animating it as a walk would misrepresent what happened.
- *  - Once the queue drains, positions reset to the authoritative board. Some relocations
+ *  - Tripping, standing up, elimination, Techies' mines and taken stars are queued the same
+ *    way, so none of them shows before the racer is seen to get there.
+ *  - Once the queue drains, everything resets to the authoritative board. Some relocations
  *    deliberately emit no event — Huge Baby's displacement "doesn't count as a move" — and
  *    a reconnect delivers a snapshot with no events at all. Resyncing means the drawing can
  *    never drift from the truth for longer than one turn.
@@ -174,7 +242,7 @@ function isPower(e: GameEvent): e is Extract<GameEvent, { t: 'ability/triggered'
  * the latest roll, and the last power in the batch is called out without animation.
  */
 export function useBoardPositions(client: RoomClient, message: StateMessage | null): BoardAnimation {
-  const [positions, setPositions] = useState<Positions>(() => truth(message));
+  const [drawn, setDrawn] = useState<Drawn>(() => drawnTruth(message));
   const [animating, setAnimating] = useState(false);
   const [roll, setRoll] = useState<ShownRoll | null>(null);
   const [power, setPower] = useState<ShownPower | null>(null);
@@ -209,15 +277,17 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
       timer.current = null;
       const next = queue.current.shift();
       if (!next) {
-        setPositions(truth(latest.current));
+        setDrawn(drawnTruth(latest.current));
         setAnimating(false);
         return;
       }
       let delay = 0;
       if (next.t === 'move') {
-        setPositions((prev) => ({ ...prev, [next.racer]: next.to }));
+        setDrawn((prev) => ({ ...prev, positions: { ...prev.positions, [next.racer]: next.to } }));
         if (next.hop) play('hop');
         delay = !next.hop ? 0 : queue.current.length > BACKLOG_FAST ? HOP_FAST_MS : HOP_MS;
+      } else if (next.t === 'mark') {
+        setDrawn(next.apply);
       } else if (next.t === 'cue') {
         play(next.sound);
       } else if (next.t === 'power') {
@@ -237,11 +307,18 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
           dice: next.dice,
           move: null,
           replaced: false,
+          power: next.power,
           instant: false,
         });
         // Long enough for the die to come to rest — and if a power is about to ask about
-        // it, the question waits behind this.
-        delay = queue.current.length > BACKLOG_FAST ? HOP_FAST_MS : ROLL_TUMBLE_MS;
+        // it, the question waits behind this. A power's roll has no move to settle into, so
+        // the face gets its own moment before whatever it decides plays out.
+        delay =
+          queue.current.length > BACKLOG_FAST
+            ? HOP_FAST_MS
+            : next.power
+              ? ROLL_TUMBLE_MS + ROLL_HOLD_MS
+              : ROLL_TUMBLE_MS;
       } else if (next.t === 'roll') {
         const before = shown.current;
         show(settle(before, next, ++rollKey.current, false));
@@ -265,7 +342,7 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
         queue.current = [];
         if (timer.current) clearTimeout(timer.current);
         timer.current = null;
-        setPositions(truth(latest.current));
+        setDrawn(drawnTruth(latest.current));
         setAnimating(false);
         // Nobody is looking at a hidden tab. Under reduced motion there is no replay to
         // sync with, so each distinct cue in the batch plays once, straight away.
@@ -288,6 +365,7 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
               dice: e.dice,
               move: null,
               replaced: false,
+              power: e.power,
               instant: true,
             };
           } else if (e.t === 'dice/rolled') {
@@ -318,6 +396,7 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
         if (e.t === 'race/started') {
           // A new race: everyone is back on Start. Drop any stale hops from the last race.
           queue.current = [];
+          setDrawn((prev) => ({ ...prev, tripped: [], eliminated: [], tripSpaces: [], claimedSpaces: [] }));
           show(null);
           turnNo.current = 0;
           flashedOn.current.clear();
@@ -326,7 +405,7 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
           queue.current.push({ t: 'power', racer: e.racerId, text: e.text });
           continue;
         } else if (e.t === 'dice/thrown') {
-          queue.current.push({ t: 'throw', racer: e.racerId, value: e.value, die: e.die ?? 6, dice: e.dice });
+          queue.current.push({ t: 'throw', racer: e.racerId, value: e.value, die: e.die ?? 6, dice: e.dice, power: e.power });
         } else if (e.t === 'dice/rolled') {
           queue.current.push({
             t: 'roll',
@@ -342,12 +421,15 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
           queue.current.push({ t: 'move', racer: e.racerId, to: e.to, hop: true });
         } else if (e.t === 'racer/warped') {
           queue.current.push({ t: 'move', racer: e.racerId, to: e.to, hop: false });
+        } else {
+          const apply = markFor(e);
+          if (apply) queue.current.push({ t: 'mark', apply });
         }
         if (cue) queue.current.push({ t: 'cue', sound: cue });
       }
 
       if (queue.current.length === 0) {
-        if (!timer.current) setPositions(truth(latest.current));
+        if (!timer.current) setDrawn(drawnTruth(latest.current));
       } else if (!timer.current) {
         setAnimating(true);
         drain();
@@ -368,8 +450,8 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
   // even when no animation is running.
   const boardKey = (message?.view.board ?? []).map((r) => r.racerId).join('|');
   useEffect(() => {
-    if (!timer.current && queue.current.length === 0) setPositions(truth(latest.current));
+    if (!timer.current && queue.current.length === 0) setDrawn(drawnTruth(latest.current));
   }, [boardKey]);
 
-  return { positions, animating, roll, power };
+  return { ...drawn, animating, roll, power };
 }

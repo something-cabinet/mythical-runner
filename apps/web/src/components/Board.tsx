@@ -289,7 +289,10 @@ function Die({ view, roll, x, y, size, color, portrait }: {
   }, [roll.key, roll.instant, roll.face, top]);
 
   const name = racerName(view, roll.racerId);
-  const by = roll.modifiedBy ? ` (${racerName(view, roll.modifiedBy)})` : '';
+  // A power's roll names that power when it isn't the roller's own: a Spirit Breaker
+  // victim rolling "1 (Spirit Breaker)", not Pudge rolling "5 (Pudge)".
+  const credit = roll.modifiedBy ?? (roll.power !== roll.racerId ? roll.power : undefined);
+  const by = credit ? ` (${racerName(view, credit)})` : '';
   const delta = (roll.move ?? roll.face) - roll.face;
   // U+2212 for the minus, so "4 − 1 = 3" lines up with the digits either side of it.
   const maths =
