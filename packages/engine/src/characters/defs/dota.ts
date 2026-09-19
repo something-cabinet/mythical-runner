@@ -873,8 +873,11 @@ const bristleback = def(
 );
 
 /**
- * PRECISION AURA — "I use a d6. If no other racer is within 3 spaces of me, I use a d8
+ * PRECISION AURA — "I use a d6. If no other racer is on my space or next to it, I use a d8
  * instead."
+ *
+ * The design's "within 3 spaces near me" is a three-space window — her own space and one
+ * either side — not three spaces each way like Omniknight's aura.
  *
  * Drow shoots best with room to work: crowded, the die is everyone else's; clear of the
  * pack, it is better. `dieSides` covers every roll of her die, so a duel or
@@ -883,12 +886,12 @@ const bristleback = def(
 const drowRanger = def(
   'drow-ranger',
   'Drow Ranger',
-  'I use a d6. If no other racer is within 3 spaces of me, I use a d8 instead.',
+  'I use a d6. If no other racer is on my space or next to it, I use a d8 instead.',
   {
     dieSides: (h) => {
       const crowded = h
         .running()
-        .some((r) => r.racerId !== h.self.racerId && Math.abs(r.pos - h.self.pos) <= 3);
+        .some((r) => r.racerId !== h.self.racerId && Math.abs(r.pos - h.self.pos) <= 1);
       return crowded ? 6 : 8;
     },
   },

@@ -372,7 +372,7 @@ export function describeEvent(e: GameEvent, view: PlayerView): LogLine | null {
     case 'racer/tripped':
       return { text: `${racer(e.racerId)} trips!`, tone: 'bad' };
     case 'racer/stoodUp':
-      return { text: `${racer(e.racerId)} gets back up`, tone: 'plain' };
+      return { text: `${racer(e.racerId)} gets back up instead of moving`, tone: 'plain' };
     case 'space/cleared':
       return { text: `${racer(e.racerId)} sets off the mine on space ${e.pos}`, tone: 'bad' };
     case 'space/mined':

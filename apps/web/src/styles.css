@@ -1252,6 +1252,55 @@ select {
   margin-top: 0;
 }
 
+/* The full log, opened from "All N". */
+.log-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(80vh, 720px);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 30%);
+}
+
+.log-dialog[open] {
+  display: flex;
+  animation: log-dialog-in 160ms ease-out;
+}
+
+.log-dialog::backdrop {
+  background: rgb(20 16 28 / 55%);
+}
+
+@keyframes log-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .log-dialog[open] {
+    animation: none;
+  }
+}
+
+.log-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  min-height: 0;
+  padding: 16px;
+}
+
+.log-dialog-scroll {
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: 4px;
+}
+
 /* ---- Action bar --------------------------------------------------------- */
 
 .actionbar {

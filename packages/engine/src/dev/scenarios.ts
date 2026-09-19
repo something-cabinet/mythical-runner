@@ -849,6 +849,29 @@ scenario('Hypnotist — "before my main move, I can warp a racer to my space"', 
   check(has(res.events, 'racer/warped'), 'a warp, not a move');
 });
 
+scenario('Hypnotist — warping Baba Yaga over trips the Hypnotist', () => {
+  // Baba Yaga's card: "The Hypnotist can cast their spell on me, but they still trip."
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'hypnotist', pos: 10 },
+      { player: 'p2', racer: 'baba-yaga', pos: 3 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(s, roll('p1'));
+  const res = applyAction(asked.state, decide('p1', 'warp:baba-yaga'));
+  check(posOf(res.state, 'baba-yaga') === 10, 'Baba Yaga warped over', `pos ${posOf(res.state, 'baba-yaga')}`);
+  check(
+    res.events.some((e) => e.t === 'racer/tripped' && e.racerId === racerId('hypnotist')),
+    'the Hypnotist trips',
+    logLines(res.events),
+  );
+  // The trip costs the main move that follows straight after the warp: the Hypnotist
+  // stands up instead of rolling, and stays with Baba Yaga.
+  check(has(res.events, 'racer/stoodUp'), 'and gets back up instead of moving');
+  check(posOf(res.state, 'hypnotist') === 10, 'without moving', `pos ${posOf(res.state, 'hypnotist')}`);
+});
+
 scenario('Third Wheel — "warp to any space with exactly 2 racers on it"', () => {
   const s = raceState(
     [
@@ -2046,6 +2069,18 @@ scenario('Oracle — predicts who trips first; right is worth 3', () => {
   const wrong = rollFor(board('banana'), 'p2', 5);
   check(pointsOf(wrong.state, 'p1') === 0, 'wrong: nothing');
   check(racerAt(wrong.state, 'oracle')?.memo['foreseen'] === true, 'and the prediction is spent');
+
+  // Predicting its own trip is allowed, and pays like any other right call.
+  const self = raceState(
+    [
+      { player: 'p1', racer: 'oracle', pos: 1, memo: { prediction: 'oracle' } },
+      { player: 'p2', racer: 'baba-yaga', pos: 4 },
+    ],
+    'p1',
+  );
+  const tripped = rollFor(self, 'p1', 3);
+  check(racerAt(tripped.state, 'oracle')?.tripped === true, 'Oracle trips on Baba Yaga');
+  check(pointsOf(tripped.state, 'p1') === 3, 'having foreseen its own trip: +3', logLines(tripped.events));
 });
 
 scenario('Storm Spirit — rolls a d6, and a d20 once per race', () => {
@@ -2454,10 +2489,16 @@ scenario('Drow Ranger — a d6 in the pack, a d8 with room to shoot', () => {
     return seen;
   };
 
-  const crowded = faces(8);
-  check(crowded.size === 6 && Math.max(...crowded) === 6, 'a racer 3 away: faces 1 to 6', [...crowded].join(','));
-  const clear = faces(9);
-  check(clear.size === 8 && Math.max(...clear) === 8, 'one space further out: faces 1 to 8', [...clear].join(','));
+  const d6 = (seen: Set<number>): boolean => seen.size === 6 && Math.max(...seen) === 6;
+  const d8 = (seen: Set<number>): boolean => seen.size === 8 && Math.max(...seen) === 8;
+  const same = faces(5);
+  check(d6(same), 'a racer on her space: faces 1 to 6', [...same].join(','));
+  const ahead = faces(6);
+  check(d6(ahead), 'a racer next to her: faces 1 to 6', [...ahead].join(','));
+  const behind = faces(4);
+  check(d6(behind), 'behind counts too', [...behind].join(','));
+  const clear = faces(7);
+  check(d8(clear), 'two spaces away is clear: faces 1 to 8', [...clear].join(','));
 });
 
 scenario('Night Stalker — +2 on its odd turns, -1 on its even ones', () => {

@@ -1,9 +1,10 @@
 import { FINISH, type RacerId, type RaceNumber } from '@mr/engine';
-import { useState } from 'react';
+import { useRef, type RefObject } from 'react';
 import { Board } from '../components/Board';
 import { ActionBar, RacerCard, RacerToken, Standings, Waiting } from '../components/bits';
 import { abilityToken, borrowedPower, duelBonusToken, silencedToken, ordinal, playerName, powerText, racerName, rawName } from '../lib/present';
 import { legalOf, useRoomContext } from '../lib/roomContext';
+import type { NumberedLine } from '../lib/useEventLog';
 
 /**
  * The race. Also shown briefly in the `scored` phase, while the move that ended the race
@@ -11,7 +12,7 @@ import { legalOf, useRoomContext } from '../lib/roomContext';
  */
 export function RaceScreen() {
   const { view: trueView, log, board } = useRoomContext();
-  const [showFullLog, setShowFullLog] = useState(false);
+  const fullLog = useRef<HTMLDialogElement>(null);
 
   // The board and the list describe what is *drawn*, which lags the true state while moves
   // animate — a racer isn't tripped or out until it is seen to happen.
@@ -57,7 +58,7 @@ export function RaceScreen() {
   });
 
   // A little longer than it would be without the turn dividers, which take lines of their own.
-  const visibleLog = showFullLog ? log : log.slice(0, 8);
+  const visibleLog = log.slice(0, 8);
 
   return (
     <>
@@ -150,23 +151,18 @@ export function RaceScreen() {
                   What happened
                 </h2>
                 {log.length > 8 && (
-                  <button type="button" className="btn btn-ghost" style={{ minHeight: 32, padding: '0 8px' }} onClick={() => setShowFullLog((v) => !v)}>
-                    {showFullLog ? 'Less' : `All ${log.length}`}
+                  <button type="button" className="btn btn-ghost" style={{ minHeight: 32, padding: '0 8px' }} onClick={() => fullLog.current?.showModal()}>
+                    {`All ${log.length}`}
                   </button>
                 )}
               </div>
               {log.length === 0 ? (
                 <p className="muted">The race is about to begin.</p>
               ) : (
-                <ol className="log" aria-live="polite">
-                  {visibleLog.map((line) => (
-                    <li key={line.id} data-tone={line.tone}>
-                      {line.text}
-                    </li>
-                  ))}
-                </ol>
+                <LogLines lines={visibleLog} live />
               )}
             </section>
+            <LogDialog ref={fullLog} lines={log} />
 
             <section className="card" aria-labelledby="standings-heading">
               <h2 id="standings-heading" className="section-title">
@@ -356,5 +352,50 @@ function RaceActions() {
             : `${playerName(view, phase.active)}'s turn`}
       </Waiting>
     </ActionBar>
+  );
+}
+
+function LogLines({ lines, live = false }: { lines: readonly NumberedLine[]; live?: boolean }) {
+  return (
+    <ol className="log" aria-live={live ? 'polite' : undefined}>
+      {lines.map((line) => (
+        <li key={line.id} data-tone={line.tone}>
+          {line.text}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/**
+ * The whole race log in a modal, newest first. A native `<dialog>` opened with
+ * `showModal()`, so Escape, the backdrop and focus all behave without help; a click on the
+ * backdrop lands on the dialog element itself, which is how it closes on an outside click.
+ * It keeps filling while open — the race doesn't pause for someone reading.
+ */
+function LogDialog({ ref, lines }: { ref: RefObject<HTMLDialogElement | null>; lines: readonly NumberedLine[] }) {
+  return (
+    <dialog
+      ref={ref}
+      className="log-dialog"
+      aria-labelledby="log-dialog-heading"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) e.currentTarget.close();
+      }}
+    >
+      <div className="log-dialog-body">
+        <div className="spread">
+          <h2 id="log-dialog-heading" className="section-title">
+            What happened · {lines.length}
+          </h2>
+          <button type="button" className="btn btn-ghost" style={{ minHeight: 32, padding: '0 10px' }} onClick={() => ref.current?.close()}>
+            Close
+          </button>
+        </div>
+        <div className="log-dialog-scroll">
+          <LogLines lines={lines} />
+        </div>
+      </div>
+    </dialog>
   );
 }

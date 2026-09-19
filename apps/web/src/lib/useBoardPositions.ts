@@ -20,6 +20,12 @@ const POWER_MS = 450;
  * flashes, but barely holds anything up.
  */
 const POWER_REPEAT_MS = 150;
+/**
+ * How long a trip holds the queue. A racer tripped just before its own main move (Baba Yaga
+ * pulled onto the Hypnotist) stands straight back up, and without this beat the trip would
+ * never be seen at all.
+ */
+const TRIP_MS = 450;
 /** How long the callout for a power stays up. Matches the `power-callout` animation. */
 export const POWER_SHOW_MS = 1800;
 
@@ -77,7 +83,7 @@ type Step =
       readonly modifiedBy?: RacerId | undefined;
     }
   | { readonly t: 'power'; readonly racer: RacerId; readonly text: string }
-  | { readonly t: 'mark'; readonly apply: (d: Drawn) => Drawn }
+  | { readonly t: 'mark'; readonly apply: (d: Drawn) => Drawn; readonly hold: boolean }
   | { readonly t: 'turn' }
   | { readonly t: 'cue'; readonly sound: Sound };
 
@@ -290,6 +296,7 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
         delay = !next.hop ? 0 : queue.current.length > BACKLOG_FAST ? HOP_FAST_MS : HOP_MS;
       } else if (next.t === 'mark') {
         setDrawn(next.apply);
+        if (next.hold) delay = queue.current.length > BACKLOG_FAST ? HOP_FAST_MS : TRIP_MS;
       } else if (next.t === 'cue') {
         play(next.sound);
       } else if (next.t === 'power') {
@@ -425,7 +432,7 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
           queue.current.push({ t: 'move', racer: e.racerId, to: e.to, hop: false });
         } else {
           const apply = markFor(e);
-          if (apply) queue.current.push({ t: 'mark', apply });
+          if (apply) queue.current.push({ t: 'mark', apply, hold: e.t === 'racer/tripped' });
         }
         if (cue) queue.current.push({ t: 'cue', sound: cue });
       }
