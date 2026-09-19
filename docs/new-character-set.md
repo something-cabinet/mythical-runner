@@ -26,9 +26,9 @@
 - Techies: Every space I stop on becomes a TRIP space.
 - Chaos Knight: I roll a d20, and get -9 to my main move. It can take me backwards.
 - Abaddon: Whenever another racer trips, I can help them up at once. If I do, I move 3.
-- Britsleback: If I trip, I also trip all racers within 3 spaces near me.
-- Drow: I use a d4. If no other racer within 3 spaces near me, I use a d8 instead.
-- Nightstalker: i get +2 on my main move on odd turn, and -1 on even turn.
+- Bristleback: If I trip, I also trip all racers within 3 spaces near me.
+- Drow Ranger: I use a d4. If no other racer within 3 spaces near me, I use a d8 instead.
+- Night Stalker: I get +2 to my main move on my odd turns, and -1 on my even turns.
 - Slark: I get +1 to my main move for every silver cup, and +2 for every gold cup.
 - Ember Spirit: I can skip my main move to move 2 for each other racer within 3 spaces of me.
 - Earth Spirit: Before my main move, I can kick one racer on my space 3 spaces forward or backward.

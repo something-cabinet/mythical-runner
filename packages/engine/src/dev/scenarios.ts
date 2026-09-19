@@ -20,8 +20,8 @@ import { choiceId, playerId, racerId } from '../ids.js';
 import { FINISH, START, trackForRace } from '../tracks/index.js';
 import type { GameState, RacerState } from '../state.js';
 import type { CharacterSetId } from '../characters/sets.js';
-import { racerLabel, racerName, racerSet } from '../characters/registry.js';
-import { pointsToken } from '../scoring.js';
+import { racerLabel, racerName, racerSet, racersInSets } from '../characters/registry.js';
+import { goldToken, pointsToken, silverToken } from '../scoring.js';
 
 // --- Harness ----------------------------------------------------------------
 
@@ -1486,7 +1486,7 @@ scenario('Sets — a new room drafts from the classic set, and the host can mix 
   );
 });
 
-scenario('Sets — Dota alone has 24 racers: exactly a full deck for six players', () => {
+scenario('Sets — Dota alone has 28 racers: enough for six players', () => {
   const lobby = lobbyWith('p1', 'p2', 'p3', 'p4', 'p5');
   const five = applyAction(applyAction(lobby, toggle('p1', 'dota')).state, toggle('p1', 'classic')).state;
   check(
@@ -1494,15 +1494,17 @@ scenario('Sets — Dota alone has 24 racers: exactly a full deck for six players
     'five players may start',
   );
 
-  // Six players draft 24 racers, which is the whole Dota set — every card is dealt and
-  // nothing is left undrafted, so this is the exact edge of what one set can seat.
+  // Six players draft 24 racers, which the set now covers with four to spare — so an
+  // Egg still has somewhere to hatch from in a Dota-only game.
   const six = applyAction(five, { t: 'lobby/join', by: playerId('p6'), name: 'P6' }).state;
   check(
     legalActions(six, playerId('p1')).some((a) => a.t === 'lobby/start'),
     'and so may six',
   );
   const dealt = playGame({ seed: 9200, playerCount: 6, sets: ['dota'] }).state;
-  check(Object.values(dealt.hands).flat().length === 24, 'the whole set is dealt out', String(Object.values(dealt.hands).flat().length));
+  const hands = Object.values(dealt.hands).flat();
+  check(hands.length === 24, 'six full hands', String(hands.length));
+  check(racersInSets(['dota']).length - hands.length === 4, 'with four left undrafted');
 });
 
 scenario('Sets — the draft deals only from the chosen sets', () => {
@@ -2282,6 +2284,91 @@ scenario('Earth Spirit — kicks a racer on its space 3 spaces, its choice of di
     roll('p1'),
   );
   check(empty.state.pending === null, 'and nothing to kick when alone');
+});
+
+scenario('Bristleback — a trip takes everyone within 3 spaces down with it', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'bristleback', pos: 1 },
+      { player: 'p2', racer: 'banana', pos: 3 },
+      { player: 'p3', racer: 'vanilla-01', pos: 5 },
+      { player: 'p4', racer: 'vanilla-02', pos: 20 },
+    ],
+    'p1',
+  );
+  const down = rollUntil(s, 'p1', (r) => racerAt(r.state, 'bristleback')?.tripped === true);
+  check(racerAt(down.state, 'vanilla-01')?.tripped === true, 'the neighbour goes down too', logLines(down.events));
+  check(racerAt(down.state, 'vanilla-02')?.tripped === false, 'but not one 15 spaces away');
+  check(logLines(down.events).includes('quills'), 'logged');
+});
+
+scenario('Drow Ranger — a d4 in the pack, a d8 with room to shoot', () => {
+  const thrown = (events: readonly GameEvent[]): number =>
+    (events.find((e) => e.t === 'dice/thrown') as { value: number } | undefined)?.value ?? NaN;
+  const faces = (other: number): Set<number> => {
+    const s = raceState(
+      [
+        { player: 'p1', racer: 'drow-ranger', pos: 5 },
+        { player: 'p2', racer: 'vanilla-01', pos: other },
+      ],
+      'p1',
+    );
+    const seen = new Set<number>();
+    for (let seed = 1; seed <= 400; seed++) seen.add(thrown(applyAction({ ...s, seed }, roll('p1')).events));
+    return seen;
+  };
+
+  const crowded = faces(8);
+  check(crowded.size === 4 && Math.max(...crowded) === 4, 'a racer 3 away: faces 1 to 4', [...crowded].join(','));
+  const clear = faces(9);
+  check(clear.size === 8 && Math.max(...clear) === 8, 'one space further out: faces 1 to 8', [...clear].join(','));
+});
+
+scenario('Night Stalker — +2 on its odd turns, -1 on its even ones', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'night-stalker', pos: 1 },
+      { player: 'p2', racer: 'vanilla-01', pos: 1 },
+    ],
+    'p1',
+  );
+  const rolledOf = (events: readonly GameEvent[]): { value: number; natural?: number } =>
+    events.find((e) => e.t === 'dice/rolled') as { value: number; natural?: number };
+
+  const night = applyAction(s, roll('p1'));
+  const first = rolledOf(night.events);
+  check(first.value === (first.natural ?? NaN) + 2, 'the first turn is night: +2', JSON.stringify(first));
+
+  const day = applyAction(applyAction(night.state, roll('p2')).state, roll('p1'));
+  const second = rolledOf(day.events);
+  check(second.value === Math.max(0, (second.natural ?? NaN) - 1), 'the second is day: -1', JSON.stringify(second));
+
+  const third = rolledOf(applyAction(applyAction(day.state, roll('p2')).state, roll('p1')).events);
+  check(third.value === (third.natural ?? NaN) + 2, 'and night comes back round', JSON.stringify(third));
+});
+
+scenario('Slark — +1 per silver cup and +2 per gold, from every race so far', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'slark', pos: 1 },
+      { player: 'p2', racer: 'vanilla-01', pos: 20 },
+    ],
+    'p1',
+    2,
+  );
+  const rolledOf = (events: readonly GameEvent[]): { value: number; natural?: number } =>
+    events.find((e) => e.t === 'dice/rolled') as { value: number; natural?: number };
+
+  // An unmodified roll carries no `natural`: the die face is the move.
+  const bare = rolledOf(applyAction(s, roll('p1')).events);
+  check(bare.natural === undefined, 'an empty shelf is worth nothing', JSON.stringify(bare));
+
+  const shelved: GameState = {
+    ...s,
+    scores: { ...s.scores, [playerId('p1')]: [goldToken(1), silverToken(1), pointsToken(5, 1)] },
+  };
+  const fed = rolledOf(applyAction(shelved, roll('p1')).events);
+  check(fed.value === (fed.natural ?? NaN) + 3, 'a gold and a silver: +3, and the chips count for nothing', JSON.stringify(fed));
 });
 
 // --- Report -----------------------------------------------------------------

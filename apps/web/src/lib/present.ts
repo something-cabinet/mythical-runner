@@ -119,6 +119,14 @@ const SPRITE_FILES: Readonly<Record<string, string>> = {
   techies: 'dota2/techies.png',
   'chaos-knight': 'dota2/chaos-knight.png',
   abaddon: 'dota2/abaddon.png',
+  'ember-spirit': 'dota2/ember-spirit.png',
+  'earth-spirit': 'dota2/earth-spirit.png',
+  bristleback: 'dota2/bristleback.png',
+  // Valve's `_full` art for Drow is still a 128x72 original; this is the same picture from
+  // `heroes/drow_ranger_lg.png` (204x115), cropped the same way.
+  'drow-ranger': 'dota2/drow-ranger.png',
+  'night-stalker': 'dota2/night-stalker.png',
+  slark: 'dota2/slark.png',
 };
 
 const SPRITE_DIR = '/character_sprite';

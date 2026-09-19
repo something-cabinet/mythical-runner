@@ -5,7 +5,7 @@ import { FINISH, START } from '../../tracks/index.js';
 import { defFor, isRunning } from './shared.js';
 
 /**
- * The Dota set: twenty-four heroes from Dota 2, designed in `docs/new-character-set.md`.
+ * The Dota set: twenty-eight heroes from Dota 2, designed in `docs/new-character-set.md`.
  *
  * Same conventions as the classic set: optional ("I can") powers ask and default to
  * declining, log lines name racers with `h.nameOf`, and one `h.log` per happening.
@@ -748,6 +748,104 @@ const earthSpirit = def(
   },
 );
 
+/**
+ * QUILL SPRAY — "If I trip, I also trip all racers within 3 spaces of me."
+ *
+ * The fall goes off like a spray of quills: anyone nearby goes down with me, either
+ * direction, teammates included. Racers already down, or shrugging it off, are unaffected
+ * — and since a racer that is already tripped can't be tripped again, the spray never
+ * bounces back.
+ */
+const bristleback = def(
+  'bristleback',
+  'Bristleback',
+  'If I trip, I also trip all racers within 3 spaces of me.',
+  {
+    onRacerTripped: (h, target) => {
+      if (target.racerId !== h.self.racerId || !h.self.tripped) return;
+      const caught = h
+        .running()
+        .filter((r) => r.racerId !== h.self.racerId && !r.tripped && Math.abs(r.pos - h.self.pos) <= 3);
+      if (caught.length === 0) return;
+      h.log(`${h.nameOf(h.self)} goes down in a spray of quills, taking ${caught.length} with it.`);
+      for (const r of caught) h.trip(r);
+    },
+  },
+);
+
+/**
+ * PRECISION AURA — "I use a d4. If no other racer is within 3 spaces of me, I use a d8
+ * instead."
+ *
+ * Drow shoots best with room to work: crowded, the die is worse than everyone else's;
+ * clear of the pack, it is better. `dieSides` covers every roll of her die, so a duel or
+ * a Spirit Breaker bash is rolled on whichever die the board says she has at that moment.
+ */
+const drowRanger = def(
+  'drow-ranger',
+  'Drow Ranger',
+  'I use a d4. If no other racer is within 3 spaces of me, I use a d8 instead.',
+  {
+    dieSides: (h) => {
+      const crowded = h
+        .running()
+        .some((r) => r.racerId !== h.self.racerId && Math.abs(r.pos - h.self.pos) <= 3);
+      return crowded ? 4 : 8;
+    },
+  },
+);
+
+/**
+ * DARKNESS — "I get +2 to my main move on odd turns, and -1 on even turns."
+ *
+ * Night and day, counted in Night Stalker's *own* turns rather than the table's: a turn
+ * counter shared with everyone would lock a seat onto one half of the cycle forever in a
+ * two- or four-player game. The count runs per race and includes a turn lost to a trip —
+ * the sun comes up whether or not you ran.
+ */
+const nightStalker = def(
+  'night-stalker',
+  'Night Stalker',
+  'I get +2 to my main move on my odd turns, and -1 on my even turns.',
+  {
+    beforeMainMove: (h) => {
+      const turns = typeof h.self.memo['nights'] === 'number' ? (h.self.memo['nights'] as number) : 0;
+      h.self.memo['nights'] = turns + 1;
+    },
+    modifyMainMove: (h, value, mover) => {
+      if (!isRunning(h.self) || mover.racerId !== h.self.racerId) return value;
+      const turns = typeof h.self.memo['nights'] === 'number' ? (h.self.memo['nights'] as number) : 1;
+      const night = turns % 2 === 1;
+      h.log(night ? `Night falls for ${h.nameOf(h.self)}: +2.` : `Daylight catches ${h.nameOf(h.self)}: -1.`);
+      return value + (night ? 2 : -1);
+    },
+  },
+);
+
+/**
+ * ESSENCE SHIFT — "I get +1 to my main move for every silver cup, and +2 for every gold
+ * cup."
+ *
+ * Cups my *owner* holds, from every race so far — so Slark is worthless in race 1 and
+ * frightening in race 4 for whoever is winning. Point chips are not cups and count for
+ * nothing.
+ */
+const slark = def(
+  'slark',
+  'Slark',
+  'I get +1 to my main move for every silver cup, and +2 for every gold cup.',
+  {
+    modifyMainMove: (h, value, mover) => {
+      if (!isRunning(h.self) || mover.racerId !== h.self.racerId) return value;
+      const cups = h.state.scores[h.self.owner] ?? [];
+      const bonus = cups.reduce((sum, t) => sum + (t.kind === 'gold' ? 2 : t.kind === 'silver' ? 1 : 0), 0);
+      if (bonus === 0) return value;
+      h.log(`${h.nameOf(h.self)} feeds on the trophy shelf: +${bonus}.`);
+      return value + bonus;
+    },
+  },
+);
+
 export const DOTA_RACERS: readonly RacerDef[] = [
   bountyHunter,
   spiritBreaker,
@@ -773,4 +871,8 @@ export const DOTA_RACERS: readonly RacerDef[] = [
   abaddon,
   emberSpirit,
   earthSpirit,
+  bristleback,
+  drowRanger,
+  nightStalker,
+  slark,
 ];
