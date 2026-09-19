@@ -118,8 +118,9 @@ export interface HookCtx {
   askRoll(roller: MutableRacer, request: { readonly prompt: string; readonly key: string; readonly data?: unknown }): void;
 
   /**
-   * Techies: space `pos` is a TRIP space for the rest of the race, whatever it was before.
-   * Start and the finish can't be mined. False when nothing changed — already a TRIP space.
+   * Techies: lays a mine on space `pos`, which trips the next racer to stop there and is
+   * then gone. Start and the finish can't be mined. False when nothing changed — already
+   * mined, or a TRIP space.
    */
   mineSpace(pos: number): boolean;
 

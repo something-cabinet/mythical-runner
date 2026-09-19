@@ -509,26 +509,26 @@ const oracle = def(
 );
 
 /**
- * OVERLOAD — "I roll a d4. Once per race, I can roll a d20 instead."
+ * OVERLOAD — "I roll a d6. Once per race, I can roll a d20 instead."
  *
  * Offered before the main move, and not on a tripped turn, which has no roll to swap. The
- * d20 is my die for the rest of that turn — a reroll throws it again — and the d4 is back
+ * d20 is my die for the rest of that turn — a reroll throws it again — and the d6 is back
  * from the next.
  */
 const stormSpirit = def(
   'storm-spirit',
   'Storm Spirit',
-  'I roll a d4. Once per race, I can roll a d20 instead.',
+  'I roll a d6. Once per race, I can roll a d20 instead.',
   {
-    dieSides: (h) => (h.self.memo['overloading'] === true ? 20 : 4),
+    dieSides: (h) => (h.self.memo['overloading'] === true ? 20 : 6),
     beforeMainMove: (h) => {
       if (!isRunning(h.self) || h.self.tripped || h.self.memo['overloadUsed'] === true) return;
       h.ask({
         player: h.self.owner,
-        prompt: 'Overload? Roll a d20 instead of your d4 this turn. Once per race.',
-        options: [option('overload', 'Roll the d20'), option('d4', 'Roll the d4')],
+        prompt: 'Overload? Roll a d20 instead of your d6 this turn. Once per race.',
+        options: [option('overload', 'Roll the d20'), option('d6', 'Roll the d6')],
         key: 'overload',
-        defaultChoice: 'd4' as ChoiceId,
+        defaultChoice: 'd6' as ChoiceId,
       });
     },
     resume: (h, key, choice) => {
@@ -589,8 +589,8 @@ const clockwerk = def(
 );
 
 /**
- * MEAT HOOK — "I can skip my main move to throw my hook at any racer. I roll a die: on a 4
- * or higher, I warp them to my space and trip them. Otherwise I miss."
+ * MEAT HOOK — "I can skip my main move to throw my hook at any racer. I roll a die: on a 5
+ * or 6, I warp them to my space and trip them. Otherwise I miss."
  *
  * The main move is gone either way; a miss wastes the turn. The throw is my die, like any
  * power that has me roll. A warp passes nobody, but the racer does arrive: my space's
@@ -600,7 +600,7 @@ const clockwerk = def(
 const pudge = def(
   'pudge',
   'Pudge',
-  'I can skip my main move to throw my hook at any racer. I roll a die: on a 4 or higher, I warp them to my space and trip them. Otherwise I miss.',
+  'I can skip my main move to throw my hook at any racer. I roll a die: on a 5 or 6, I warp them to my space and trip them. Otherwise I miss.',
   {
     beforeMainMove: (h) => {
       if (!isRunning(h.self) || h.self.tripped) return;
@@ -608,7 +608,7 @@ const pudge = def(
       if (targets.length === 0) return;
       h.ask({
         player: h.self.owner,
-        prompt: 'Meat Hook? Instead of moving, roll to hook a racer: on a 4+, warp them to your space and trip them.',
+        prompt: 'Meat Hook? Instead of moving, roll to hook a racer: on a 5 or 6, warp them to your space and trip them.',
         options: [
           ...targets.map((r) => option(`hook:${r.racerId}`, `Hook ${h.nameOf(r)}`, racerTarget(r.racerId))),
           option('roll', 'Roll normally'),
@@ -624,7 +624,7 @@ const pudge = def(
         if (!victim || !isRunning(victim)) return;
         h.skipMainMove();
         h.askRoll(h.self, {
-          prompt: `Meat Hook at ${h.nameOf(victim)}! Roll: on a 4 or higher, it lands.`,
+          prompt: `Meat Hook at ${h.nameOf(victim)}! Roll: on a 5 or 6, it lands.`,
           key: 'hookRoll',
           data: { victim: victim.racerId },
         });
@@ -634,7 +634,7 @@ const pudge = def(
       const victim = h.racers().find((r) => r.racerId === (data as { victim: string }).victim);
       if (!victim || !isRunning(victim)) return;
       const roll = h.rollDie(h.self);
-      if (roll < 4) {
+      if (roll < 5) {
         h.log(`${h.nameOf(h.self)} throws the hook at ${h.nameOf(victim)}, rolls a ${roll}, and misses.`);
         return;
       }
@@ -646,19 +646,25 @@ const pudge = def(
 );
 
 /**
- * PROXIMITY MINES — "Every space I stop on becomes a TRIP space."
+ * PROXIMITY MINES — "Every space I stop on gets a mine. The next racer to stop there trips,
+ * and the mine is gone."
  *
  * Mined as I come to rest, after the space has done whatever it does, so I don't trip on
- * the mine I've just laid — but it's a TRIP space for everyone from then on, me included,
- * for the rest of the race. A star or an arrow under it is gone. Start and the finish
- * can't be mined.
+ * the mine I've just laid — but the next racer to stop there sets it off, me included.
+ * While it's armed, a star or an arrow under it does nothing; once it has gone off, the
+ * space is its old self again. Start, the finish and TRIP spaces can't be mined.
  */
-const techies = def('techies', 'Techies', 'Every space I stop on becomes a TRIP space.', {
-  onStop: (h) => {
-    if (!isRunning(h.self)) return;
-    if (h.mineSpace(h.self.pos)) h.log(`${h.nameOf(h.self)} plants a mine on space ${h.self.pos}.`);
+const techies = def(
+  'techies',
+  'Techies',
+  'Every space I stop on gets a mine. The next racer to stop there trips, and the mine is gone.',
+  {
+    onStop: (h) => {
+      if (!isRunning(h.self)) return;
+      if (h.mineSpace(h.self.pos)) h.log(`${h.nameOf(h.self)} plants a mine on space ${h.self.pos}.`);
+    },
   },
-});
+);
 
 /**
  * CHAOS BOLT — "I roll a d20, and get -9 to my main move. It can take me backwards."
@@ -845,23 +851,23 @@ const bristleback = def(
 );
 
 /**
- * PRECISION AURA — "I use a d4. If no other racer is within 3 spaces of me, I use a d8
+ * PRECISION AURA — "I use a d6. If no other racer is within 3 spaces of me, I use a d8
  * instead."
  *
- * Drow shoots best with room to work: crowded, the die is worse than everyone else's;
- * clear of the pack, it is better. `dieSides` covers every roll of her die, so a duel or
+ * Drow shoots best with room to work: crowded, the die is everyone else's; clear of the
+ * pack, it is better. `dieSides` covers every roll of her die, so a duel or
  * a Spirit Breaker bash is rolled on whichever die the board says she has at that moment.
  */
 const drowRanger = def(
   'drow-ranger',
   'Drow Ranger',
-  'I use a d4. If no other racer is within 3 spaces of me, I use a d8 instead.',
+  'I use a d6. If no other racer is within 3 spaces of me, I use a d8 instead.',
   {
     dieSides: (h) => {
       const crowded = h
         .running()
         .some((r) => r.racerId !== h.self.racerId && Math.abs(r.pos - h.self.pos) <= 3);
-      return crowded ? 4 : 8;
+      return crowded ? 6 : 8;
     },
   },
 );

@@ -348,6 +348,8 @@ export function describeEvent(e: GameEvent, view: PlayerView): LogLine | null {
       return { text: `${racer(e.racerId)} trips!`, tone: 'bad' };
     case 'racer/stoodUp':
       return { text: `${racer(e.racerId)} gets back up`, tone: 'plain' };
+    case 'space/cleared':
+      return { text: `${racer(e.racerId)} sets off the mine on space ${e.pos}`, tone: 'bad' };
     case 'space/mined':
     case 'space/claimed':
       // Already told: Techies' power logs the mine, and the token awarded logs the star.

@@ -154,6 +154,8 @@ function markFor(e: GameEvent): ((d: Drawn) => Drawn) | null {
       return (d) => ({ ...d, eliminated: withItem(d.eliminated, e.racerId, true) });
     case 'space/mined':
       return (d) => ({ ...d, tripSpaces: withItem(d.tripSpaces, e.pos, true) });
+    case 'space/cleared':
+      return (d) => ({ ...d, tripSpaces: withItem(d.tripSpaces, e.pos, false) });
     case 'space/claimed':
       return (d) => ({ ...d, claimedSpaces: withItem(d.claimedSpaces, e.pos, true) });
     default:

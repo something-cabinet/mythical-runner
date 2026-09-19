@@ -2021,7 +2021,7 @@ scenario('Oracle — predicts who trips first; right is worth 3', () => {
   check(racerAt(wrong.state, 'oracle')?.memo['foreseen'] === true, 'and the prediction is spent');
 });
 
-scenario('Storm Spirit — rolls a d4, and a d20 once per race', () => {
+scenario('Storm Spirit — rolls a d6, and a d20 once per race', () => {
   const s = raceState(
     [
       { player: 'p1', racer: 'storm-spirit', pos: 1 },
@@ -2039,15 +2039,15 @@ scenario('Storm Spirit — rolls a d4, and a d20 once per race', () => {
   const big = new Set<number>();
   for (let seed = 1; seed <= 400; seed++) {
     const at = applyAction({ ...s, seed }, roll('p1')).state;
-    small.add(thrown(applyAction(at, decide('p1', 'd4')).events));
+    small.add(thrown(applyAction(at, decide('p1', 'd6')).events));
     big.add(thrown(applyAction(at, decide('p1', 'overload')).events));
   }
-  check(small.size === 4 && Math.min(...small) === 1 && Math.max(...small) === 4, 'the d4: faces 1 to 4', [...small].join(','));
+  check(small.size === 6 && Math.min(...small) === 1 && Math.max(...small) === 6, 'the d6: faces 1 to 6', [...small].join(','));
   check(big.size === 20 && Math.max(...big) === 20, 'the d20: faces 1 to 20', [...big].join(','));
 
   const used = applyAction(asked.state, decide('p1', 'overload')).state;
   const me = racerAt(used, 'storm-spirit');
-  check(me?.memo['overloadUsed'] === true && me.memo['overloading'] === undefined, 'spent, and back to the d4 after the turn');
+  check(me?.memo['overloadUsed'] === true && me.memo['overloading'] === undefined, 'spent, and back to the d6 after the turn');
   const again = raceState([{ player: 'p1', racer: 'storm-spirit', pos: 1, memo: { overloadUsed: true } }, { player: 'p2', racer: 'vanilla-01', pos: 20 }], 'p1');
   check(applyAction(again, roll('p1')).state.pending === null, 'not offered a second time');
 });
@@ -2107,7 +2107,7 @@ scenario('Clockwerk — pushes every racer 1 away before the main move', () => {
   check(posOf(none.state, 'vanilla-01') === 0 && !logLines(none.events).includes('Cogs'), 'nobody is pushed off Start');
 });
 
-scenario('Pudge — can skip the main move to throw a hook, landing it on a 4+', () => {
+scenario('Pudge — can skip the main move to throw a hook, landing it on a 5 or 6', () => {
   const s = raceState(
     [
       { player: 'p1', racer: 'pudge', pos: 10 },
@@ -2133,17 +2133,17 @@ scenario('Pudge — can skip the main move to throw a hook, landing it on a 4+',
     throw new Error('could not find a seed producing the wanted hook roll');
   };
 
-  const hooked = throwHook((v) => v >= 4);
-  check(posOf(hooked.state, 'vanilla-01') === 10, 'a 4+ warps them onto Pudge', `pos ${posOf(hooked.state, 'vanilla-01')}`);
+  const hooked = throwHook((v) => v >= 5);
+  check(posOf(hooked.state, 'vanilla-01') === 10, 'a 5 or 6 warps them onto Pudge', `pos ${posOf(hooked.state, 'vanilla-01')}`);
   check(has(hooked.events, 'racer/warped'), 'by a warp');
   check(racerAt(hooked.state, 'vanilla-01')?.tripped === true, 'and tripped');
   check(!has(hooked.events, 'dice/rolled') && posOf(hooked.state, 'pudge') === 10, 'Pudge takes no main move');
   check(moverAt(hooked.state) === 'p2', 'and the turn is over');
 
-  const missed = throwHook((v) => v < 4);
+  const missed = throwHook((v) => v === 4);
   check(
     posOf(missed.state, 'vanilla-01') === 3 && racerAt(missed.state, 'vanilla-01')?.tripped === false,
-    'below 4 the hook misses',
+    'a 4 is not enough: the hook misses',
     `pos ${posOf(missed.state, 'vanilla-01')}`,
   );
   check(logLines(missed.events).includes('misses'), 'logged', logLines(missed.events));
@@ -2155,7 +2155,7 @@ scenario('Pudge — can skip the main move to throw a hook, landing it on a 4+',
   check(down.state.pending === null, 'a tripped Pudge has no main move to give up');
 });
 
-scenario('Techies — every space it stops on becomes a TRIP space', () => {
+scenario('Techies — every space it stops on gets a mine, which goes off once', () => {
   const s = raceState(
     [
       { player: 'p1', racer: 'techies', pos: 3 },
@@ -2173,8 +2173,28 @@ scenario('Techies — every space it stops on becomes a TRIP space', () => {
     posOf(boom.state, 'vanilla-01') === 7 && racerAt(boom.state, 'vanilla-01')?.tripped === true,
     'the next racer to stop there trips',
   );
+  const left = boom.state.phase.t === 'racing' ? boom.state.phase.tripSpaces : [];
+  check(left.length === 0, 'and the mine is gone', left.join(','));
+  check(has(boom.events, 'space/cleared'), 'which the board is told about');
 
-  // A mine replaces the space: an arrow under it no longer shoves.
+  // One mine, one trip: the racer after the one who set it off walks on by.
+  const field = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: 5 },
+      { player: 'p2', racer: 'vanilla-02', pos: 5 },
+    ],
+    'p1',
+  );
+  const laid: GameState = { ...field, phase: { ...field.phase, tripSpaces: [7] } as GameState['phase'] };
+  const first = rollFor(laid, 'p1', 2);
+  check(racerAt(first.state, 'vanilla-01')?.tripped === true, 'the first racer onto a mine trips');
+  const second = rollFor(first.state, 'p2', 2);
+  check(
+    posOf(second.state, 'vanilla-02') === 7 && racerAt(second.state, 'vanilla-02')?.tripped === false,
+    'the next one onto that space is safe',
+  );
+
+  // An armed mine covers the space: an arrow under it doesn't shove.
   const wilds = trackForRace(2);
   const arrow = wilds.spaces.find((sp) => sp.effect.t === 'arrow' && sp.index > 3);
   const base = raceState(
@@ -2187,7 +2207,7 @@ scenario('Techies — every space it stops on becomes a TRIP space', () => {
   );
   const armed: GameState = { ...base, phase: { ...base.phase, tripSpaces: [arrow!.index] } as GameState['phase'] };
   const hit = rollFor(armed, 'p1', 2);
-  check(posOf(hit.state, 'vanilla-01') === arrow!.index, `the arrow at ${arrow!.index} is gone`, `pos ${posOf(hit.state, 'vanilla-01')}`);
+  check(posOf(hit.state, 'vanilla-01') === arrow!.index, `the arrow at ${arrow!.index} is covered`, `pos ${posOf(hit.state, 'vanilla-01')}`);
   check(racerAt(hit.state, 'vanilla-01')?.tripped === true, 'and it trips instead');
 
   const trap = wilds.spaces.findIndex((sp) => sp.effect.t === 'trip' && sp.index > 1);
@@ -2391,7 +2411,7 @@ scenario('Bristleback — a trip takes everyone within 3 spaces down with it', (
   check(logLines(down.events).includes('quills'), 'logged');
 });
 
-scenario('Drow Ranger — a d4 in the pack, a d8 with room to shoot', () => {
+scenario('Drow Ranger — a d6 in the pack, a d8 with room to shoot', () => {
   const thrown = (events: readonly GameEvent[]): number =>
     (events.find((e) => e.t === 'dice/thrown') as { value: number } | undefined)?.value ?? NaN;
   const faces = (other: number): Set<number> => {
@@ -2408,7 +2428,7 @@ scenario('Drow Ranger — a d4 in the pack, a d8 with room to shoot', () => {
   };
 
   const crowded = faces(8);
-  check(crowded.size === 4 && Math.max(...crowded) === 4, 'a racer 3 away: faces 1 to 4', [...crowded].join(','));
+  check(crowded.size === 6 && Math.max(...crowded) === 6, 'a racer 3 away: faces 1 to 6', [...crowded].join(','));
   const clear = faces(9);
   check(clear.size === 8 && Math.max(...clear) === 8, 'one space further out: faces 1 to 8', [...clear].join(','));
 });

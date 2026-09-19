@@ -169,8 +169,8 @@ export type Phase =
        */
       readonly claimedSpaces: readonly number[];
       /**
-       * Spaces turned into TRIP spaces for the rest of the race — Techies' mines. Their own
-       * effect, star or arrow, is gone.
+       * Techies' mines, each waiting for the next racer to stop on it. While armed, the
+       * space's own effect, star or arrow, does nothing; a mine that goes off is removed.
        */
       readonly tripSpaces: readonly number[];
       /**

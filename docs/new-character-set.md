@@ -19,15 +19,15 @@
 - Alchemist: I received double the points from finish cup and star space.
 - Legion Commander: Whenever a racer shares my space, I can shout DUEL! We roll our dice and whoever rolls highest get +1 permanently to their main move. I win ties.
 - Oracle: At the start of my first turn, I predict which racer will trip first. If I'm right, I get 3 points.
-- Storm Spirit: I roll a d4. Once per race, I can roll a d20 instead.
+- Storm Spirit: I roll a d6. Once per race, I can roll a d20 instead.
 - Bloodseeker: I get +1 to my main move for each other racer currently tripped.
 - Clockwerk: Before my main move, I push every racer 1 space away from me.
-- Pudge: I can skip my main move to throw my hook at any racer. I roll a die: on a 4 or higher, I warp them to my space and trip them. Otherwise I miss.
-- Techies: Every space I stop on becomes a TRIP space.
+- Pudge: I can skip my main move to throw my hook at any racer. I roll a die: on a 5 or 6, I warp them to my space and trip them. Otherwise I miss.
+- Techies: Every space I stop on gets a mine. The next racer to stop there trips, and the mine is gone.
 - Chaos Knight: I roll a d20, and get -9 to my main move. It can take me backwards.
 - Abaddon: Whenever another racer trips, I can help them up at once. If I do, I move 3.
 - Bristleback: If I trip, I also trip all racers within 3 spaces near me.
-- Drow Ranger: I use a d4. If no other racer within 3 spaces near me, I use a d8 instead.
+- Drow Ranger: I use a d6. If no other racer within 3 spaces near me, I use a d8 instead.
 - Night Stalker: I get +2 to my main move on my odd turns, and -1 on my even turns.
 - Slark: I get +1 to my main move for every silver cup, and +2 for every gold cup.
 - Ember Spirit: I can skip my main move to move 2 for each other racer within 3 spaces of me.

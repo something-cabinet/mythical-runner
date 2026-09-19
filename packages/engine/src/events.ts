@@ -124,7 +124,7 @@ export interface DiceThrown {
   /** The face, before modifiers. */
   readonly value: number;
   /**
-   * Sides of the die, when it isn't a d6: Chaos Knight's 20, Drow Ranger's 4 or 8. Lets the
+   * Sides of the die, when it isn't a d6: Chaos Knight's 20, Drow Ranger's 8. Lets the
    * client draw the right die.
    */
   readonly die?: number;
@@ -206,11 +206,19 @@ export interface RacerStoodUp {
 }
 
 /**
- * A space became a TRIP space for the rest of the race (Techies' mines). Emitted where it
- * happens in the turn, so the client can draw the mine once the racer is seen to get there.
+ * A mine was laid on a space (Techies): it trips the next racer to stop there. Emitted
+ * where it happens in the turn, so the client can draw the mine once the racer is seen to
+ * get there.
  */
 export interface SpaceMined {
   readonly t: 'space/mined';
+  readonly racerId: RacerId;
+  readonly pos: number;
+}
+
+/** `racerId` stopped on a mine and set it off: space `pos` is back to what it was. */
+export interface SpaceCleared {
+  readonly t: 'space/cleared';
   readonly racerId: RacerId;
   readonly pos: number;
 }
@@ -309,6 +317,7 @@ export type GameEvent =
   | RacerTripped
   | RacerStoodUp
   | SpaceMined
+  | SpaceCleared
   | SpaceClaimed
   | RacerEliminated
   | AbilityTriggered

@@ -577,8 +577,12 @@ function doSpaceEffect(ctx: Ctx, job: Extract<Job, { t: 'spaceEffect' }>, rng: R
   const phase = ctx.s.phase;
   invariant(phase.t === 'racing', 'space effect resolved outside a race');
 
-  // Techies' mines replace whatever the space was.
+  // Techies' mines sit on top of whatever the space was, and go off once: the racer that
+  // sets one off trips instead of getting the space, and the space is its old self after.
+  // Gone even if the trip is shrugged off (Templar Assassin) — the mine still went bang.
   if (phase.tripSpaces.includes(job.pos)) {
+    phase.tripSpaces.splice(phase.tripSpaces.indexOf(job.pos), 1);
+    ctx.emit({ t: 'space/cleared', racerId: racer.racerId, pos: job.pos });
     tripRacer(ctx, rng, racer, null);
     return;
   }
