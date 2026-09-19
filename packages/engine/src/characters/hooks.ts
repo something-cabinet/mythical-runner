@@ -132,10 +132,11 @@ export interface HookCtx {
   defer(key: string, data?: unknown): void;
 
   /**
-   * Silencer: `target` has no powers at all during its next turn — "they can only roll for
-   * main move". Lifted when that turn ends.
+   * Silencer: `target` has no powers at all during its next `turns` turns (default 1) —
+   * "they can only roll for main move". Counted in the target's own turns; a longer silence
+   * already on them stands.
    */
-  silence(target: MutableRacer): void;
+  silence(target: MutableRacer, turns?: number): void;
 
   /**
    * Legion Commander's duel prize: `target` gets `amount` more on every main move for the

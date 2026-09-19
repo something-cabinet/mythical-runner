@@ -31,8 +31,14 @@ export function isMimic(power: RacerId): boolean {
 
 /** `memo` key holding a borrowed power's racer id. Set through `HookCtx.borrowPower`. */
 export const BORROWED = 'borrowedPower';
-/** `memo` key set by Silencer: no powers during this racer's next turn. */
+/** `memo` key set by Silencer: how many of this racer's own turns it has no powers for. */
 export const SILENCED = 'silenced';
+
+/** Turns of silence `racer` has left. A bare `true`, from before silences had a length, is one. */
+export function silencedTurns(racer: RacerState): number {
+  const v = racer.memo[SILENCED];
+  return v === true ? 1 : typeof v === 'number' ? v : 0;
+}
 /** `memo` key holding a permanent main move bonus, from Legion Commander's duel. */
 export const MAIN_MOVE_BONUS = 'mainMoveBonus';
 /** `memo` key set when a racer has given up its coming main move for a power. */
@@ -90,8 +96,8 @@ export function copyTarget(s: BoardLike, self: RacerState): RacerId | null {
  * asked it. `undefined` means work it out from the board.
  */
 export function hooksFor(s: BoardLike, racer: RacerState, pinned?: RacerId | null): Hooks {
-  // Silencer: "they can only roll for main move" — for the whole of their next turn.
-  if (racer.memo[SILENCED] === true && s.phase?.t === 'racing' && s.phase.moving === racer.racerId) {
+  // Silencer: "they can only roll for main move" — for the whole of each silenced turn.
+  if (silencedTurns(racer) > 0 && s.phase?.t === 'racing' && s.phase.moving === racer.racerId) {
     return NO_HOOKS;
   }
   const power = powerOf(racer);

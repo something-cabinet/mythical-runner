@@ -2,7 +2,7 @@ import { FINISH, type RacerId, type RaceNumber } from '@mr/engine';
 import { useState } from 'react';
 import { Board } from '../components/Board';
 import { ActionBar, RacerCard, RacerToken, Standings, Waiting } from '../components/bits';
-import { abilityToken, borrowedPower, duelBonusToken, ordinal, playerName, powerText, racerName, rawName } from '../lib/present';
+import { abilityToken, borrowedPower, duelBonusToken, silencedToken, ordinal, playerName, powerText, racerName, rawName } from '../lib/present';
 import { legalOf, useRoomContext } from '../lib/roomContext';
 
 /**
@@ -93,6 +93,7 @@ export function RaceScreen() {
                 const power = borrowedPower(view, r);
                 const ability = r.finishedRank === null && !r.eliminated ? abilityToken(r, power ?? r.racerId) : null;
                 const duel = r.finishedRank === null && !r.eliminated ? duelBonusToken(r) : null;
+                const hush = r.finishedRank === null && !r.eliminated ? silencedToken(r) : null;
                 return (
                   <div key={r.racerId} className="field-row" data-out={r.eliminated}>
                     <RacerToken view={view} racer={r.racerId} owner={r.owner} />
@@ -118,6 +119,11 @@ export function RaceScreen() {
                       {ability && (
                         <span className={`tag${ability.ready ? ' tag-good' : ''}`} title={ability.title}>
                           {ability.label}
+                        </span>
+                      )}
+                      {hush && (
+                        <span className="tag tag-bad num" title={hush.title}>
+                          {hush.label}
                         </span>
                       )}
                       {duel && (

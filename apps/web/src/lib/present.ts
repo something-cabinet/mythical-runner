@@ -218,6 +218,17 @@ export function abilityToken(
   }
 }
 
+/** Silencer's hush on a racer: how many of its own turns it has no powers for. Null when none. */
+export function silencedToken(racer: RacerState): { label: string; title: string } | null {
+  const v = racer.memo['silenced'];
+  const turns = v === true ? 1 : typeof v === 'number' ? v : 0;
+  if (turns <= 0) return null;
+  return {
+    label: `silenced ${turns}`,
+    title: `Silenced: no powers for ${turns === 1 ? 'its next turn' : `its next ${turns} turns`}`,
+  };
+}
+
 /**
  * Legion Commander's duel prizes a racer holds: +1 to every main move for each duel won,
  * whoever won it — the Commander or the racer it challenged. Null when there are none.

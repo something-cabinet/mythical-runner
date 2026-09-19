@@ -264,33 +264,45 @@ function inBubble(h: HookCtx) {
 }
 
 /**
- * GLOBAL SILENCE — "Once per race, before my main move, I can silence every other racer:
- * on their next turn, they have no powers and can only roll for their main move."
+ * GLOBAL SILENCE — "Once per race, before my main move, I can silence every other racer.
+ * I roll a die: for that many of their turns, they have no powers and can only roll for
+ * their main move."
  *
- * Their whole turn, passive powers included, and nothing else: on everyone else's turns
- * their powers work as normal.
+ * Their whole turns, passive powers included, and nothing else: on everyone else's turns
+ * their powers work as normal. Counted in each racer's own turns, tripped ones included.
  */
 const silencer = def(
   'silencer',
   'Silencer',
-  'Once per race, before my main move, I can silence every other racer: on their next turn, they have no powers and can only roll for their main move.',
+  'Once per race, before my main move, I can silence every other racer. I roll a die: for that many of their turns, they have no powers and can only roll for their main move.',
   {
     beforeMainMove: (h) => {
       if (!isRunning(h.self) || h.self.memo['silenceUsed'] === true) return;
       if (!h.running().some((r) => r.racerId !== h.self.racerId)) return;
       h.ask({
         player: h.self.owner,
-        prompt: 'Global Silence? Everyone else loses their powers on their next turn. Once per race.',
+        prompt: 'Global Silence? Everyone else loses their powers — you roll for how many of their turns. Once per race.',
         options: [option('silence', 'Global Silence'), option('wait', 'Not yet')],
         key: 'silence',
         defaultChoice: 'wait' as ChoiceId,
       });
     },
     resume: (h, key, choice) => {
-      if (key !== 'silence' || choice !== ('silence' as ChoiceId)) return;
-      h.self.memo['silenceUsed'] = true;
-      h.log(`${h.nameOf(h.self)} casts Global Silence. Nobody else has powers on their next turn.`);
-      for (const r of h.running()) if (r.racerId !== h.self.racerId) h.silence(r);
+      if (key === 'silence') {
+        if (choice !== ('silence' as ChoiceId)) return;
+        h.self.memo['silenceUsed'] = true;
+        h.askRoll(h.self, {
+          prompt: 'Global Silence! Roll: that is how many turns everyone else goes without powers.',
+          key: 'silenceRoll',
+        });
+        return;
+      }
+      if (key !== 'silenceRoll') return;
+      const turns = h.rollDie(h.self);
+      h.log(
+        `${h.nameOf(h.self)} casts Global Silence and rolls a ${turns}: nobody else has powers for their next ${turns === 1 ? 'turn' : `${turns} turns`}.`,
+      );
+      for (const r of h.running()) if (r.racerId !== h.self.racerId) h.silence(r, turns);
     },
   },
 );

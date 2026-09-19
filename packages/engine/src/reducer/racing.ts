@@ -7,7 +7,7 @@ import { goldToken, silverToken, totalPoints, type Token } from '../scoring.js';
 import { FINISH, START, type RaceNumber } from '../tracks/index.js';
 import { FINISHERS_PER_RACE, RACE_COUNT, racersPerRace } from '../state.js';
 import { beginCommit } from './commit.js';
-import { hooksFor, SILENCED } from '../characters/powers.js';
+import { hooksFor, SILENCED, silencedTurns } from '../characters/powers.js';
 import { awardFor, makeHookCtx, runQueue } from './pipeline.js';
 import { activeRacers, findRacer, racersOf, type Ctx, scoreOf, seatAt } from './working.js';
 
@@ -232,9 +232,13 @@ export function endTurn(ctx: Ctx, rng: Rng): void {
       });
   phase.moving = null;
 
-  // Silencer's hush lasts one turn, and that turn is over.
+  // One of the silenced racer's turns is over; the hush lifts when they have all gone.
   const hushed = moved ? findRacer(s, moved) : undefined;
-  if (hushed) delete hushed.memo[SILENCED];
+  if (hushed && silencedTurns(hushed) > 0) {
+    const left = silencedTurns(hushed) - 1;
+    if (left > 0) hushed.memo[SILENCED] = left;
+    else delete hushed.memo[SILENCED];
+  }
 
   if (phase.finished.length >= FINISHERS_PER_RACE) {
     endRace(ctx, false, rng);

@@ -1821,7 +1821,7 @@ scenario('Faceless Void — once per race, before or after the move, trips every
   check(applyAction(used, roll('p1')).state.pending === null, 'not offered a second time');
 });
 
-scenario('Silencer — once per race, everyone else loses their powers for their next turn', () => {
+scenario('Silencer — once per race, everyone else loses their powers for a rolled number of turns', () => {
   const s = raceState(
     [
       { player: 'p1', racer: 'silencer', pos: 0 },
@@ -1832,14 +1832,31 @@ scenario('Silencer — once per race, everyone else loses their powers for their
   );
   const asked = applyAction(s, roll('p1'));
   check(asked.state.pending?.prompt.includes('Global Silence') === true, 'offered before the main move');
-  const hushed = applyAction(asked.state, decide('p1', 'silence'));
+  const cast = applyAction(asked.state, decide('p1', 'silence'));
+  check(rollAsked(cast.state) && cast.state.pending?.player === playerId('p1'), 'then Silencer rolls for how long');
+
+  // Find a throw of 2, so the silence outlasts one turn.
+  let hushed = pressRolls(cast);
+  for (let seed = 1; seed < 40000 && powerThrows(hushed.events)[0] !== 2; seed++) {
+    hushed = pressRolls(applyAction({ ...cast.state, seed }, decide('p1', 'roll')));
+  }
+  check(logLines(hushed.events).includes('next 2 turns'), 'a 2 silences for 2 turns', logLines(hushed.events));
   check(logLines(hushed.events).includes('goops'), "Gunk's goop still works on Silencer's turn", logLines(hushed.events));
+  check(racerAt(hushed.state, 'gunk')?.memo['silenced'] === 2, 'everyone else is down for 2');
 
   const legsTurn = applyAction(hushed.state, roll('p2'));
   check(legsTurn.state.pending === null, "Legs isn't offered its jog");
   check(has(legsTurn.events, 'dice/rolled'), 'it just rolls');
-  check(racerAt(legsTurn.state, 'legs')?.memo['silenced'] === undefined, 'and the silence lifts after that turn');
-  check(racerAt(legsTurn.state, 'gunk')?.memo['silenced'] === true, "Gunk's turn is still to come");
+  check(racerAt(legsTurn.state, 'legs')?.memo['silenced'] === 1, 'one turn of silence left');
+
+  // Round the table: Gunk, then Silencer, then Legs again — still hushed.
+  const gunkTurn = applyAction(legsTurn.state, roll('p3'));
+  const silencerTurn = applyAction(gunkTurn.state, roll('p1'));
+  const legsAgain = applyAction(silencerTurn.state, roll('p2'));
+  check(legsAgain.state.pending === null && has(legsAgain.events, 'dice/rolled'), 'Legs is still silenced on its second turn');
+  check(racerAt(legsAgain.state, 'legs')?.memo['silenced'] === undefined, 'and the silence lifts after it');
+  const legsFree = applyAction(applyAction(applyAction(legsAgain.state, roll('p3')).state, roll('p1')).state, roll('p2'));
+  check(legsFree.state.pending?.prompt.includes('Jog') === true, 'the turn after, Legs can jog again', legsFree.state.pending?.prompt);
 
   const again = raceState([{ player: 'p1', racer: 'silencer', pos: 0, memo: { silenceUsed: true } }, { player: 'p2', racer: 'legs', pos: 0 }], 'p1');
   check(applyAction(again, roll('p1')).state.pending === null, 'not offered a second time');

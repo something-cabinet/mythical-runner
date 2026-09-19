@@ -8,6 +8,7 @@ import {
   MAIN_MOVE_BONUS,
   powerOf,
   SILENCED,
+  silencedTurns,
   SKIP_MAIN,
 } from '../characters/powers.js';
 import { invariant } from '../errors.js';
@@ -987,8 +988,9 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
       });
     },
 
-    silence: (target) => {
-      target.memo[SILENCED] = true;
+    // A second silence doesn't stack: the longer one stands.
+    silence: (target, turns = 1) => {
+      target.memo[SILENCED] = Math.max(silencedTurns(target), turns);
     },
 
     addMainMoveBonus: (target, amount) => {
