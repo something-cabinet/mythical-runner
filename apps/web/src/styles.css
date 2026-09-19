@@ -1067,6 +1067,11 @@ select {
 .board3d-wrap canvas {
   display: block;
   outline: none;
+  /* The scene renders at a fraction of native resolution (see PIXEL_DPR in Board3D.tsx);
+     nearest-neighbour upscaling here is what turns that into chunky pixel art. */
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
 }
 
 .board3d-callout {

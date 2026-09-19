@@ -8,12 +8,7 @@ import {
 } from '@mr/engine';
 import type { Credentials } from './identity';
 
-/**
- * TEMPORARY: pinned to the deployed Worker so this preview sandbox (which has no local
- * wrangler) can be tested end-to-end. Revert to `location.host` once local wrangler is
- * available again.
- */
-const API_HOST = 'mythical-runner.khoalamvn.workers.dev';
+const API_HOST = location.host;
 
 export type ConnectionStatus = 'connecting' | 'open' | 'reconnecting';
 

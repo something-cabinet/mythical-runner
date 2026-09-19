@@ -146,8 +146,25 @@ const PIPS: Record<number, readonly (readonly [number, number])[]> = {
   6: [[-1, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [1, 1]],
 };
 
+/** Renders the whole scene at a fraction of native resolution, then CSS-upscales with
+ * nearest-neighbour so the 3D board reads as chunky pixel art rather than smooth 3D. */
+const PIXEL_DPR = 0.42;
+/** Steps in the toon gradient: fewer bands = flatter, more retro-cel lighting. */
+const TOON_STEPS = 4;
+
+function toonGradient(steps: number): THREE.DataTexture {
+  const data = new Uint8Array(steps);
+  for (let i = 0; i < steps; i++) data[i] = Math.round((i / Math.max(1, steps - 1)) * 255);
+  const tex = new THREE.DataTexture(data, steps, 1, THREE.RedFormat);
+  tex.needsUpdate = true;
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
+  return tex;
+}
+
 function pipTexture(value: number, pip: string, face: string): THREE.CanvasTexture {
-  const size = 256;
+  const size = 64;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
@@ -159,7 +176,7 @@ function pipTexture(value: number, pip: string, face: string): THREE.CanvasTextu
     const unit = size / 3.2;
     const cx = size / 2;
     const cy = size / 2;
-    const r = size * 0.09;
+    const r = size * 0.1;
     for (const [px, py] of PIPS[value] ?? []) {
       ctx.beginPath();
       ctx.arc(cx + px * unit, cy + py * unit, r, 0, Math.PI * 2);
@@ -168,11 +185,14 @@ function pipTexture(value: number, pip: string, face: string): THREE.CanvasTextu
   }
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
   return tex;
 }
 
 function initialsTexture(text: string, ink: string, bg: string): THREE.CanvasTexture {
-  const size = 256;
+  const size = 64;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
@@ -184,15 +204,18 @@ function initialsTexture(text: string, ink: string, bg: string): THREE.CanvasTex
     ctx.font = `700 ${Math.round(size * 0.42)}px system-ui, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(text, size / 2, size / 2 + 4);
+    ctx.fillText(text, size / 2, size / 2 + 1);
   }
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
   return tex;
 }
 
 function checkerTexture(a: string, b: string): THREE.CanvasTexture {
-  const size = 64;
+  const size = 16;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
@@ -209,6 +232,9 @@ function checkerTexture(a: string, b: string): THREE.CanvasTexture {
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(4, 2);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
   return tex;
 }
 
@@ -284,16 +310,22 @@ function Piece({
 }) {
   const group = useRef<THREE.Group>(null);
   const drawn = useRef(new THREE.Vector3(target[0], 0, target[1]));
+  const targetVec = useRef(new THREE.Vector3());
   const sprite = hasArt ? useLoader(THREE.TextureLoader, spriteUrl) : null;
   const fallback = useMemo(() => (hasArt ? null : initialsTexture(initials, SEAT_INK, color)), [hasArt, initials, color]);
   const map = sprite ?? fallback ?? null;
+  const gradientMap = useMemo(() => toonGradient(TOON_STEPS), []);
 
   useFrame((_, delta) => {
     const g = group.current;
     if (!g) return;
-    drawn.current.lerp(new THREE.Vector3(target[0], 0, target[1]), Math.min(1, delta * 7));
+    targetVec.current.set(target[0], 0, target[1]);
+    const dist = drawn.current.distanceTo(targetVec.current);
+    drawn.current.lerp(targetVec.current, Math.min(1, delta * 7));
+    // A quick hop while a piece is sliding toward its new space — settles as it arrives.
+    const hop = dist > 0.02 ? Math.min(0.45, dist) * Math.abs(Math.sin(performance.now() / 95)) : 0;
     const bob = active ? Math.sin(performance.now() / 260) * 0.06 : 0;
-    g.position.set(drawn.current.x, bob, drawn.current.z);
+    g.position.set(drawn.current.x, bob + hop, drawn.current.z);
   });
 
   const h = Math.max(0.22, radius * 0.62);
@@ -309,9 +341,9 @@ function Piece({
       {active && <pointLight color={color} intensity={2.4} distance={radius * 7} position={[0, radius * 1.6, 0]} />}
       <mesh position={[0, h / 2 + 0.02, 0]} castShadow>
         <cylinderGeometry args={[radius, radius * 0.98, h, 28]} />
-        <meshStandardMaterial attach="material-0" color={color} emissive={color} emissiveIntensity={active ? 0.55 : 0.14} />
-        <meshStandardMaterial attach="material-1" map={map} color={map ? '#ffffff' : color} roughness={0.5} />
-        <meshStandardMaterial attach="material-2" color={color} />
+        <meshToonMaterial attach="material-0" color={color} emissive={color} emissiveIntensity={active ? 0.55 : 0.14} gradientMap={gradientMap} />
+        <meshToonMaterial attach="material-1" map={map} color={map ? '#ffffff' : color} gradientMap={gradientMap} />
+        <meshToonMaterial attach="material-2" color={color} gradientMap={gradientMap} />
       </mesh>
       {mine && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
@@ -345,7 +377,10 @@ function Die({ roll, restX, restZ, reducedMotion, color }: {
   color: string;
 }) {
   const ref = useRef<RapierRigidBody>(null);
+  const meshRef = useRef<THREE.Mesh>(null);
+  const landedAt = useRef(0);
   const rest = useMemo(() => ({ x: restX, y: DIE_SIZE / 2 + 0.02, z: restZ }), [restX, restZ]);
+  const gradientMap = useMemo(() => toonGradient(TOON_STEPS), []);
   const materials = useMemo(() => {
     const tex: Record<number, THREE.CanvasTexture> = {};
     for (let v = 1; v <= 6; v++) tex[v] = pipTexture(v, '#26212f', '#f7f3ec');
@@ -361,6 +396,7 @@ function Die({ roll, restX, restZ, reducedMotion, color }: {
       body.setRotation(FACE_QUATS[roll.face] ?? FACE_QUATS[1]!, true);
       body.setLinvel({ x: 0, y: 0, z: 0 }, true);
       body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      landedAt.current = performance.now();
       return;
     }
     const spin = new THREE.Quaternion().setFromEuler(
@@ -377,17 +413,31 @@ function Die({ roll, restX, restZ, reducedMotion, color }: {
       b.setRotation(FACE_QUATS[roll.face] ?? FACE_QUATS[1]!, true);
       b.setLinvel({ x: 0, y: 0, z: 0 }, true);
       b.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      landedAt.current = performance.now();
     }, ROLL_TUMBLE_MS);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by the throw, re-run only on a fresh roll
   }, [roll.key, roll.instant, roll.face, reducedMotion]);
 
+  // A brief squash-and-pop on landing gives the die some arcade weight.
+  useFrame(() => {
+    const m = meshRef.current;
+    if (!m) return;
+    const t = Math.min(1, (performance.now() - landedAt.current) / 220);
+    if (t >= 1) {
+      m.scale.set(1, 1, 1);
+      return;
+    }
+    const squash = 1 - Math.sin(t * Math.PI) * 0.22 * (1 - t);
+    m.scale.set(1 + (1 - squash) * 0.5, squash, 1 + (1 - squash) * 0.5);
+  });
+
   return (
     <RigidBody ref={ref} colliders="cuboid" restitution={0.25} friction={0.7} position={[rest.x, rest.y, rest.z]}>
-      <mesh castShadow>
+      <mesh ref={meshRef} castShadow>
         <boxGeometry args={[DIE_SIZE, DIE_SIZE, DIE_SIZE]} />
         {materials.map((tex, i) => (
-          <meshStandardMaterial key={i} attach={`material-${i}`} map={tex ?? null} roughness={0.35} />
+          <meshToonMaterial key={i} attach={`material-${i}`} map={tex ?? null} gradientMap={gradientMap} />
         ))}
       </mesh>
       <pointLight color={color} intensity={1.4} distance={4} position={[0, 1.4, 0]} />
@@ -407,6 +457,7 @@ export function Board3D({
   const wide = useWide();
   const reducedMotion = usePrefersReducedMotion();
   const track = trackForRace(raceNo);
+  const tileGradient = useMemo(() => toonGradient(TOON_STEPS), []);
   const g = geometry(!wide);
   const boxes = track.spaces.map((s) => g.rect(gridCell(s.index)));
   const finishBox = g.rect(FINISH_CELL);
@@ -485,19 +536,20 @@ export function Board3D({
 
   return (
     <div className="board3d-wrap" role="img" aria-label={`${track.name} race track`}>
-      <Canvas shadows dpr={[1, 2]} camera={{ fov: 42 }} gl={{ antialias: true }}>
+      <Canvas shadows dpr={[PIXEL_DPR, PIXEL_DPR]} camera={{ fov: 42 }} gl={{ antialias: false }}>
         <CameraRig portrait={g.portrait} />
         <color attach="background" args={['#100c1c']} />
         <fog attach="fog" args={['#100c1c', 22, 46]} />
-        <ambientLight intensity={0.55} />
-        <hemisphereLight args={['#e6d9ff', '#100c1c', 0.5]} />
-        <directionalLight position={[8, 16, 6]} intensity={1.15} castShadow shadow-mapSize={[1024, 1024]} />
+        <ambientLight intensity={0.4} />
+        <hemisphereLight args={['#ffd9a0', '#1a0f2e', 0.4]} />
+        <directionalLight position={[8, 16, 6]} intensity={1.6} color="#fff4d6" castShadow shadow-mapSize={[512, 512]} />
+        <directionalLight position={[-10, 9, -8]} intensity={0.45} color="#5ea8ef" />
 
         <Physics gravity={[0, -22, 0]}>
           <RigidBody type="fixed" colliders="cuboid">
             <mesh position={[0, -0.05, 0]} receiveShadow>
               <boxGeometry args={[g.width * SCALE + 2, 0.1, g.height * SCALE + 2]} />
-              <meshStandardMaterial color="#1c1630" />
+              <meshToonMaterial color="#1c1630" gradientMap={tileGradient} />
             </mesh>
           </RigidBody>
 
@@ -519,7 +571,7 @@ export function Board3D({
               <group key={space.index}>
                 <mesh position={[x, SPACE_H / 2, z]} receiveShadow>
                   <boxGeometry args={[w * 0.94, SPACE_H, d * 0.94]} />
-                  <meshStandardMaterial color={fill} emissive={claimed ? '#ffd23c' : '#000000'} emissiveIntensity={claimed ? 0.35 : 0} roughness={0.55} />
+                  <meshToonMaterial color={fill} emissive={claimed ? '#ffd23c' : '#000000'} emissiveIntensity={claimed ? 0.35 : 0} gradientMap={tileGradient} />
                 </mesh>
                 {isStart && (
                   <Text position={[x, glyphY, z]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.7} color="#1a1523" anchorX="center" anchorY="middle">
@@ -578,7 +630,7 @@ export function Board3D({
               <group>
                 <mesh position={[x, -0.005, z]} receiveShadow>
                   <boxGeometry args={[w, 0.02, d]} />
-                  <meshStandardMaterial color="#241d3a" />
+                  <meshToonMaterial color="#241d3a" gradientMap={tileGradient} />
                 </mesh>
                 <Text
                   position={[x, 0.02, z]}
@@ -604,12 +656,12 @@ export function Board3D({
               <group>
                 <mesh position={[x, SPACE_H / 2, z]} receiveShadow>
                   <boxGeometry args={[w * 0.94, SPACE_H, d * 0.94]} />
-                  <meshStandardMaterial attach="material-0" color="#1a1523" />
-                  <meshStandardMaterial attach="material-1" color="#1a1523" />
-                  <meshStandardMaterial attach="material-2" map={checker} />
-                  <meshStandardMaterial attach="material-3" color="#1a1523" />
-                  <meshStandardMaterial attach="material-4" color="#1a1523" />
-                  <meshStandardMaterial attach="material-5" color="#1a1523" />
+                  <meshToonMaterial attach="material-0" color="#1a1523" gradientMap={tileGradient} />
+                  <meshToonMaterial attach="material-1" color="#1a1523" gradientMap={tileGradient} />
+                  <meshToonMaterial attach="material-2" map={checker} gradientMap={tileGradient} />
+                  <meshToonMaterial attach="material-3" color="#1a1523" gradientMap={tileGradient} />
+                  <meshToonMaterial attach="material-4" color="#1a1523" gradientMap={tileGradient} />
+                  <meshToonMaterial attach="material-5" color="#1a1523" gradientMap={tileGradient} />
                 </mesh>
                 <Text position={[finishSplit.label ? x : x, SPACE_H + 0.05, z]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.55} color="#fff4d6" anchorX="center" anchorY="middle">
                   FINISH
