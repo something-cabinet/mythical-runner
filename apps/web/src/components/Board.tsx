@@ -290,7 +290,7 @@ function Die({ view, roll, x, y, size, color, portrait }: {
 
   const name = racerName(view, roll.racerId);
   // A power's roll names that power when it isn't the roller's own: a Spirit Breaker
-  // victim rolling "1 (Spirit Breaker)", not Pudge rolling "5 (Pudge)".
+  // victim rolling "1 (Spirit Breaker)", not Tidehunter rolling "5 (Tidehunter)".
   const credit = roll.modifiedBy ?? (roll.power !== roll.racerId ? roll.power : undefined);
   const by = credit ? ` (${racerName(view, credit)})` : '';
   const delta = (roll.move ?? roll.face) - roll.face;

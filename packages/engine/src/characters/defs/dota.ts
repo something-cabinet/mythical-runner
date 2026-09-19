@@ -621,61 +621,37 @@ const clockwerk = def(
 );
 
 /**
- * MEAT HOOK — "I can skip my main move to throw my hook at any racer. I roll a die: on a 5
- * or 6, I warp them to my space and trip them. Otherwise I miss."
+ * MEAT HOOK — "Before my main move, I can warp a racer to my space."
  *
- * The main move is gone either way; a miss wastes the turn. The throw is my die, like any
- * power that has me roll. A warp passes nobody, but the racer does arrive: my space's
- * effect and stop powers fire for them. Offered like Earthshaker's slam: before the roll,
- * and not on a tripped turn.
+ * Hypnotist's power under another name, and ruled the same way: any running racer not
+ * already with me, my main move still follows, and nothing is rolled. A warp passes
+ * nobody, but the racer does arrive: my space's effect and stop powers fire for them —
+ * hook Baba Yaga and I'm the one who trips.
  */
-const pudge = def(
-  'pudge',
-  'Pudge',
-  'I can skip my main move to throw my hook at any racer. I roll a die: on a 5 or 6, I warp them to my space and trip them. Otherwise I miss.',
-  {
-    beforeMainMove: (h) => {
-      if (!isRunning(h.self) || h.self.tripped) return;
-      const targets = h.running().filter((r) => r.racerId !== h.self.racerId);
-      if (targets.length === 0) return;
-      h.ask({
-        player: h.self.owner,
-        prompt: 'Meat Hook? Instead of moving, roll to hook a racer: on a 5 or 6, warp them to your space and trip them.',
-        options: [
-          ...targets.map((r) => option(`hook:${r.racerId}`, `Hook ${h.nameOf(r)}`, racerTarget(r.racerId))),
-          option('roll', 'Roll normally'),
-        ],
-        key: 'hook',
-        defaultChoice: 'roll' as ChoiceId,
-      });
-    },
-    resume: (h, key, choice, data) => {
-      if (key === 'hook') {
-        if (choice === ('roll' as ChoiceId)) return;
-        const victim = h.racers().find((r) => choice === (`hook:${r.racerId}` as ChoiceId));
-        if (!victim || !isRunning(victim)) return;
-        h.skipMainMove();
-        h.askRoll(h.self, {
-          prompt: `Meat Hook at ${h.nameOf(victim)}! Roll: on a 5 or 6, it lands.`,
-          key: 'hookRoll',
-          data: { victim: victim.racerId },
-        });
-        return;
-      }
-      if (key !== 'hookRoll') return;
-      const victim = h.racers().find((r) => r.racerId === (data as { victim: string }).victim);
-      if (!victim || !isRunning(victim)) return;
-      const roll = h.rollDie(h.self);
-      if (roll < 5) {
-        h.log(`${h.nameOf(h.self)} throws the hook at ${h.nameOf(victim)}, rolls a ${roll}, and misses.`);
-        return;
-      }
-      h.log(`${h.nameOf(h.self)} rolls a ${roll} and hooks ${h.nameOf(victim)}!`);
-      h.warp(victim, h.self.pos);
-      h.trip(victim);
-    },
+const pudge = def('pudge', 'Pudge', 'Before my main move, I can warp a racer to my space.', {
+  beforeMainMove: (h) => {
+    if (!isRunning(h.self)) return;
+    const targets = h.running().filter((r) => r.racerId !== h.self.racerId && r.pos !== h.self.pos);
+    if (targets.length === 0) return;
+    h.ask({
+      player: h.self.owner,
+      prompt: 'Meat Hook a racer to your space?',
+      options: [
+        ...targets.map((r) => option(`hook:${r.racerId}`, h.nameOf(r), racerTarget(r.racerId))),
+        option('pass', 'Do nothing'),
+      ],
+      key: 'hook',
+      defaultChoice: 'pass' as ChoiceId,
+    });
   },
-);
+  resume: (h, key, choice) => {
+    if (key !== 'hook' || choice === ('pass' as ChoiceId)) return;
+    const victim = h.running().find((r) => choice === (`hook:${r.racerId}` as ChoiceId));
+    if (!victim) return;
+    h.log(`${h.nameOf(h.self)} hooks ${h.nameOf(victim)} over!`);
+    h.warp(victim, h.self.pos);
+  },
+});
 
 /**
  * PROXIMITY MINES — "Every space I stop on gets a mine. The next racer to stop there trips,

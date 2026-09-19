@@ -134,7 +134,7 @@ export interface DiceThrown {
    */
   readonly dice?: readonly number[];
   /**
-   * The racer whose power called for this roll — Pudge's hook, a Spirit Breaker victim's
+   * The racer whose power called for this roll — Tidehunter getting up, a Spirit Breaker victim's
    * bash roll, either side of a duel. Absent for a main move, which is the only roll a
    * `dice/rolled` follows.
    */

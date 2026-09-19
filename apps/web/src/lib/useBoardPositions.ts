@@ -58,7 +58,7 @@ export interface ShownRoll {
   /** The move stands in place of the face (Alchemist) rather than adjusting it (Blimp). */
   readonly replaced: boolean;
   readonly modifiedBy?: RacerId | undefined;
-  /** The racer whose power asked for this roll (Pudge's hook, a duel), when it isn't a main move. */
+  /** The racer whose power asked for this roll (Tidehunter getting up, a duel), when it isn't a main move. */
   readonly power?: RacerId | undefined;
   /** Shown without the tumble, e.g. under reduced motion. */
   readonly instant: boolean;

@@ -179,7 +179,7 @@ export function RaceScreen() {
   );
 }
 
-/** A power's roll waiting on its player (Pudge's hook, a duel): the one choice is Roll. */
+/** A power's roll waiting on its player (Tidehunter getting up, a duel): the one choice is Roll. */
 function isRollAsk(pending: { readonly options: readonly { readonly id: string }[] }): boolean {
   return pending.options.length === 1 && pending.options[0]?.id === 'roll';
 }

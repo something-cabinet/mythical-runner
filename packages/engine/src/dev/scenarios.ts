@@ -2178,52 +2178,28 @@ scenario('Clockwerk — pushes every racer 1 away before the main move', () => {
   check(posOf(none.state, 'vanilla-01') === 0 && !logLines(none.events).includes('Cogs'), 'nobody is pushed off Start');
 });
 
-scenario('Pudge — can skip the main move to throw a hook, landing it on a 5 or 6', () => {
+scenario('Pudge — "before my main move, I can warp a racer to my space"', () => {
   const s = raceState(
     [
       { player: 'p1', racer: 'pudge', pos: 10 },
       { player: 'p2', racer: 'vanilla-01', pos: 3 },
-      { player: 'p3', racer: 'vanilla-02', pos: 15 },
+      { player: 'p3', racer: 'vanilla-02', pos: 10 },
     ],
     'p1',
   );
   const asked = applyAction(s, roll('p1'));
   const ids = asked.state.pending?.options.map((o) => String(o.id)).join(',');
-  check(ids === 'hook:vanilla-01,hook:vanilla-02,roll', 'offers every other racer', ids);
+  check(ids === 'hook:vanilla-01,pass', 'offers every racer not already on its space', ids);
 
-  const aimed = applyAction(asked.state, decide('p1', 'hook:vanilla-01'));
-  check(rollAsked(aimed.state) && aimed.state.pending?.player === playerId('p1'), 'then waits for Pudge to roll');
-  check(posOf(aimed.state, 'vanilla-01') === 3, 'nothing lands before the roll');
+  const hooked = applyAction(asked.state, decide('p1', 'hook:vanilla-01'));
+  check(posOf(hooked.state, 'vanilla-01') === 10, 'warped to Pudge’s space', `pos ${posOf(hooked.state, 'vanilla-01')}`);
+  check(has(hooked.events, 'racer/warped'), 'a warp, not a move');
+  check(racerAt(hooked.state, 'vanilla-01')?.tripped === false, 'and not tripped');
+  check(hooked.events.filter((e) => e.t === 'dice/thrown').length === 1, 'the only die thrown is the main move');
+  check(has(hooked.events, 'dice/rolled') && posOf(hooked.state, 'pudge') > 10, 'Pudge still takes its main move');
 
-  const throwHook = (found: (face: number) => boolean) => {
-    for (let seed = 1; seed < 40000; seed++) {
-      const res = applyAction({ ...aimed.state, seed }, decide('p1', 'roll'));
-      const face = powerThrows(res.events)[0];
-      if (face !== undefined && found(face)) return res;
-    }
-    throw new Error('could not find a seed producing the wanted hook roll');
-  };
-
-  const hooked = throwHook((v) => v >= 5);
-  check(posOf(hooked.state, 'vanilla-01') === 10, 'a 5 or 6 warps them onto Pudge', `pos ${posOf(hooked.state, 'vanilla-01')}`);
-  check(has(hooked.events, 'racer/warped'), 'by a warp');
-  check(racerAt(hooked.state, 'vanilla-01')?.tripped === true, 'and tripped');
-  check(!has(hooked.events, 'dice/rolled') && posOf(hooked.state, 'pudge') === 10, 'Pudge takes no main move');
-  check(moverAt(hooked.state) === 'p2', 'and the turn is over');
-
-  const missed = throwHook((v) => v === 4);
-  check(
-    posOf(missed.state, 'vanilla-01') === 3 && racerAt(missed.state, 'vanilla-01')?.tripped === false,
-    'a 4 is not enough: the hook misses',
-    `pos ${posOf(missed.state, 'vanilla-01')}`,
-  );
-  check(logLines(missed.events).includes('misses'), 'logged', logLines(missed.events));
-  check(posOf(missed.state, 'pudge') === 10 && moverAt(missed.state) === 'p2', 'and the turn is wasted');
-
-  check(has(applyAction(asked.state, decide('p1', 'roll')).events, 'dice/rolled'), 'declining rolls as normal');
-
-  const down = applyAction({ ...s, board: s.board.map((r) => (String(r.racerId) === 'pudge' ? { ...r, tripped: true } : r)) }, roll('p1'));
-  check(down.state.pending === null, 'a tripped Pudge has no main move to give up');
+  const passed = applyAction(asked.state, decide('p1', 'pass'));
+  check(posOf(passed.state, 'vanilla-01') === 3 && has(passed.events, 'dice/rolled'), 'passing just rolls');
 });
 
 scenario('Techies — every space it stops on gets a mine, which goes off once', () => {
@@ -2364,24 +2340,22 @@ scenario('Abaddon — can help a tripped racer up, and moves 3 for it', () => {
   const self = rollFor(own, 'p1', 3);
   check(self.state.pending === null && racerAt(self.state, 'abaddon')?.tripped === true, 'but not itself');
 
-  // Pudge trips while answering a question of its own; Abaddon's offer comes straight after.
+  // Pudge trips while answering a question of its own — hooking Baba Yaga onto itself —
+  // and Abaddon's offer comes straight after.
   const hook = raceState(
     [
       { player: 'p1', racer: 'pudge', pos: 10 },
       { player: 'p2', racer: 'abaddon', pos: 1 },
-      { player: 'p3', racer: 'vanilla-01', pos: 3 },
+      { player: 'p3', racer: 'baba-yaga', pos: 3 },
     ],
     'p1',
   );
-  const aimed = applyAction(applyAction(hook, roll('p1')).state, decide('p1', 'hook:vanilla-01')).state;
-  let asked = applyAction(aimed, decide('p1', 'roll'));
-  for (let seed = 1; seed < 40000 && racerAt(asked.state, 'vanilla-01')?.tripped !== true; seed++) {
-    asked = applyAction({ ...aimed, seed }, decide('p1', 'roll'));
-  }
+  const asked = applyAction(applyAction(hook, roll('p1')).state, decide('p1', 'hook:baba-yaga'));
+  check(racerAt(asked.state, 'pudge')?.tripped === true, 'Pudge trips on the Baba Yaga it hooked');
   check(asked.state.pending?.player === playerId('p2'), 'Abaddon is asked after a Meat Hook', asked.state.pending?.prompt);
   const saved = applyAction(asked.state, decide('p2', 'help'));
   check(
-    racerAt(saved.state, 'vanilla-01')?.tripped === false && posOf(saved.state, 'abaddon') === 4,
+    racerAt(saved.state, 'pudge')?.tripped === false && posOf(saved.state, 'abaddon') === 4,
     'and can undo the trip',
   );
 });
