@@ -1049,6 +1049,71 @@ select {
   user-select: none;
 }
 
+.board3d-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 6;
+  border-radius: 18px;
+  overflow: hidden;
+  background: #100c1c;
+}
+
+@media (max-width: 959px) {
+  .board3d-wrap {
+    aspect-ratio: 3 / 5;
+  }
+}
+
+.board3d-wrap canvas {
+  display: block;
+  outline: none;
+}
+
+.board3d-callout {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1.5px solid;
+  background: color-mix(in srgb, #100c1c 88%, transparent);
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+  animation: board3d-callout-in 180ms ease-out;
+}
+
+@keyframes board3d-callout-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.board3d-callout-name {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.board3d-callout-roll {
+  font-size: 12px;
+  color: #f3eefc;
+  opacity: 0.85;
+}
+
+.board3d-callout-maths {
+  font-size: 11px;
+  color: #ffd23c;
+  font-weight: 700;
+}
+
 .race-layout {
   display: flex;
   flex-direction: column;

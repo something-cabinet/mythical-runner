@@ -1,6 +1,6 @@
 import { FINISH, RACE_COUNT, type RacerId, type RaceNumber } from '@mr/engine';
 import { useState } from 'react';
-import { Board } from '../components/Board';
+import { Board3D } from '../components/Board3D';
 import { ActionBar, HudBar, RacerCard, RacerToken, Standings, Waiting } from '../components/bits';
 import { abilityToken, borrowedPower, ordinal, playerName, points, powerText, racerName, rawName } from '../lib/present';
 import { legalOf, useRoomContext } from '../lib/roomContext';
@@ -87,7 +87,7 @@ export function RaceScreen() {
               <span className="arena-badge"><span className="live-dot" /> Live match</span>
             </div>
             <div className="card race-board" style={{ padding: 10 }}>
-            <Board
+            <Board3D
               view={view}
               raceNo={phase.raceNo as RaceNumber}
               positions={board.positions}
