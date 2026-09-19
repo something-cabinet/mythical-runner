@@ -1782,7 +1782,7 @@ scenario('Anti-Mage — can skip the main move to warp up to 3 ahead', () => {
   check(racerAt(fell.state, 'anti-mage')?.tripped === true, `and blinking onto TRIP at ${trap} still trips`);
 });
 
-scenario('Faceless Void — once per race, trips everyone within 5', () => {
+scenario('Faceless Void — once per race, before or after the move, trips everyone within 5', () => {
   const s = raceState(
     [
       { player: 'p1', racer: 'faceless-void', pos: 10 },
@@ -1800,6 +1800,16 @@ scenario('Faceless Void — once per race, trips everyone within 5', () => {
   check(racerAt(chrono.state, 'vanilla-02')?.tripped === true, '5 ahead: tripped');
   check(racerAt(chrono.state, 'vanilla-03')?.tripped === false, '6 ahead: safe');
   check(has(chrono.events, 'dice/rolled'), 'and Void still takes its main move');
+  check(chrono.state.pending === null, 'and is not asked again after it');
+
+  // Held back before the roll, it is offered again once the move lands, from the new space.
+  const waited = rollFor(s, 'p1', 3, { by: 'p1', choice: 'wait' });
+  check(waited.state.pending?.prompt.includes('after your move') === true, 'asked again after the move', waited.state.pending?.prompt);
+  check(waited.state.pending?.options[0]?.label === 'Trip 2', 'counting the bubble from space 13', waited.state.pending?.options[0]?.label);
+  const late = applyAction(waited.state, decide('p1', 'chrono'));
+  check(racerAt(late.state, 'vanilla-03')?.tripped === true && racerAt(late.state, 'vanilla-01')?.tripped === false, '16 is in reach now, 5 is not');
+  const saved = applyAction(waited.state, decide('p1', 'wait'));
+  check(racerAt(saved.state, 'faceless-void')?.memo['chronoUsed'] !== true && saved.state.pending === null, 'or saved for another turn');
 
   const used = raceState(
     [

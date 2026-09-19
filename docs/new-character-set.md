@@ -10,7 +10,7 @@
 - Tidehunter: Each time I tripped, I roll a dice. If it's 4 or larger, I stand up immediately.
 - Templar Assassin: I ignore the first 3 trips I received.
 - Anti-mage: I can skip my main move and _warp_ to any space within 3 spaces ahead.
-- Faceless Void: Once per round, I can trip everyone within 5 spaces near me.
+- Faceless Void: Once per round, before or after my main move, I can trip everyone within 5 spaces near me.
 - Silencer: Once per round, I can disable the ability of all racer for one turn (It mean other racer's next turn, they can only roll for main move).
 - Kunkka: After my main move, I can _warp_ back to the space I was before my main move.
 - Omniknight: Other racer within 3 spaces near me get -2 to their main move.
@@ -32,3 +32,8 @@
 - Slark: I get +1 to my main move for every silver cup, and +2 for every gold cup.
 - Ember Spirit: I can skip my main move to move 2 for each other racer within 3 spaces of me.
 - Earth Spirit: Before my main move, I can kick one racer on my space 3 spaces forward or backward.
+- Razor: Before my main move, I can link to another racer within 5 space. The link break if the distance between us is larger than 2. As long as I linked, I get +1 while they get -1 to main move.
+- Disruptor: I can skip my main move to teleport a racer to their previous location turn.
+- Lich: After my main move, I pull everyone to my space.
+- Magnus: Once per race, I can warp every racer within 5 spaces to my space.
+- Ancient Apparition:

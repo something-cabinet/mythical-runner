@@ -13,7 +13,7 @@ import { defFor, isRunning } from './shared.js';
  * Rulings the design doc leaves open, settled here:
  *
  *  - "Once per round" (Faceless Void, Silencer) means once per race: both are one-shot
- *    ultimates, used before the owner's main move.
+ *    ultimates. Silencer casts before the owner's main move; Faceless Void before or after.
  *  - "Skip my main move" powers (Earthshaker, Anti-Mage, Ember Spirit) are offered before the main move,
  *    and not at all on a tripped turn, which has no main move to skip.
  *  - A warp is not a move, so a warped racer passes nobody. It is still an arrival, though:
@@ -215,28 +215,21 @@ const antiMage = def('anti-mage', 'Anti-Mage', 'I can skip my main move and warp
 });
 
 /**
- * CHRONOSPHERE — "Once per race, before my main move, I can trip every racer within 5
- * spaces of me."
+ * CHRONOSPHERE — "Once per race, before or after my main move, I can trip every racer
+ * within 5 spaces of me."
  *
  * Either direction, teammates included — time stops for everyone in the bubble but me.
+ * Asked twice a turn while it is unspent: before the roll, and again once the main move
+ * has landed, with the bubble counted from where I stand then. Not after a tripped turn
+ * or a main move that went nowhere: there is no "after" to a move that never happened.
  */
 const facelessVoid = def(
   'faceless-void',
   'Faceless Void',
-  'Once per race, before my main move, I can trip every racer within 5 spaces of me.',
+  'Once per race, before or after my main move, I can trip every racer within 5 spaces of me.',
   {
-    beforeMainMove: (h) => {
-      if (!isRunning(h.self) || h.self.memo['chronoUsed'] === true) return;
-      const caught = inBubble(h);
-      if (caught.length === 0) return;
-      h.ask({
-        player: h.self.owner,
-        prompt: `Chronosphere? It catches ${caught.map((r) => h.nameOf(r)).join(', ')}. Once per race.`,
-        options: [option('chrono', `Trip ${caught.length}`), option('wait', 'Not yet')],
-        key: 'chrono',
-        defaultChoice: 'wait' as ChoiceId,
-      });
-    },
+    beforeMainMove: (h) => offerChrono(h, 'before'),
+    afterMainMove: (h) => offerChrono(h, 'after'),
     resume: (h, key, choice) => {
       if (key !== 'chrono' || choice !== ('chrono' as ChoiceId)) return;
       h.self.memo['chronoUsed'] = true;
@@ -245,6 +238,23 @@ const facelessVoid = def(
     },
   },
 );
+
+/** Asks Faceless Void whether to drop the Chronosphere now, if it is unspent and would catch anyone. */
+function offerChrono(h: HookCtx, when: 'before' | 'after') {
+  if (!isRunning(h.self) || h.self.memo['chronoUsed'] === true) return;
+  const caught = inBubble(h);
+  if (caught.length === 0) return;
+  h.ask({
+    player: h.self.owner,
+    prompt: `Chronosphere ${when === 'before' ? 'before' : 'after'} your move? It catches ${caught.map((r) => h.nameOf(r)).join(', ')}. Once per race.`,
+    options: [
+      option('chrono', `Trip ${caught.length}`),
+      option('wait', when === 'before' ? 'Not yet — ask after my move' : 'Save it'),
+    ],
+    key: 'chrono',
+    defaultChoice: 'wait' as ChoiceId,
+  });
+}
 
 /** Faceless Void's targets: running racers within 5 spaces that can still go down. */
 function inBubble(h: HookCtx) {
