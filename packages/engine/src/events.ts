@@ -123,6 +123,16 @@ export interface DiceThrown {
   readonly racerId: RacerId;
   /** The face, before modifiers. */
   readonly value: number;
+  /**
+   * Sides of the die, when it isn't a d6: Chaos Knight's 20, Drow Ranger's 4 or 8. Lets the
+   * client draw the right die.
+   */
+  readonly die?: number;
+  /**
+   * Each die's face, when several were thrown and combined into `value` — Ogre Magi's
+   * d3 × d3. `die` is then the sides of each one.
+   */
+  readonly dice?: readonly number[];
 }
 
 /** The settled main move: what the racer will actually move, die or no die. */

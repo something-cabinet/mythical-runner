@@ -11,6 +11,7 @@ import {
   SKIP_MAIN,
 } from '../characters/powers.js';
 import { invariant } from '../errors.js';
+import type { GameEvent } from '../events.js';
 import type { ChoiceId, PlayerId, RacerId } from '../ids.js';
 import type { Job, MoveReason, ResumeDescriptor } from '../jobs.js';
 import type { Rng } from '../rng.js';
@@ -206,11 +207,12 @@ function doMainMove(ctx: Ctx, racerId: RacerId, rng: Rng): void {
   if (hooks.skipsMainMove?.(h) === true) return;
 
   const replaced = hooks.replaceMainMove?.(h) ?? null;
-  const face = replaced ?? rollDieOf(ctx, rng, racer);
+  const thrown = replaced === null ? rollDieOf(ctx, rng, racer) : null;
+  const face = replaced ?? thrown?.face ?? 0;
   // Announce the throw before anything reacts to it: Magician's reroll and Alchemist's
   // transmute both ask a question from here on, and the player should see the die they are
   // being asked about.
-  if (replaced === null) ctx.emit({ t: 'dice/thrown', player: racer.owner, racerId, value: face });
+  if (thrown) ctx.emit(thrownEvent(racer, thrown));
   ctx.s.queue.unshift({
     t: 'roll',
     racer: racerId,
@@ -758,12 +760,36 @@ function warpRacer(
   ctx.s.queue.unshift(...tail);
 }
 
+interface Thrown {
+  readonly face: number;
+  /** Sides of the die thrown, or of each die when several were combined. */
+  readonly die: number;
+  /** Each die's face, when several were combined into `face`. */
+  readonly dice?: readonly number[];
+}
+
 /** Rolls `racer`'s own die: a d6, unless a power (Chaos Knight, Ogre Magi) says otherwise. */
-function rollDieOf(ctx: Ctx, rng: Rng, racer: MutableRacer): number {
+function rollDieOf(ctx: Ctx, rng: Rng, racer: MutableRacer): Thrown {
   const hooks = hooksFor(ctx.s, racer);
   const h = makeHookCtx(ctx, rng, racer);
-  if (hooks.throwDie) return hooks.throwDie(h);
-  return rng.roll(hooks.dieSides?.(h) ?? 6);
+  if (hooks.throwDie) {
+    const combined = hooks.throwDie(h);
+    return { face: combined.face, die: combined.sides, dice: combined.dice };
+  }
+  const sides = hooks.dieSides?.(h) ?? 6;
+  return { face: rng.roll(sides), die: sides };
+}
+
+/** A d6 is the default, so its throw leaves `die` out. */
+function thrownEvent(racer: MutableRacer, thrown: Thrown): GameEvent {
+  return {
+    t: 'dice/thrown',
+    player: racer.owner,
+    racerId: racer.racerId,
+    value: thrown.face,
+    ...(thrown.die === 6 ? {} : { die: thrown.die }),
+    ...(thrown.dice ? { dice: [...thrown.dice] } : {}),
+  };
 }
 
 /**
@@ -911,7 +937,7 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
       return lost;
     },
 
-    rollDie: (target) => rollDieOf(ctx, rng, target),
+    rollDie: (target) => rollDieOf(ctx, rng, target).face,
 
     mineSpace: (pos) => {
       const phase = ctx.s.phase;
@@ -978,8 +1004,13 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
       const was = roll.value;
       // The die belongs to whoever is taking the turn, not to whoever forced the reroll.
       const mover = findRacer(ctx.s, roll.racer);
-      roll.value = mover ? rollDieOf(ctx, rng, mover) : rng.rollD6();
-      if (mover) ctx.emit({ t: 'dice/thrown', player: mover.owner, racerId: roll.racer, value: roll.value });
+      if (mover) {
+        const thrown = rollDieOf(ctx, rng, mover);
+        roll.value = thrown.face;
+        ctx.emit(thrownEvent(mover, thrown));
+      } else {
+        roll.value = rng.rollD6();
+      }
       roll.rerolls += 1;
       roll.stage = 'reroll';
       roll.done = [];

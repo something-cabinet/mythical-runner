@@ -251,7 +251,15 @@ pieces added for wave 2, worth knowing before touching a power:
   and the board draws it as MINE!); and `h.defer`, which re-enters a power's `resume`
   once the current work is done, so Abaddon can ask a question in reaction to a trip.
 
-**Still to do:** spectators, a replay viewer, sound.
+- **Sound** — synthesised with Web Audio in
+  [lib/sound.ts](../apps/web/src/lib/sound.ts), no audio files. Race cues (hops, dice,
+  trips, powers, finishes, "your turn", "your decision") play from the board animation
+  queue so they line up with what is drawn; lobby, draft, race-start and game-end cues play
+  from [useSoundCues](../apps/web/src/lib/useSoundCues.ts). Audio starts on the first tap
+  or key press (a browser rule), stays silent in a hidden tab, and the top-bar speaker
+  button mutes it, remembered per device.
+
+**Still to do:** spectators, a replay viewer.
 
 ### Deploying
 

@@ -318,7 +318,7 @@ const ogreMagi = def(
       const a = h.rng.roll(3);
       const b = h.rng.roll(3);
       h.log(`${h.nameOf(h.self)} rolls ${a} × ${b} = ${a * b}.`);
-      return a * b;
+      return { face: a * b, sides: 3, dice: [a, b] };
     },
   },
 );

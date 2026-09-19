@@ -149,6 +149,99 @@ const PIPS: Record<number, readonly (readonly [number, number])[]> = {
   6: [[-1, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [1, 1]],
 };
 
+/** Corners of a regular polygon centred on the origin, starting straight up. */
+function polygon(sides: number, radius: number, turn = 0): [number, number][] {
+  return Array.from({ length: sides }, (_, i) => {
+    const a = -Math.PI / 2 + turn + (i * 2 * Math.PI) / sides;
+    return [radius * Math.cos(a), radius * Math.sin(a)];
+  });
+}
+
+const points = (corners: readonly (readonly [number, number])[]): string => corners.map(([x, y]) => `${x},${y}`).join(' ');
+
+/**
+ * The silhouette of a die, the way it is usually drawn flat: a d4 is a triangle, a d8 a
+ * diamond, a d10 a kite, a d12 a pentagon and a d20 a hexagon with its facets showing.
+ * A d6 is the familiar rounded square with pips. Anything else — Ogre Magi's d3s, a die
+ * with no well-known shape — is a plain square with the number on it.
+ */
+function DieShape({ die, face, size, color }: { die: number; face: number; size: number; color: string }) {
+  const stroke = { stroke: color };
+  const number = (fontSize: number, dy = 0) => (
+    <text className="dice-number num" y={dy} style={{ fontSize }}>
+      {face}
+    </text>
+  );
+  const pips = die === 6 ? PIPS[face] : undefined;
+
+  if (die === 4) {
+    const r = size * 0.72;
+    return (
+      <>
+        <polygon points={points(polygon(3, r))} className="dice-face" style={stroke} />
+        {number(size * 0.42, r * 0.14)}
+      </>
+    );
+  }
+  if (die === 8) {
+    const r = size * 0.68;
+    return (
+      <>
+        <polygon points={points(polygon(4, r))} className="dice-face" style={stroke} />
+        <line x1={-r} y1={0} x2={r} y2={0} className="dice-facet" style={stroke} />
+        {number(size * 0.46)}
+      </>
+    );
+  }
+  if (die === 10) {
+    const r = size * 0.66;
+    return (
+      <>
+        <polygon points={points([[0, -r], [r * 0.8, -r * 0.1], [0, r], [-r * 0.8, -r * 0.1]])} className="dice-face" style={stroke} />
+        {number(size * 0.42, r * 0.05)}
+      </>
+    );
+  }
+  if (die === 12) {
+    const r = size * 0.64;
+    return (
+      <>
+        <polygon points={points(polygon(5, r))} className="dice-face" style={stroke} />
+        <polygon points={points(polygon(5, r * 0.55, Math.PI / 5))} className="dice-facet" style={stroke} />
+        {number(size * 0.34, r * 0.04)}
+      </>
+    );
+  }
+  if (die === 20) {
+    const r = size * 0.64;
+    const outer = polygon(6, r);
+    // The front facet, point up, joined to the rim so the hexagon reads as a d20.
+    const inner = polygon(3, r * 0.52);
+    const spokes = inner.flatMap((p, i) =>
+      [-1, 0, 1].map((k) => [p, outer[(i * 2 + k + 6) % 6]!] as const),
+    );
+    return (
+      <>
+        <polygon points={points(outer)} className="dice-face" style={stroke} />
+        {spokes.map(([a, b], i) => (
+          <line key={i} x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} className="dice-facet" style={stroke} />
+        ))}
+        <polygon points={points(inner)} className="dice-facet" style={stroke} />
+        {number(size * 0.27, r * 0.06)}
+      </>
+    );
+  }
+  const unit = size / 3.4;
+  return (
+    <>
+      <rect x={-size / 2} y={-size / 2} width={size} height={size} rx={size * (die === 6 ? 0.2 : 0.1)} className="dice-face" style={stroke} />
+      {pips
+        ? pips.map(([px, py], i) => <circle key={i} cx={px * unit} cy={py * unit} r={size * 0.085} className="dice-pip" />)
+        : number(size * (face >= 10 ? 0.42 : 0.5))}
+    </>
+  );
+}
+
 /**
  * The latest roll as a big die in the infield. It tumbles through random faces, lands on
  * the face that was thrown, and then names who threw it. Remounted per throw via `key`.
@@ -168,27 +261,33 @@ function Die({ view, roll, x, y, size, color, portrait }: {
   color: string;
   portrait: boolean;
 }) {
-  const [face, setFace] = useState(() => (roll.instant ? roll.face : 1 + Math.floor(Math.random() * 6)));
+  // Usually one die; Ogre Magi throws two d3s and multiplies them, and both are shown.
+  const final = roll.dice ?? [roll.face];
+  const top = roll.die;
+  const [faces, setFaces] = useState(() => (roll.instant ? final : final.map(() => 1 + Math.floor(Math.random() * top))));
   const [landed, setLanded] = useState(roll.instant);
 
   // Keyed by the throw, so settling the move into an already-landed die does not set it
   // tumbling again — only a fresh throw does that.
   useEffect(() => {
     if (roll.instant) return;
-    const spin = setInterval(() => setFace((f) => ((f + 1 + Math.floor(Math.random() * 4)) % 6) + 1), 75);
+    // Always a different face each tick, so the tumble visibly churns even on a d4.
+    const spin = setInterval(
+      () => setFaces((fs) => fs.map((f) => ((f + Math.floor(Math.random() * (top - 1))) % top) + 1)),
+      75,
+    );
     const land = setTimeout(() => {
       clearInterval(spin);
-      setFace(roll.face);
+      setFaces(final);
       setLanded(true);
     }, ROLL_TUMBLE_MS);
     return () => {
       clearInterval(spin);
       clearTimeout(land);
     };
-  }, [roll.key, roll.instant, roll.face]);
+    // `final` is derived from these, so a fresh array each render must not restart the throw.
+  }, [roll.key, roll.instant, roll.face, top]);
 
-  const pips = PIPS[face];
-  const unit = size / 3.4;
   const name = racerName(view, roll.racerId);
   const by = roll.modifiedBy ? ` (${racerName(view, roll.modifiedBy)})` : '';
   const delta = (roll.move ?? roll.face) - roll.face;
@@ -201,29 +300,34 @@ function Die({ view, roll, x, y, size, color, portrait }: {
           ? `no move${by}`
           : `moves ${roll.move} instead${by}`
         : `${roll.face} ${delta < 0 ? '−' : '+'} ${Math.abs(delta)} = ${roll.move < 0 ? `−${-roll.move}` : roll.move}${by}`;
-  const labelX = portrait ? x : x + size / 2 + 22;
+  // Two dice sit side by side, each a little smaller, in the space one would take and a bit.
+  const each = final.length > 1 ? size * 0.74 : size;
+  const gap = each * 0.3;
+  const span = final.length * each + (final.length - 1) * gap;
+  const thrown =
+    roll.dice && roll.dice.length > 1
+      ? `${roll.dice.join(' × ')} = ${roll.face}`
+      : `${roll.face}${roll.die !== 6 ? ` (d${roll.die})` : ''}`;
+  const labelX = portrait ? x : x + span / 2 + 22;
   const labelY = portrait ? y + size / 2 + 30 : y - (maths ? 15 : 0);
 
   return (
     <g className={`dice${landed ? ' dice-landed' : ' dice-tumbling'}`}>
-      <title>{`${name} rolled ${roll.face}${maths ? `, moves ${roll.move}` : ''}`}</title>
-      <g transform={`translate(${x} ${y})`}>
-        <g className="dice-body">
-          <rect x={-size / 2} y={-size / 2} width={size} height={size} rx={size * 0.2} className="dice-face" style={{ stroke: color }} />
-          {pips ? (
-            pips.map(([px, py], i) => <circle key={i} cx={px * unit} cy={py * unit} r={size * 0.085} className="dice-pip" />)
-          ) : (
-            <text className="dice-number num">{face}</text>
-          )}
+      <title>{`${name} rolled ${thrown}${maths ? `, moves ${roll.move}` : ''}`}</title>
+      {faces.map((face, i) => (
+        <g key={i} transform={`translate(${x - span / 2 + each / 2 + i * (each + gap)} ${y})`}>
+          <g className="dice-body">
+            <DieShape die={roll.die} face={face} size={each} color={color} />
+          </g>
         </g>
-      </g>
+      ))}
       {landed && (
         <text className="dice-label" x={labelX} y={labelY} style={{ textAnchor: portrait ? 'middle' : 'start' }}>
           <tspan x={labelX} dy={portrait ? 0 : '-0.55em'} style={{ fill: color }}>
             {name}
           </tspan>
           <tspan x={labelX} dy="1.2em">
-            {maths ? `rolled ${roll.face}` : `rolled ${roll.face}${by}`}
+            {`rolled ${thrown}${maths ? '' : by}`}
           </tspan>
           {maths && (
             <tspan className="dice-maths num" x={labelX} dy="1.25em">

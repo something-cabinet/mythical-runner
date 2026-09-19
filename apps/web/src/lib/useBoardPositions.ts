@@ -1,6 +1,7 @@
 import type { GameEvent, RacerId, StateMessage } from '@mr/engine';
 import { useEffect, useRef, useState } from 'react';
 import type { RoomClient } from './roomClient';
+import { play, type Sound } from './sound';
 
 type Positions = Readonly<Record<string, number>>;
 
@@ -20,6 +21,10 @@ export interface ShownRoll {
   readonly racerId: RacerId;
   /** The face on the die: what was thrown, or the distance a power substituted for it. */
   readonly face: number;
+  /** Sides of the die it came off, or of each die when several were combined — see `DiceThrown`. */
+  readonly die: number;
+  /** Each die's face, when several were thrown and combined into `face` (Ogre Magi). */
+  readonly dice?: readonly number[] | undefined;
   /**
    * The main move this settles into, or null while powers are still having their say —
    * a die on the table with a question hanging over it.
@@ -34,7 +39,7 @@ export interface ShownRoll {
 
 type Step =
   | { readonly t: 'move'; readonly racer: RacerId; readonly to: number; readonly hop: boolean }
-  | { readonly t: 'throw'; readonly racer: RacerId; readonly value: number }
+  | { readonly t: 'throw'; readonly racer: RacerId; readonly value: number; readonly die: number; readonly dice?: readonly number[] | undefined }
   | {
       readonly t: 'roll';
       readonly racer: RacerId;
@@ -43,7 +48,31 @@ type Step =
       readonly replaced?: boolean | undefined;
       readonly modifiedBy?: RacerId | undefined;
     }
-  | { readonly t: 'turn' };
+  | { readonly t: 'turn' }
+  | { readonly t: 'cue'; readonly sound: Sound };
+
+/**
+ * The sound a race event makes, if any. Played from the queue rather than on arrival, so a
+ * trip is heard when it is drawn, not while the racer is still walking towards the banana.
+ */
+function cueFor(e: GameEvent, you: string | undefined): Sound | null {
+  switch (e.t) {
+    case 'turn/began':
+      return e.player === you ? 'yourTurn' : null;
+    case 'decision/requested':
+      return e.player === you ? 'decision' : null;
+    case 'racer/tripped':
+      return 'trip';
+    case 'racer/eliminated':
+      return 'eliminated';
+    case 'ability/triggered':
+      return 'ability';
+    case 'racer/finished':
+      return e.player === you ? 'finishMine' : 'finish';
+    default:
+      return null;
+  }
+}
 
 function truth(message: StateMessage | null): Positions {
   const out: Record<string, number> = {};
@@ -72,7 +101,7 @@ function settle(
   if (prev && prev.racerId === step.racer && prev.move === null && prev.face === face) {
     return { ...prev, ...settled };
   }
-  return { key, racerId: step.racer, face, ...settled, instant };
+  return { key, racerId: step.racer, face, die: 6, ...settled, instant };
 }
 
 export interface BoardAnimation {
@@ -143,12 +172,18 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
       let delay = 0;
       if (next.t === 'move') {
         setPositions((prev) => ({ ...prev, [next.racer]: next.to }));
+        if (next.hop) play('hop');
         delay = !next.hop ? 0 : queue.current.length > BACKLOG_FAST ? HOP_FAST_MS : HOP_MS;
+      } else if (next.t === 'cue') {
+        play(next.sound);
       } else if (next.t === 'throw') {
+        play('throw');
         show({
           key: ++rollKey.current,
           racerId: next.racer,
           face: next.value,
+          die: next.die,
+          dice: next.dice,
           move: null,
           replaced: false,
           instant: false,
@@ -173,13 +208,20 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
       timer.current = setTimeout(drain, delay);
     };
 
-    const onEvents = (events: readonly GameEvent[]): void => {
+    const onEvents = (events: readonly GameEvent[], msg: StateMessage): void => {
       if (reduced.matches || document.hidden) {
         queue.current = [];
         if (timer.current) clearTimeout(timer.current);
         timer.current = null;
         setPositions(truth(latest.current));
         setAnimating(false);
+        // Nobody is looking at a hidden tab. Under reduced motion there is no replay to
+        // sync with, so each distinct cue in the batch plays once, straight away.
+        if (!document.hidden) {
+          const you = msg.view.you;
+          const cues = new Set(events.map((e) => cueFor(e, you)));
+          for (const cue of cues) if (cue) play(cue);
+        }
         // Same bookkeeping as the animated path, just without the waiting: the die ends up
         // wherever this batch of events leaves it, and a new turn clears it.
         let next = shown.current;
@@ -190,6 +232,8 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
               key: ++rollKey.current,
               racerId: e.racerId,
               face: e.value,
+              die: e.die ?? 6,
+              dice: e.dice,
               move: null,
               replaced: false,
               instant: true,
@@ -214,13 +258,15 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
         return;
       }
 
+      const you = msg.view.you;
       for (const e of events) {
+        const cue = cueFor(e, you);
         if (e.t === 'race/started') {
           // A new race: everyone is back on Start. Drop any stale hops from the last race.
           queue.current = [];
           show(null);
         } else if (e.t === 'dice/thrown') {
-          queue.current.push({ t: 'throw', racer: e.racerId, value: e.value });
+          queue.current.push({ t: 'throw', racer: e.racerId, value: e.value, die: e.die ?? 6, dice: e.dice });
         } else if (e.t === 'dice/rolled') {
           queue.current.push({
             t: 'roll',
@@ -237,6 +283,7 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
         } else if (e.t === 'racer/warped') {
           queue.current.push({ t: 'move', racer: e.racerId, to: e.to, hop: false });
         }
+        if (cue) queue.current.push({ t: 'cue', sound: cue });
       }
 
       if (queue.current.length === 0) {

@@ -7,6 +7,16 @@ import type { DeepMutable, MutableState } from '../reducer/working.js';
 
 export type MutableRacer = DeepMutable<RacerState>;
 
+/** Several dice thrown and combined into one face, e.g. Ogre Magi's d3 × d3. */
+export interface CombinedThrow {
+  /** The face that counts. */
+  readonly face: number;
+  /** Sides of each die thrown. */
+  readonly sides: number;
+  /** Each die's face, in the order thrown. */
+  readonly dice: readonly number[];
+}
+
 /**
  * Everything a character's handler is allowed to do.
  *
@@ -229,10 +239,11 @@ export interface Hooks {
   dieSides?(h: HookCtx): number;
 
   /**
-   * Ogre Magi: throws `self`'s die some other way than one die of `dieSides` faces, and
-   * returns the face. Wins over `dieSides`, and applies everywhere it does.
+   * Ogre Magi: throws `self`'s die some other way than one die of `dieSides` faces. Returns
+   * the face that counts, plus the dice behind it so the board can show them. Wins over
+   * `dieSides`, and applies everywhere it does.
    */
-  throwDie?(h: HookCtx): number;
+  throwDie?(h: HookCtx): CombinedThrow;
 
   /**
    * Replaces the main move entirely, e.g. Legs' "skip rolling and move 5 instead".

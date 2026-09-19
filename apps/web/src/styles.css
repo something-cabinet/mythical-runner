@@ -419,6 +419,24 @@ select {
   text-overflow: ellipsis;
 }
 
+.sound-toggle {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: inherit;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.sound-toggle[aria-pressed='false'] {
+  opacity: 0.55;
+}
+
 .conn-dot {
   width: 10px;
   height: 10px;
@@ -926,6 +944,17 @@ select {
   fill: #fffdf7;
   stroke-width: 7;
   filter: drop-shadow(0 6px 10px rgb(0 0 0 / 45%));
+}
+
+.board .dice-face {
+  stroke-linejoin: round;
+}
+
+.board .dice-facet {
+  fill: none;
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+  opacity: 0.45;
 }
 
 .board .dice-pip,

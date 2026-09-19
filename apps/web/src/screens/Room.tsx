@@ -13,8 +13,10 @@ import {
 import { RoomClient } from '../lib/roomClient';
 import { RoomContext, useRoomContext, type RoomContextValue } from '../lib/roomContext';
 import { navigate, roomLink } from '../lib/router';
+import { isMuted, setMuted, subscribeMuted } from '../lib/sound';
 import { useBoardPositions } from '../lib/useBoardPositions';
 import { useEventLog } from '../lib/useEventLog';
+import { useSoundCues } from '../lib/useSoundCues';
 import { CommitScreen } from './Commit';
 import { DraftScreen } from './Draft';
 import { GameOverScreen } from './GameOver';
@@ -130,6 +132,7 @@ function Connected({ code, credentials, name }: { code: string; credentials: Cre
   // the message that changes screens.
   const log = useEventLog(client);
   const board = useBoardPositions(client, snapshot.message);
+  useSoundCues(client);
   const holding = useFinishHold(snapshot.message?.view.phase.t, board.animating);
 
   if (snapshot.fatal) {
@@ -269,9 +272,23 @@ function TopBar({ wide }: { wide: boolean }) {
         </button>
         <span className="phase-label">{label}</span>
         {message.turnSeconds > 0 && <Countdown deadline={view.deadline} />}
-        <span className="conn-dot" data-status={snapshot.status} role="img" aria-label={statusText} title={statusText} />
+        <SoundToggle />
+        <span className="conn-dot"data-status={snapshot.status} role="img" aria-label={statusText} title={statusText} />
       </div>
     </header>
+  );
+}
+
+function SoundToggle() {
+  const muted = useSyncExternalStore(subscribeMuted, isMuted);
+  const label = muted ? 'Turn sound on' : 'Turn sound off';
+  return (
+    <button type="button" className="sound-toggle" onClick={() => setMuted(!muted)} aria-label="Sound" aria-pressed={!muted} title={label}>
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor" />
+        {muted ? <path d="M17 9l5 6M22 9l-5 6" /> : <path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" />}
+      </svg>
+    </button>
   );
 }
 
