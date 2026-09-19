@@ -218,6 +218,20 @@ export function abilityToken(
   }
 }
 
+/**
+ * Legion Commander's duel prizes a racer holds: +1 to every main move for each duel won,
+ * whoever won it — the Commander or the racer it challenged. Null when there are none.
+ */
+export function duelBonusToken(racer: RacerState): { label: string; title: string } | null {
+  const bonus = racer.memo['mainMoveBonus'];
+  if (typeof bonus !== 'number' || bonus === 0) return null;
+  const duels = Math.abs(bonus);
+  return {
+    label: `duel ${bonus > 0 ? '+' : '−'}${duels}`,
+    title: `Won ${duels} Legion Commander duel${duels === 1 ? '' : 's'}: ${bonus > 0 ? '+' : '−'}${duels} to every main move this race`,
+  };
+}
+
 /** "Classic + Dota", in the sets' canonical order. */
 export function setNames(sets: readonly CharacterSetId[]): string {
   return CHARACTER_SETS.filter((x) => sets.includes(x.id)).map((x) => x.name).join(' + ');
