@@ -5,7 +5,7 @@ import { FINISH, START } from '../../tracks/index.js';
 import { defFor, isRunning } from './shared.js';
 
 /**
- * The Dota set: twenty-two heroes from Dota 2, designed in `docs/new-character-set.md`.
+ * The Dota set: twenty-four heroes from Dota 2, designed in `docs/new-character-set.md`.
  *
  * Same conventions as the classic set: optional ("I can") powers ask and default to
  * declining, log lines name racers with `h.nameOf`, and one `h.log` per happening.
@@ -14,7 +14,7 @@ import { defFor, isRunning } from './shared.js';
  *
  *  - "Once per round" (Faceless Void, Silencer) means once per race: both are one-shot
  *    ultimates, used before the owner's main move.
- *  - "Skip my main move" powers (Earthshaker, Anti-Mage) are offered before the main move,
+ *  - "Skip my main move" powers (Earthshaker, Anti-Mage, Ember Spirit) are offered before the main move,
  *    and not at all on a tripped turn, which has no main move to skip.
  *  - A warp is not a move, so a warped racer passes nobody. It is still an arrival, though:
  *    "racers are stopped on a space after they've finished moving onto it, or otherwise
@@ -29,13 +29,15 @@ const def = defFor('dota');
  * JINADA — "When I stop on a space with exactly one other racer, I steal 1 point from
  * them."
  *
- * Point chips only, like every power that takes points: cups are never touched. A victim
- * with no chips has nothing to steal, and a teammate isn't a victim.
+ * Point chips only, like every power that takes points: cups are never touched, so a
+ * victim holding nothing but cups keeps every point. The wording says "point chip" for
+ * that reason. A victim with no chips has nothing to steal, and a teammate isn't a
+ * victim.
  */
 const bountyHunter = def(
   'bounty-hunter',
   'Bounty Hunter',
-  'When I stop on a space with exactly one other racer, I steal 1 point from them.',
+  'When I stop on a space with exactly one other racer, I steal 1 point chip from them. Cups are safe.',
   {
     onStop: (h) => {
       if (!isRunning(h.self)) return;
@@ -354,16 +356,35 @@ const dotaAlchemist = def(
 );
 
 /**
- * DUEL — "After my main move, I can shout DUEL! at another racer on my space. We roll our
- * dice, and whoever rolls highest gets +1 to their main move for the rest of the race. I
- * win ties."
+ * DUEL — "Whenever a racer shares my space, I can shout DUEL! We roll our dice, and
+ * whoever rolls highest gets +1 to their main move for the rest of the race. I win ties."
+ *
+ * Triggered like the Duelist's: on the stop that brings someone onto this space as well
+ * as on Legion Commander's own, so it fires on another player's turn too and the question
+ * goes to a player who is not the active one. Every stop that results in sharing offers
+ * the duel again, so several are possible in a turn.
  */
 const legionCommander = def(
   'legion-commander',
   'Legion Commander',
-  'After my main move, I can shout DUEL! at another racer on my space. We roll our dice, and whoever rolls highest gets +1 to their main move for the rest of the race. I win ties.',
+  'Whenever a racer shares my space, I can shout DUEL! We roll our dice, and whoever rolls highest gets +1 to their main move for the rest of the race. I win ties.',
   {
-    afterMainMove: (h) => {
+    onOtherStops: (h, other) => {
+      if (!isRunning(h.self) || !isRunning(other) || other.pos !== h.self.pos) return;
+      if (h.self.pos === FINISH) return;
+      h.ask({
+        player: h.self.owner,
+        prompt: `${h.nameOf(other)} is sharing your space. Shout DUEL? The winner gets +1 to every main move this race.`,
+        options: [
+          option(`duel:${other.racerId}`, 'DUEL!', racerTarget(other.racerId)),
+          option('pass', 'Not now'),
+        ],
+        key: 'duel',
+        defaultChoice: 'pass' as ChoiceId,
+      });
+    },
+
+    onStop: (h) => {
       if (!isRunning(h.self) || h.self.pos === FINISH) return;
       const foes = h.sharing().filter(isRunning);
       if (foes.length === 0) return;
@@ -630,6 +651,103 @@ const abaddon = def(
   },
 );
 
+/**
+ * SLEIGHT OF FIST — "I can skip my main move to move 2 for each other racer within 3
+ * spaces of me."
+ *
+ * A dash through the pack: worth nothing out in front alone, and worth more than any roll
+ * in traffic, so Ember Spirit wants to be where the crowd is — the opposite of Drow.
+ *
+ * Either direction, tripped racers and teammates included: the dash is measured by who is
+ * nearby, not by who can be hit. Counted again when the answer comes back, so a racer that
+ * moved in between counts as they stand.
+ */
+const emberSpirit = def(
+  'ember-spirit',
+  'Ember Spirit',
+  'I can skip my main move to move 2 for each other racer within 3 spaces of me.',
+  {
+    beforeMainMove: (h) => {
+      if (!isRunning(h.self) || h.self.tripped) return;
+      const near = withinThree(h);
+      if (near.length === 0) return;
+      h.ask({
+        player: h.self.owner,
+        prompt: `Sleight of Fist? ${near.length} racer${near.length === 1 ? ' is' : 's are'} within 3 spaces.`,
+        options: [
+          option('dash', `Sleight of Fist (+${near.length * 2})`),
+          option('roll', 'Roll normally'),
+        ],
+        key: 'sleight',
+        defaultChoice: 'roll' as ChoiceId,
+      });
+    },
+    resume: (h, key, choice) => {
+      if (key !== 'sleight' || choice !== ('dash' as ChoiceId)) return;
+      const near = withinThree(h);
+      h.skipMainMove();
+      if (near.length === 0) return;
+      h.log(`${h.nameOf(h.self)} dashes through ${near.length} racer${near.length === 1 ? '' : 's'}: ${near.length * 2} spaces.`);
+      h.move(h.self, near.length * 2);
+    },
+  },
+);
+
+/** Ember Spirit's crowd: running racers within 3 spaces, itself excluded. */
+function withinThree(h: HookCtx) {
+  return h
+    .running()
+    .filter((r) => r.racerId !== h.self.racerId && Math.abs(r.pos - h.self.pos) <= 3);
+}
+
+/**
+ * BOULDER SMASH — "Before my main move, I can kick one racer on my space 3 spaces forward
+ * or backward."
+ *
+ * The direction is Earth Spirit's choice, which is the whole power: a kick backwards
+ * buries a rival, a kick forwards is a favour — or a shove over the finish line, cup and
+ * all. A kick is a move, so it can pass racers and the space it lands on fires.
+ *
+ * A racer already on Start has nowhere to go backwards, so only the forward kick is
+ * offered for them.
+ */
+const earthSpirit = def(
+  'earth-spirit',
+  'Earth Spirit',
+  'Before my main move, I can kick one racer on my space 3 spaces forward or backward.',
+  {
+    beforeMainMove: (h) => {
+      if (!isRunning(h.self) || h.self.tripped) return;
+      const targets = h.sharing().filter(isRunning);
+      if (targets.length === 0) return;
+      h.ask({
+        player: h.self.owner,
+        prompt: 'Boulder Smash? Kick one racer on your space 3 spaces.',
+        options: [
+          ...targets.flatMap((r) => [
+            option(`smash:${r.racerId}:1`, `Kick ${h.nameOf(r)} 3 forward`, racerTarget(r.racerId)),
+            ...(r.pos > START
+              ? [option(`smash:${r.racerId}:-1`, `Kick ${h.nameOf(r)} 3 back`, racerTarget(r.racerId))]
+              : []),
+          ]),
+          option('pass', 'Leave them be'),
+        ],
+        key: 'smash',
+        defaultChoice: 'pass' as ChoiceId,
+      });
+    },
+    resume: (h, key, choice) => {
+      if (key !== 'smash' || choice === ('pass' as ChoiceId)) return;
+      const [, targetId, dir] = String(choice).split(':');
+      const target = h.racers().find((r) => r.racerId === racerId(String(targetId)));
+      if (!target || !isRunning(target)) return;
+      const distance = dir === '-1' ? -3 : 3;
+      h.log(`${h.nameOf(h.self)} smashes ${h.nameOf(target)} 3 spaces ${distance < 0 ? 'back' : 'forward'}.`);
+      h.move(target, distance);
+    },
+  },
+);
+
 export const DOTA_RACERS: readonly RacerDef[] = [
   bountyHunter,
   spiritBreaker,
@@ -653,4 +771,6 @@ export const DOTA_RACERS: readonly RacerDef[] = [
   techies,
   chaosKnight,
   abaddon,
+  emberSpirit,
+  earthSpirit,
 ];

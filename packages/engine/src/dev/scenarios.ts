@@ -1486,7 +1486,7 @@ scenario('Sets — a new room drafts from the classic set, and the host can mix 
   );
 });
 
-scenario('Sets — Dota alone has 22 racers: enough for five players, not six', () => {
+scenario('Sets — Dota alone has 24 racers: exactly a full deck for six players', () => {
   const lobby = lobbyWith('p1', 'p2', 'p3', 'p4', 'p5');
   const five = applyAction(applyAction(lobby, toggle('p1', 'dota')).state, toggle('p1', 'classic')).state;
   check(
@@ -1494,18 +1494,15 @@ scenario('Sets — Dota alone has 22 racers: enough for five players, not six', 
     'five players may start',
   );
 
+  // Six players draft 24 racers, which is the whole Dota set — every card is dealt and
+  // nothing is left undrafted, so this is the exact edge of what one set can seat.
   const six = applyAction(five, { t: 'lobby/join', by: playerId('p6'), name: 'P6' }).state;
   check(
-    legalActions(six, playerId('p1')).every((a) => a.t !== 'lobby/start'),
-    'six players are not offered Start',
+    legalActions(six, playerId('p1')).some((a) => a.t === 'lobby/start'),
+    'and so may six',
   );
-  check(throws(() => applyAction(six, { t: 'lobby/start', by: playerId('p1') })), 'and cannot start');
-
-  const mixed = applyAction(six, toggle('p1', 'classic')).state;
-  check(
-    legalActions(mixed, playerId('p1')).some((a) => a.t === 'lobby/start'),
-    'adding classic back makes room for them',
-  );
+  const dealt = playGame({ seed: 9200, playerCount: 6, sets: ['dota'] }).state;
+  check(Object.values(dealt.hands).flat().length === 24, 'the whole set is dealt out', String(Object.values(dealt.hands).flat().length));
 });
 
 scenario('Sets — the draft deals only from the chosen sets', () => {
@@ -1518,7 +1515,7 @@ scenario('Sets — the draft deals only from the chosen sets', () => {
     drafted.filter((r) => racerSet(r) !== 'dota').join(','),
   );
 
-  const mixed = playGame({ seed: 9002, playerCount: 6, sets: ['classic', 'dota'] }).state;
+  const mixed = playGame({ seed: 9003, playerCount: 6, sets: ['classic', 'dota'] }).state;
   const pool = Object.values(mixed.hands).flat();
   check(pool.length === 24, 'six full hands from the mixed deck', String(pool.length));
   check(pool.every((r) => racerSet(r) !== undefined), 'all real racers');
@@ -1885,7 +1882,7 @@ scenario('Alchemist (Dota) — double points from star spaces and cups', () => {
   check(pointsOf(s, 'p2') === 1, 'the silver is untouched', String(pointsOf(s, 'p2')));
 });
 
-scenario('Legion Commander — DUEL! after the main move; the winner gets +1 for the race', () => {
+scenario('Legion Commander — DUEL! whenever a racer shares its space; the winner gets +1 for the race', () => {
   const s = raceState(
     [
       { player: 'p1', racer: 'legion-commander', pos: 3 },
@@ -1897,6 +1894,26 @@ scenario('Legion Commander — DUEL! after the main move; the winner gets +1 for
   const bonuses = ['legion-commander', 'vanilla-01'].map((r) => racerAt(duel.state, r)?.memo['mainMoveBonus'] ?? 0);
   check(bonuses.filter((b) => b === 1).length === 1, 'exactly one of them wins +1', bonuses.join(','));
   check(logLines(duel.events).includes('DUEL!'), 'logged');
+
+  // Like the Duelist: someone landing on Legion Commander offers the duel too, on their
+  // turn, and it is Legion Commander's owner who answers.
+  const landedOn = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: 3 },
+      { player: 'p2', racer: 'legion-commander', pos: 7 },
+    ],
+    'p1',
+  );
+  const { state: mid } = rollFor(landedOn, 'p1', 4);
+  check(mid.pending !== null, 'suspended when the other racer stops on it');
+  check(
+    mid.pending?.player === playerId('p2'),
+    "the NON-active player (Legion Commander's owner) is asked",
+    `asked ${String(mid.pending?.player)}`,
+  );
+  const shouted = applyAction(mid, decide('p2', 'duel:vanilla-01'));
+  const won = ['legion-commander', 'vanilla-01'].map((r) => racerAt(shouted.state, r)?.memo['mainMoveBonus'] ?? 0);
+  check(won.filter((b) => b === 1).length === 1, 'and the duel still pays +1 to exactly one of them', won.join(','));
 
   const prize = raceState(
     [
@@ -2185,6 +2202,86 @@ scenario('Abaddon — can help a tripped racer up, and moves 3 for it', () => {
     racerAt(saved.state, 'vanilla-01')?.tripped === false && posOf(saved.state, 'abaddon') === 4,
     'and can undo the trip',
   );
+});
+
+scenario('Ember Spirit — skips the main move to dash 2 per racer within 3 spaces', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'ember-spirit', pos: 5 },
+      { player: 'p2', racer: 'vanilla-01', pos: 2 },
+      { player: 'p3', racer: 'vanilla-02', pos: 8 },
+      { player: 'p4', racer: 'vanilla-03', pos: 20 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(s, roll('p1'));
+  check(asked.state.pending?.prompt.includes('Sleight of Fist') === true, 'asks before rolling');
+
+  const dash = applyAction(asked.state, decide('p1', 'dash'));
+  check(posOf(dash.state, 'ember-spirit') === 9, 'two racers within 3, either side: moves 4', `pos ${posOf(dash.state, 'ember-spirit')}`);
+  check(!has(dash.events, 'dice/thrown'), 'and never rolls');
+
+  const declined = applyAction(asked.state, decide('p1', 'roll'));
+  check(has(declined.events, 'dice/rolled'), 'declining rolls as normal');
+
+  const alone = applyAction(
+    raceState(
+      [
+        { player: 'p1', racer: 'ember-spirit', pos: 5 },
+        { player: 'p2', racer: 'vanilla-01', pos: 20 },
+      ],
+      'p1',
+    ),
+    roll('p1'),
+  );
+  check(alone.state.pending === null, 'nobody near, nothing to dash through');
+});
+
+scenario('Earth Spirit — kicks a racer on its space 3 spaces, its choice of direction', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'earth-spirit', pos: 5 },
+      { player: 'p2', racer: 'vanilla-01', pos: 5 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(s, roll('p1'));
+  check(asked.state.pending?.prompt.includes('Boulder Smash') === true, 'asks before rolling');
+  check(asked.state.pending?.options.length === 3, 'forward, back, or leave them', String(asked.state.pending?.options.length));
+
+  const back = applyAction(asked.state, decide('p1', 'smash:vanilla-01:-1'));
+  check(posOf(back.state, 'vanilla-01') === 2, 'kicked back 3', `pos ${posOf(back.state, 'vanilla-01')}`);
+  check(has(back.events, 'dice/rolled'), 'and the main move still happens');
+
+  const forward = applyAction(asked.state, decide('p1', 'smash:vanilla-01:1'));
+  check(posOf(forward.state, 'vanilla-01') === 8, 'or forward 3', `pos ${posOf(forward.state, 'vanilla-01')}`);
+
+  const declined = applyAction(asked.state, decide('p1', 'pass'));
+  check(posOf(declined.state, 'vanilla-01') === 5, 'declining leaves them put');
+
+  const onStart = applyAction(
+    raceState(
+      [
+        { player: 'p1', racer: 'earth-spirit', pos: START },
+        { player: 'p2', racer: 'vanilla-01', pos: START },
+      ],
+      'p1',
+    ),
+    roll('p1'),
+  );
+  check(onStart.state.pending?.options.length === 2, 'no kicking anyone back off the Start space', String(onStart.state.pending?.options.length));
+
+  const empty = applyAction(
+    raceState(
+      [
+        { player: 'p1', racer: 'earth-spirit', pos: 5 },
+        { player: 'p2', racer: 'vanilla-01', pos: 9 },
+      ],
+      'p1',
+    ),
+    roll('p1'),
+  );
+  check(empty.state.pending === null, 'and nothing to kick when alone');
 });
 
 // --- Report -----------------------------------------------------------------
