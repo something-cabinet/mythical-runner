@@ -1011,6 +1011,161 @@ select {
   dominant-baseline: central;
 }
 
+/* ---- Powers ------------------------------------------------------------- */
+
+/* Holds the board and anything laid over it; the callout sizes itself in `cqw` of this. */
+.board-wrap {
+  position: relative;
+  container-type: inline-size;
+}
+
+/* A power going off: the racer pops and a ring in its seat colour bursts off it. */
+.board .piece-pop {
+  animation: piece-pop 420ms cubic-bezier(0.3, 1.8, 0.5, 1);
+}
+
+@keyframes piece-pop {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.35) rotate(-8deg);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.board .piece-burst circle {
+  fill: none;
+  stroke-width: 6;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: piece-burst 650ms ease-out forwards;
+  pointer-events: none;
+}
+
+.board .piece-burst .piece-burst-inner {
+  stroke: #fff;
+  stroke-width: 3;
+  animation-delay: 90ms;
+  opacity: 0;
+}
+
+@keyframes piece-burst {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+.power-area {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.power-callout {
+  display: flex;
+  align-items: center;
+  max-width: 100%;
+  border-radius: 1.4em;
+  background: #2a2238;
+  color: #f3eefc;
+  border: 3px solid var(--seat);
+  box-shadow:
+    0 0 0 3px #1b1724,
+    0 0 24px color-mix(in srgb, var(--seat) 55%, transparent),
+    0 8px 18px rgb(0 0 0 / 45%);
+  line-height: 1.2;
+  animation: power-callout 1800ms ease-out forwards;
+}
+
+.power-callout-instant {
+  animation: power-callout-fade 1800ms linear forwards;
+}
+
+@keyframes power-callout {
+  0% {
+    transform: scale(0.6) translateY(12%);
+    opacity: 0;
+  }
+  12% {
+    transform: scale(1.06);
+    opacity: 1;
+  }
+  20% {
+    transform: scale(1);
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes power-callout-fade {
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.power-callout-face {
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--seat);
+  color: #1a1523;
+  font-weight: 850;
+  box-shadow: 0 0 0 2px #1b1724;
+}
+
+.power-callout-face img {
+  width: 84%;
+  height: 84%;
+  object-fit: contain;
+  border-radius: 50%;
+}
+
+.power-callout-name {
+  color: var(--seat);
+  font-weight: 900;
+  font-size: 0.75em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.power-callout-text {
+  font-weight: 800;
+  padding-right: 0.4em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board .piece-pop {
+    animation: none;
+  }
+
+  .board .piece-burst {
+    display: none;
+  }
+
+  .power-callout {
+    animation-name: power-callout-fade;
+  }
+}
+
 /* ---- Field (racers in this race) --------------------------------------- */
 
 .field-row {
@@ -1069,6 +1224,32 @@ select {
 .log li[data-tone='turn'] {
   border-color: var(--accent-bg);
   font-weight: 650;
+}
+
+/* Heads each turn: a rule with the turn's number and who is taking it. */
+.log li[data-tone='divider'] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding-left: 0;
+  border-left: 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.log li[data-tone='divider']::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.log li[data-tone='divider']:first-child {
+  margin-top: 0;
 }
 
 /* ---- Action bar --------------------------------------------------------- */

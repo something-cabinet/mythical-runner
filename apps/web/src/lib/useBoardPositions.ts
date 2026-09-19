@@ -13,6 +13,25 @@ const HOP_FAST_MS = 60;
 /** How long the die tumbles, then how long the result sits before the racer moves. */
 export const ROLL_TUMBLE_MS = 650;
 const ROLL_HOLD_MS = 550;
+/** How long a power holds the queue so everyone sees who just did something. */
+const POWER_MS = 450;
+/**
+ * A power that also fired last turn (Gunk gooping every mover) is old news: it still
+ * flashes, but barely holds anything up.
+ */
+const POWER_REPEAT_MS = 150;
+/** How long the callout for a power stays up. Matches the `power-callout` animation. */
+export const POWER_SHOW_MS = 1800;
+
+/** The power that just happened, for the board to call out. */
+export interface ShownPower {
+  /** Changes with every power, so the burst and callout replay. */
+  readonly key: number;
+  readonly racerId: RacerId;
+  readonly text: string;
+  /** Shown without animation, e.g. under reduced motion. */
+  readonly instant: boolean;
+}
 
 /** The most recent roll, for the board to show as a die. */
 export interface ShownRoll {
@@ -48,6 +67,7 @@ type Step =
       readonly replaced?: boolean | undefined;
       readonly modifiedBy?: RacerId | undefined;
     }
+  | { readonly t: 'power'; readonly racer: RacerId; readonly text: string }
   | { readonly t: 'turn' }
   | { readonly t: 'cue'; readonly sound: Sound };
 
@@ -110,6 +130,15 @@ export interface BoardAnimation {
   /** True while queued moves are still playing out. */
   readonly animating: boolean;
   readonly roll: ShownRoll | null;
+  readonly power: ShownPower | null;
+}
+
+/**
+ * Whether an event is a racer's own power going off. Arrow spaces log through the same
+ * event, but a space shoving a racer is the track, not the racer.
+ */
+function isPower(e: GameEvent): e is Extract<GameEvent, { t: 'ability/triggered' }> {
+  return e.t === 'ability/triggered' && e.hook !== 'space';
 }
 
 /**
@@ -138,13 +167,22 @@ export interface BoardAnimation {
  * belongs to the turn that made it, and leaving it lingering over the infield reads as part
  * of the turn now starting.
  *
+ * An `ability/triggered` queues a short beat too, so a power is seen going off where it
+ * happens in the turn — see `POWER_MS`.
+ *
  * Honours `prefers-reduced-motion` by skipping the replay entirely; the die then just shows
- * the latest roll.
+ * the latest roll, and the last power in the batch is called out without animation.
  */
 export function useBoardPositions(client: RoomClient, message: StateMessage | null): BoardAnimation {
   const [positions, setPositions] = useState<Positions>(() => truth(message));
   const [animating, setAnimating] = useState(false);
   const [roll, setRoll] = useState<ShownRoll | null>(null);
+  const [power, setPower] = useState<ShownPower | null>(null);
+  const powerKey = useRef(0);
+  const powerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Turns since the race began, and the last turn each racer's power flashed on.
+  const turnNo = useRef(0);
+  const flashedOn = useRef(new Map<RacerId, number>());
   // Mirrors `roll`, so the drain can read what is on the table without waiting for React.
   const shown = useRef<ShownRoll | null>(null);
   const rollKey = useRef(0);
@@ -159,6 +197,12 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
     const show = (next: ShownRoll | null): void => {
       shown.current = next;
       setRoll(next);
+    };
+
+    const callOut = (racerId: RacerId, text: string, instant: boolean): void => {
+      setPower({ key: ++powerKey.current, racerId, text, instant });
+      if (powerTimer.current) clearTimeout(powerTimer.current);
+      powerTimer.current = setTimeout(() => setPower(null), POWER_SHOW_MS);
     };
 
     const drain = (): void => {
@@ -176,6 +220,13 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
         delay = !next.hop ? 0 : queue.current.length > BACKLOG_FAST ? HOP_FAST_MS : HOP_MS;
       } else if (next.t === 'cue') {
         play(next.sound);
+      } else if (next.t === 'power') {
+        play('ability');
+        callOut(next.racer, next.text, false);
+        const last = flashedOn.current.get(next.racer);
+        const repeat = last !== undefined && last >= turnNo.current - 1;
+        flashedOn.current.set(next.racer, turnNo.current);
+        delay = queue.current.length > BACKLOG_FAST ? HOP_FAST_MS : repeat ? POWER_REPEAT_MS : POWER_MS;
       } else if (next.t === 'throw') {
         play('throw');
         show({
@@ -203,6 +254,7 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
               ? ROLL_TUMBLE_MS + ROLL_HOLD_MS
               : ROLL_HOLD_MS;
       } else {
+        turnNo.current++;
         show(null);
       }
       timer.current = setTimeout(drain, delay);
@@ -255,6 +307,8 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
           }
         }
         show(next);
+        const lastPower = events.filter(isPower).at(-1);
+        if (lastPower && !document.hidden) callOut(lastPower.racerId, lastPower.text, true);
         return;
       }
 
@@ -265,6 +319,12 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
           // A new race: everyone is back on Start. Drop any stale hops from the last race.
           queue.current = [];
           show(null);
+          turnNo.current = 0;
+          flashedOn.current.clear();
+        } else if (isPower(e)) {
+          // Plays its own sound, so it takes the place of the cue.
+          queue.current.push({ t: 'power', racer: e.racerId, text: e.text });
+          continue;
         } else if (e.t === 'dice/thrown') {
           queue.current.push({ t: 'throw', racer: e.racerId, value: e.value, die: e.die ?? 6, dice: e.dice });
         } else if (e.t === 'dice/rolled') {
@@ -298,6 +358,7 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
     return () => {
       off();
       if (timer.current) clearTimeout(timer.current);
+      if (powerTimer.current) clearTimeout(powerTimer.current);
       timer.current = null;
       queue.current = [];
     };
@@ -310,5 +371,5 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
     if (!timer.current && queue.current.length === 0) setPositions(truth(latest.current));
   }, [boardKey]);
 
-  return { positions, animating, roll };
+  return { positions, animating, roll, power };
 }

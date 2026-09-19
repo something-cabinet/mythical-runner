@@ -280,7 +280,8 @@ export function listNames(view: PlayerView, pids: readonly PlayerId[]): string {
 
 export interface LogLine {
   readonly text: string;
-  readonly tone: 'plain' | 'good' | 'bad' | 'power' | 'turn';
+  /** `divider` heads a turn's lines; see `useEventLog`. */
+  readonly tone: 'plain' | 'good' | 'bad' | 'power' | 'turn' | 'divider';
 }
 
 /**

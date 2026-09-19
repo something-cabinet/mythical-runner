@@ -45,7 +45,8 @@ export function RaceScreen() {
     return drawn(b.racerId, b.pos) - drawn(a.racerId, a.pos);
   });
 
-  const visibleLog = showFullLog ? log : log.slice(0, 6);
+  // A little longer than it would be without the turn dividers, which take lines of their own.
+  const visibleLog = showFullLog ? log : log.slice(0, 8);
 
   return (
     <>
@@ -61,6 +62,7 @@ export function RaceScreen() {
               claimedSpaces={racing ? phase.claimedSpaces : []}
               tripSpaces={racing ? phase.tripSpaces : []}
               roll={board.roll}
+              power={board.power}
               activeRacer={
                 // Follow the die while its move plays out; the server has already moved on.
                 board.roll ? board.roll.racerId : upNow
@@ -124,7 +126,7 @@ export function RaceScreen() {
                 <h2 id="log-heading" className="section-title">
                   What happened
                 </h2>
-                {log.length > 6 && (
+                {log.length > 8 && (
                   <button type="button" className="btn btn-ghost" style={{ minHeight: 32, padding: '0 8px' }} onClick={() => setShowFullLog((v) => !v)}>
                     {showFullLog ? 'Less' : `All ${log.length}`}
                   </button>

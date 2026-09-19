@@ -1,7 +1,7 @@
 import { FINISH, trackForRace, type PlayerView, type RacerId, type RaceNumber } from '@mr/engine';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { hasSprite, ordinal, racerInitials, racerName, racerSprite, rawName, seatColor } from '../lib/present';
-import { ROLL_TUMBLE_MS, type ShownRoll } from '../lib/useBoardPositions';
+import { ROLL_TUMBLE_MS, type ShownPower, type ShownRoll } from '../lib/useBoardPositions';
 
 /**
  * The race track, drawn as a loop like the physical board.
@@ -340,6 +340,53 @@ function Die({ view, roll, x, y, size, color, portrait }: {
   );
 }
 
+/**
+ * A power going off, called out in the infield: who did it and what the log says it did.
+ *
+ * HTML laid over the board rather than SVG text, so a long line wraps — the portrait
+ * infield is a narrow column. It sits where the die never does (left of it in landscape,
+ * above it in portrait), so a power that reacts to a roll never hides the roll.
+ */
+function PowerCallout({ view, power, g, infield }: { view: PlayerView; power: ShownPower; g: Geometry; infield: Rect }) {
+  const racer = view.board.find((b) => b.racerId === power.racerId);
+  const color = racer ? seatColor(view, racer.owner) : '#ffc93c';
+  const inset = 16;
+  // The die is centred 90 left of the infield's middle in landscape, 40 above it in portrait.
+  const area: Rect = g.portrait
+    ? { x: infield.x + inset, y: infield.y + inset, w: infield.w - inset * 2, h: infield.h / 2 - 40 - 48 - inset * 2 }
+    : { x: infield.x + inset, y: infield.y + inset, w: infield.w / 2 - 90 - 60 - inset * 2, h: infield.h - inset * 2 };
+  const pct = (v: number, of: number) => `${(v / of) * 100}%`;
+  // Sized in board units, so the callout scales with the board like everything drawn in it.
+  const unit = (v: number) => `${(v / g.width) * 100}cqw`;
+
+  return (
+    <div
+      className="power-area"
+      style={{
+        left: pct(area.x, g.width),
+        top: pct(area.y, g.height),
+        width: pct(area.w, g.width),
+        height: pct(area.h, g.height),
+      }}
+    >
+      <div
+        key={power.key}
+        className={`power-callout${power.instant ? ' power-callout-instant' : ''}`}
+        style={{ '--seat': color, fontSize: unit(g.portrait ? 17 : 22), gap: unit(10), padding: unit(10) } as CSSProperties}
+        role="status"
+      >
+        <span className="power-callout-face" style={{ width: unit(52), height: unit(52), fontSize: unit(19) }}>
+          {hasSprite(power.racerId) ? <img src={racerSprite(power.racerId)} alt="" /> : racerInitials(power.racerId)}
+        </span>
+        <div style={{ minWidth: 0 }}>
+          <div className="power-callout-name">{racerName(view, power.racerId)}</div>
+          <div className="power-callout-text">{power.text}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface BoardProps {
   readonly view: PlayerView;
   readonly raceNo: RaceNumber;
@@ -352,6 +399,8 @@ interface BoardProps {
   readonly tripSpaces?: readonly number[];
   /** The latest roll, drawn as a die in the infield. */
   readonly roll?: ShownRoll | null;
+  /** A power that just went off: its racer bursts and the infield calls it out. */
+  readonly power?: ShownPower | null;
   /** The racer whose turn it is, which gets a glow. */
   readonly activeRacer?: RacerId | null;
 }
@@ -364,6 +413,7 @@ export function Board({
   claimedSpaces = [],
   tripSpaces = [],
   roll = null,
+  power = null,
   activeRacer = null,
 }: BoardProps) {
   const track = trackForRace(raceNo);
@@ -402,225 +452,238 @@ export function Board({
   const finishSplit = g.portrait ? splitLabel(finishBox, 'left', 78) : splitLabel(finishBox, 'top', 28);
 
   return (
-    <svg className="board" viewBox={`0 0 ${g.width} ${g.height}`} role="img" aria-label={`${track.name} race track`}>
-      <defs>
-        {/* One clip for every portrait: object-bounding-box units make it scale to each
-            piece's own square, so pieces of different sizes share the one definition, and
-            square art is cropped to the disc instead of overhanging it. */}
-        <clipPath id="piece-disc" clipPathUnits="objectBoundingBox">
-          <circle cx="0.5" cy="0.5" r="0.5" />
-        </clipPath>
-      </defs>
-      <rect className="board-rim" x={0} y={0} width={g.width} height={g.height} rx={PAD + 26} />
-      <rect
-        className="board-outline"
-        x={PAD / 2}
-        y={PAD / 2}
-        width={g.width - PAD}
-        height={g.height - PAD}
-        rx={PAD + 20}
-      />
-      <rect
-        className="board-outline"
-        x={infield.x - GAP / 2}
-        y={infield.y - GAP / 2}
-        width={infield.w + GAP}
-        height={infield.h + GAP}
-        rx={10}
-      />
-      <text
-        className={`infield-name${roll ? ' infield-name-dim' : ''}`}
-        x={inf.x}
-        y={inf.y}
-        transform={g.portrait ? `rotate(-90 ${inf.x} ${inf.y})` : undefined}
-      >
-        {track.name.toUpperCase()}
-      </text>
+    <div className="board-wrap">
+      <svg className="board" viewBox={`0 0 ${g.width} ${g.height}`} role="img" aria-label={`${track.name} race track`}>
+        <defs>
+          {/* One clip for every portrait: object-bounding-box units make it scale to each
+              piece's own square, so pieces of different sizes share the one definition, and
+              square art is cropped to the disc instead of overhanging it. */}
+          <clipPath id="piece-disc" clipPathUnits="objectBoundingBox">
+            <circle cx="0.5" cy="0.5" r="0.5" />
+          </clipPath>
+        </defs>
+        <rect className="board-rim" x={0} y={0} width={g.width} height={g.height} rx={PAD + 26} />
+        <rect
+          className="board-outline"
+          x={PAD / 2}
+          y={PAD / 2}
+          width={g.width - PAD}
+          height={g.height - PAD}
+          rx={PAD + 20}
+        />
+        <rect
+          className="board-outline"
+          x={infield.x - GAP / 2}
+          y={infield.y - GAP / 2}
+          width={infield.w + GAP}
+          height={infield.h + GAP}
+          rx={10}
+        />
+        <text
+          className={`infield-name${roll ? ' infield-name-dim' : ''}`}
+          x={inf.x}
+          y={inf.y}
+          transform={g.portrait ? `rotate(-90 ${inf.x} ${inf.y})` : undefined}
+        >
+          {track.name.toUpperCase()}
+        </text>
 
-      {track.spaces.map((space, i) => {
-        const b = boxes[i] ?? { x: 0, y: 0, w: 0, h: 0 };
-        const c = center(b);
-        const mined = tripSpaces.includes(space.index);
-        const e = mined ? ({ t: 'trip' } as const) : space.effect;
-        const isStart = space.index === 0;
-        const claimed = e.t === 'star' && claimedSpaces.includes(space.index);
-        const fill = isStart ? SPACE_COLORS[3] : SPACE_COLORS[(space.index - 1) % SPACE_COLORS.length];
-        const inset = 7;
+        {track.spaces.map((space, i) => {
+          const b = boxes[i] ?? { x: 0, y: 0, w: 0, h: 0 };
+          const c = center(b);
+          const mined = tripSpaces.includes(space.index);
+          const e = mined ? ({ t: 'trip' } as const) : space.effect;
+          const isStart = space.index === 0;
+          const claimed = e.t === 'star' && claimedSpaces.includes(space.index);
+          const fill = isStart ? SPACE_COLORS[3] : SPACE_COLORS[(space.index - 1) % SPACE_COLORS.length];
+          const inset = 7;
 
-        return (
-          <g key={space.index} className={claimed ? 'space-claimed' : undefined}>
-            <rect className="space" x={b.x} y={b.y} width={b.w} height={b.h} rx={8} fill={fill} />
-            {e.t !== 'plain' && (
-              <rect
-                className="space-panel"
-                x={b.x + inset}
-                y={b.y + inset}
-                width={b.w - inset * 2}
-                height={b.h - inset * 2}
-                rx={5}
-              />
-            )}
-            {isStart && (
-              <text
-                className="start-label"
-                x={startSplit.label.x}
-                y={startSplit.label.y}
-                style={g.portrait ? { fontSize: 24 } : undefined}
-              >
-                START
-              </text>
-            )}
-            {!isStart && e.t === 'plain' && space.index % 5 === 0 && (
-              <text className="milestone num" x={c.x} y={c.y}>
-                {space.index}
-              </text>
-            )}
-            {!isStart && !(e.t === 'plain' && space.index % 5 === 0) && (
-              <text className="idx num" x={b.x + 6} y={b.y + 15}>
-                {space.index}
-              </text>
-            )}
-            {e.t === 'star' && (
-              <text className="glyph glyph-star" x={c.x} y={c.y}>
-                ★
-              </text>
-            )}
-            {e.t === 'trip' && (
-              <text className="glyph glyph-trip" x={c.x} y={c.y}>
-                {mined ? 'MINE!' : 'TRIP!'}
-              </text>
-            )}
-            {e.t === 'arrow' && (
-              <g transform={`translate(${c.x} ${c.y})`}>
-                <path
-                  className="glyph-arrow-shape"
-                  d="M-24 -9 H4 V-18 L24 0 L4 18 V9 H-24 Z"
-                  transform={`rotate(${heading(space.index) + (e.amount < 0 ? 180 : 0)}) scale(${g.portrait ? 0.85 : 1})`}
+          return (
+            <g key={space.index} className={claimed ? 'space-claimed' : undefined}>
+              <rect className="space" x={b.x} y={b.y} width={b.w} height={b.h} rx={8} fill={fill} />
+              {e.t !== 'plain' && (
+                <rect
+                  className="space-panel"
+                  x={b.x + inset}
+                  y={b.y + inset}
+                  width={b.w - inset * 2}
+                  height={b.h - inset * 2}
+                  rx={5}
                 />
-                <text className="glyph glyph-arrow num">{Math.abs(e.amount)}</text>
-              </g>
-            )}
-            <title>
-              {isStart
-                ? 'Start'
-                : e.t === 'star'
-                  ? `Space ${space.index}: star, 1 point${claimed ? ' (already taken)' : ''}`
-                  : e.t === 'trip'
-                    ? `Space ${space.index}: trip${mined ? ' (mined)' : ''}`
-                    : e.t === 'arrow'
-                      ? `Space ${space.index}: move ${e.amount > 0 ? 'forward' : 'back'} ${Math.abs(e.amount)}`
-                      : `Space ${space.index}`}
-            </title>
-          </g>
-        );
-      })}
-
-      <rect className="finish" x={finishBox.x} y={finishBox.y} width={finishBox.w} height={finishBox.h} rx={8} />
-      <text
-        className="finish-label"
-        x={finishSplit.label.x}
-        y={finishSplit.label.y}
-      >
-        FINISH
-      </text>
-
-      {roll && (() => {
-        const owner = view.board.find((b) => b.racerId === roll.racerId)?.owner;
-        const size = g.portrait ? 96 : 120;
-        return (
-          <Die
-            view={view}
-            key={roll.key}
-            roll={roll}
-            x={g.portrait ? inf.x : inf.x - 90}
-            y={g.portrait ? inf.y - 40 : inf.y}
-            size={size}
-            color={owner ? seatColor(view, owner) : '#ffc93c'}
-            portrait={g.portrait}
-          />
-        );
-      })()}
-
-      {live.map((r) => {
-        const pos = drawnPos(r.racerId, r.pos);
-        let x: number;
-        let y: number;
-        let radius: number;
-        let rank: number | null = null;
-
-        if (pos >= FINISH) {
-          const n = Math.max(0, finished.findIndex((f) => f.racerId === r.racerId));
-          rank = r.finishedRank;
-          const area = finishSplit.tokens;
-          const s = slot(n, finished.length, area.w - 8, area.h - 8, R_FINISH);
-          x = center(area).x + s.dx;
-          y = center(area).y + s.dy;
-          radius = s.r;
-        } else {
-          const group = groups.get(pos) ?? [r.racerId];
-          const b = boxes[pos] ?? boxes[0] ?? { x: 0, y: 0, w: 0, h: 0 };
-          const area = pos === 0 ? startSplit.tokens : b;
-          const c = center(area);
-          const s = slot(group.indexOf(r.racerId), group.length, area.w - 6, area.h - 6, 30);
-          x = c.x + s.dx;
-          y = c.y + s.dy;
-          radius = s.r;
-        }
-
-        const mine = r.owner === view.you;
-        const targeted = highlight.includes(r.racerId);
-        const label = `${racerName(view, r.racerId)} (${rawName(view, r.owner)})${
-          r.tripped ? ', tripped' : ''
-        }${rank ? `, finished ${ordinal(rank)}` : `, space ${pos}`}`;
-
-        return (
-          <g
-            key={r.racerId}
-            className={`piece${r.tripped ? ' piece-tripped' : ''}`}
-            style={{ transform: `translate(${x}px, ${y}px)` }}
-          >
-            <title>{label}</title>
-            {targeted && <circle r={radius + 6} fill="none" className="piece-target" />}
-            {r.racerId === activeRacer && rank === null && (
-              <circle r={radius + 5} className="piece-active" style={{ fill: seatColor(view, r.owner) }} />
-            )}
-            {/* Keyed by space, so every step remounts it and replays the hop. */}
-            <g key={pos} className="piece-hop">
-              <circle
-                r={radius}
-                fill={seatColor(view, r.owner)}
-                className={mine ? 'piece-you' : 'piece-ring'}
-              />
-              {/* Initials, not the stand-in face: every racer without art would wear the
-                  same one, and a board of identical faces is worse than no art at all. */}
-              {hasSprite(r.racerId) ? (
-                <image
-                  className="piece-sprite"
-                  href={racerSprite(r.racerId)}
-                  x={-radius * SPRITE_INSET}
-                  y={-radius * SPRITE_INSET}
-                  width={radius * 2 * SPRITE_INSET}
-                  height={radius * 2 * SPRITE_INSET}
-                  preserveAspectRatio="xMidYMid meet"
-                  clipPath="url(#piece-disc)"
-                />
-              ) : (
-                <text className="piece-label" style={{ fontSize: Math.round(radius * 0.8) }}>
-                  {racerInitials(r.racerId)}
+              )}
+              {isStart && (
+                <text
+                  className="start-label"
+                  x={startSplit.label.x}
+                  y={startSplit.label.y}
+                  style={g.portrait ? { fontSize: 24 } : undefined}
+                >
+                  START
                 </text>
               )}
-            </g>
-            {r.tripped && (
-              <g transform={`translate(${radius * 0.72} ${-radius * 0.72})`}>
-                <circle r={Math.max(7, radius * 0.38)} className="trip-badge" />
-                <text className="trip-badge-label" style={{ fontSize: Math.max(9, Math.round(radius * 0.46)) }}>
-                  z
+              {!isStart && e.t === 'plain' && space.index % 5 === 0 && (
+                <text className="milestone num" x={c.x} y={c.y}>
+                  {space.index}
                 </text>
+              )}
+              {!isStart && !(e.t === 'plain' && space.index % 5 === 0) && (
+                <text className="idx num" x={b.x + 6} y={b.y + 15}>
+                  {space.index}
+                </text>
+              )}
+              {e.t === 'star' && (
+                <text className="glyph glyph-star" x={c.x} y={c.y}>
+                  ★
+                </text>
+              )}
+              {e.t === 'trip' && (
+                <text className="glyph glyph-trip" x={c.x} y={c.y}>
+                  {mined ? 'MINE!' : 'TRIP!'}
+                </text>
+              )}
+              {e.t === 'arrow' && (
+                <g transform={`translate(${c.x} ${c.y})`}>
+                  <path
+                    className="glyph-arrow-shape"
+                    d="M-24 -9 H4 V-18 L24 0 L4 18 V9 H-24 Z"
+                    transform={`rotate(${heading(space.index) + (e.amount < 0 ? 180 : 0)}) scale(${g.portrait ? 0.85 : 1})`}
+                  />
+                  <text className="glyph glyph-arrow num">{Math.abs(e.amount)}</text>
+                </g>
+              )}
+              <title>
+                {isStart
+                  ? 'Start'
+                  : e.t === 'star'
+                    ? `Space ${space.index}: star, 1 point${claimed ? ' (already taken)' : ''}`
+                    : e.t === 'trip'
+                      ? `Space ${space.index}: trip${mined ? ' (mined)' : ''}`
+                      : e.t === 'arrow'
+                        ? `Space ${space.index}: move ${e.amount > 0 ? 'forward' : 'back'} ${Math.abs(e.amount)}`
+                        : `Space ${space.index}`}
+              </title>
+            </g>
+          );
+        })}
+
+        <rect className="finish" x={finishBox.x} y={finishBox.y} width={finishBox.w} height={finishBox.h} rx={8} />
+        <text
+          className="finish-label"
+          x={finishSplit.label.x}
+          y={finishSplit.label.y}
+        >
+          FINISH
+        </text>
+
+        {roll && (() => {
+          const owner = view.board.find((b) => b.racerId === roll.racerId)?.owner;
+          const size = g.portrait ? 96 : 120;
+          return (
+            <Die
+              view={view}
+              key={roll.key}
+              roll={roll}
+              x={g.portrait ? inf.x : inf.x - 90}
+              y={g.portrait ? inf.y - 40 : inf.y}
+              size={size}
+              color={owner ? seatColor(view, owner) : '#ffc93c'}
+              portrait={g.portrait}
+            />
+          );
+        })()}
+
+        {live.map((r) => {
+          const pos = drawnPos(r.racerId, r.pos);
+          let x: number;
+          let y: number;
+          let radius: number;
+          let rank: number | null = null;
+
+          if (pos >= FINISH) {
+            const n = Math.max(0, finished.findIndex((f) => f.racerId === r.racerId));
+            rank = r.finishedRank;
+            const area = finishSplit.tokens;
+            const s = slot(n, finished.length, area.w - 8, area.h - 8, R_FINISH);
+            x = center(area).x + s.dx;
+            y = center(area).y + s.dy;
+            radius = s.r;
+          } else {
+            const group = groups.get(pos) ?? [r.racerId];
+            const b = boxes[pos] ?? boxes[0] ?? { x: 0, y: 0, w: 0, h: 0 };
+            const area = pos === 0 ? startSplit.tokens : b;
+            const c = center(area);
+            const s = slot(group.indexOf(r.racerId), group.length, area.w - 6, area.h - 6, 30);
+            x = c.x + s.dx;
+            y = c.y + s.dy;
+            radius = s.r;
+          }
+
+          const mine = r.owner === view.you;
+          const powered = power !== null && power.racerId === r.racerId && !power.instant;
+          const targeted = highlight.includes(r.racerId);
+          const label = `${racerName(view, r.racerId)} (${rawName(view, r.owner)})${
+            r.tripped ? ', tripped' : ''
+          }${rank ? `, finished ${ordinal(rank)}` : `, space ${pos}`}`;
+
+          return (
+            <g
+              key={r.racerId}
+              className={`piece${r.tripped ? ' piece-tripped' : ''}`}
+              style={{ transform: `translate(${x}px, ${y}px)` }}
+            >
+              <title>{label}</title>
+              {targeted && <circle r={radius + 6} fill="none" className="piece-target" />}
+              {r.racerId === activeRacer && rank === null && (
+                <circle r={radius + 5} className="piece-active" style={{ fill: seatColor(view, r.owner) }} />
+              )}
+              {powered && (
+                <g key={`burst-${power.key}`} className="piece-burst" style={{ stroke: seatColor(view, r.owner) }}>
+                  <circle r={radius} />
+                  <circle r={radius} className="piece-burst-inner" />
+                </g>
+              )}
+              {/* Keyed by power, so each one replays the pop without disturbing the hop. */}
+              <g key={powered ? `pop-${power.key}` : 'still'} className={powered ? 'piece-pop' : undefined}>
+                {/* Keyed by space, so every step remounts it and replays the hop. */}
+                <g key={pos} className="piece-hop">
+                  <circle
+                    r={radius}
+                    fill={seatColor(view, r.owner)}
+                    className={mine ? 'piece-you' : 'piece-ring'}
+                  />
+                  {/* Initials, not the stand-in face: every racer without art would wear the
+                      same one, and a board of identical faces is worse than no art at all. */}
+                  {hasSprite(r.racerId) ? (
+                    <image
+                      className="piece-sprite"
+                      href={racerSprite(r.racerId)}
+                      x={-radius * SPRITE_INSET}
+                      y={-radius * SPRITE_INSET}
+                      width={radius * 2 * SPRITE_INSET}
+                      height={radius * 2 * SPRITE_INSET}
+                      preserveAspectRatio="xMidYMid meet"
+                      clipPath="url(#piece-disc)"
+                    />
+                  ) : (
+                    <text className="piece-label" style={{ fontSize: Math.round(radius * 0.8) }}>
+                      {racerInitials(r.racerId)}
+                    </text>
+                  )}
+                </g>
               </g>
-            )}
-          </g>
-        );
-      })}
-    </svg>
+              {r.tripped && (
+                <g transform={`translate(${radius * 0.72} ${-radius * 0.72})`}>
+                  <circle r={Math.max(7, radius * 0.38)} className="trip-badge" />
+                  <text className="trip-badge-label" style={{ fontSize: Math.max(9, Math.round(radius * 0.46)) }}>
+                    z
+                  </text>
+                </g>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+      {power && <PowerCallout view={view} power={power} g={g} infield={infield} />}
+    </div>
   );
 }
