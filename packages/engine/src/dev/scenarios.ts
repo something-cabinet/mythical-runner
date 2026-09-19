@@ -1805,13 +1805,13 @@ scenario('Anti-Mage — can skip the main move to warp up to 3 ahead', () => {
   check(racerAt(fell.state, 'anti-mage')?.tripped === true, `and blinking onto TRIP at ${trap} still trips`);
 });
 
-scenario('Faceless Void — once per race, before or after the move, trips everyone within 5', () => {
+scenario('Faceless Void — once per race, before or after the move, trips everyone within 2', () => {
   const s = raceState(
     [
       { player: 'p1', racer: 'faceless-void', pos: 10 },
-      { player: 'p2', racer: 'vanilla-01', pos: 5 },
-      { player: 'p3', racer: 'vanilla-02', pos: 15 },
-      { player: 'p4', racer: 'vanilla-03', pos: 16 },
+      { player: 'p2', racer: 'vanilla-01', pos: 8 },
+      { player: 'p3', racer: 'vanilla-02', pos: 12 },
+      { player: 'p4', racer: 'vanilla-03', pos: 13 },
     ],
     'p1',
   );
@@ -1819,9 +1819,9 @@ scenario('Faceless Void — once per race, before or after the move, trips every
   check(asked.state.pending?.options[0]?.label === 'Trip 2', 'two in the bubble', asked.state.pending?.options[0]?.label);
 
   const chrono = applyAction(asked.state, decide('p1', 'chrono'));
-  check(racerAt(chrono.state, 'vanilla-01')?.tripped === true, '5 behind: tripped');
-  check(racerAt(chrono.state, 'vanilla-02')?.tripped === true, '5 ahead: tripped');
-  check(racerAt(chrono.state, 'vanilla-03')?.tripped === false, '6 ahead: safe');
+  check(racerAt(chrono.state, 'vanilla-01')?.tripped === true, '2 behind: tripped');
+  check(racerAt(chrono.state, 'vanilla-02')?.tripped === true, '2 ahead: tripped');
+  check(racerAt(chrono.state, 'vanilla-03')?.tripped === false, '3 ahead: safe');
   check(has(chrono.events, 'dice/rolled'), 'and Void still takes its main move');
   check(chrono.state.pending === null, 'and is not asked again after it');
 
@@ -1830,14 +1830,14 @@ scenario('Faceless Void — once per race, before or after the move, trips every
   check(waited.state.pending?.prompt.includes('after your move') === true, 'asked again after the move', waited.state.pending?.prompt);
   check(waited.state.pending?.options[0]?.label === 'Trip 2', 'counting the bubble from space 13', waited.state.pending?.options[0]?.label);
   const late = applyAction(waited.state, decide('p1', 'chrono'));
-  check(racerAt(late.state, 'vanilla-03')?.tripped === true && racerAt(late.state, 'vanilla-01')?.tripped === false, '16 is in reach now, 5 is not');
+  check(racerAt(late.state, 'vanilla-03')?.tripped === true && racerAt(late.state, 'vanilla-01')?.tripped === false, '13 is in reach now, 8 is not');
   const saved = applyAction(waited.state, decide('p1', 'wait'));
   check(racerAt(saved.state, 'faceless-void')?.memo['chronoUsed'] !== true && saved.state.pending === null, 'or saved for another turn');
 
   const used = raceState(
     [
       { player: 'p1', racer: 'faceless-void', pos: 10, memo: { chronoUsed: true } },
-      { player: 'p2', racer: 'vanilla-01', pos: 5 },
+      { player: 'p2', racer: 'vanilla-01', pos: 8 },
     ],
     'p1',
   );
@@ -1901,26 +1901,35 @@ scenario('Kunkka — after the main move, can warp back to where it started', ()
   check(posOf(stay.state, 'kunkka') === 7, 'or it stays', `pos ${posOf(stay.state, 'kunkka')}`);
 });
 
-scenario('Omniknight — other racers within 3 get -2 to their main move', () => {
+scenario('Omniknight — other racers on its space or next to it get -2 to their main move', () => {
   const s = raceState(
     [
-      { player: 'p1', racer: 'vanilla-01', pos: 3 },
+      { player: 'p1', racer: 'vanilla-01', pos: 5 },
       { player: 'p2', racer: 'omniknight', pos: 6 },
     ],
     'p1',
   );
   const near = rollFor(s, 'p1', 3);
   const rolled = near.events.find((e) => e.t === 'dice/rolled') as { natural?: number };
-  check(rolled.natural === 5, 'a 5 becomes a move of 3', JSON.stringify(rolled));
+  check(rolled.natural === 5, 'next to it: a 5 becomes a move of 3', JSON.stringify(rolled));
 
-  const far = raceState(
+  const same = raceState(
     [
-      { player: 'p1', racer: 'vanilla-01', pos: 2 },
+      { player: 'p1', racer: 'vanilla-01', pos: 6 },
       { player: 'p2', racer: 'omniknight', pos: 6 },
     ],
     'p1',
   );
-  check(!logLines(rollFor(far, 'p1', 3).events).includes('aura'), '4 away is out of range');
+  check(logLines(rollFor(same, 'p1', 3).events).includes('aura'), 'sharing its space counts too');
+
+  const far = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: 4 },
+      { player: 'p2', racer: 'omniknight', pos: 6 },
+    ],
+    'p1',
+  );
+  check(!logLines(rollFor(far, 'p1', 3).events).includes('aura'), '2 away is out of range');
 });
 
 scenario('Ogre Magi — rolls two d3s and multiplies them', () => {
@@ -2377,13 +2386,13 @@ scenario('Abaddon — can help a tripped racer up, and moves 3 for it', () => {
   );
 });
 
-scenario('Ember Spirit — skips the main move to dash 2 per racer within 3 spaces', () => {
+scenario('Ember Spirit — skips the main move to dash 2 per racer on its space or next to it', () => {
   const s = raceState(
     [
       { player: 'p1', racer: 'ember-spirit', pos: 5 },
-      { player: 'p2', racer: 'vanilla-01', pos: 2 },
-      { player: 'p3', racer: 'vanilla-02', pos: 8 },
-      { player: 'p4', racer: 'vanilla-03', pos: 20 },
+      { player: 'p2', racer: 'vanilla-01', pos: 4 },
+      { player: 'p3', racer: 'vanilla-02', pos: 6 },
+      { player: 'p4', racer: 'vanilla-03', pos: 7 },
     ],
     'p1',
   );
@@ -2391,7 +2400,7 @@ scenario('Ember Spirit — skips the main move to dash 2 per racer within 3 spac
   check(asked.state.pending?.prompt.includes('Sleight of Fist') === true, 'asks before rolling');
 
   const dash = applyAction(asked.state, decide('p1', 'dash'));
-  check(posOf(dash.state, 'ember-spirit') === 9, 'two racers within 3, either side: moves 4', `pos ${posOf(dash.state, 'ember-spirit')}`);
+  check(posOf(dash.state, 'ember-spirit') === 9, 'one either side, not the one 2 away: moves 4', `pos ${posOf(dash.state, 'ember-spirit')}`);
   check(!has(dash.events, 'dice/thrown'), 'and never rolls');
 
   const declined = applyAction(asked.state, decide('p1', 'roll'));
@@ -2457,19 +2466,22 @@ scenario('Earth Spirit — kicks a racer on its space 3 spaces, its choice of di
   check(empty.state.pending === null, 'and nothing to kick when alone');
 });
 
-scenario('Bristleback — a trip takes everyone within 3 spaces down with it', () => {
+scenario('Bristleback — a trip takes everyone on its space or next to it down with it', () => {
+  // Baba Yaga trips it on arrival at space 4.
   const s = raceState(
     [
       { player: 'p1', racer: 'bristleback', pos: 1 },
-      { player: 'p2', racer: 'banana', pos: 3 },
+      { player: 'p2', racer: 'baba-yaga', pos: 4 },
       { player: 'p3', racer: 'vanilla-01', pos: 5 },
-      { player: 'p4', racer: 'vanilla-02', pos: 20 },
+      { player: 'p4', racer: 'vanilla-02', pos: 6 },
     ],
     'p1',
   );
-  const down = rollUntil(s, 'p1', (r) => racerAt(r.state, 'bristleback')?.tripped === true);
-  check(racerAt(down.state, 'vanilla-01')?.tripped === true, 'the neighbour goes down too', logLines(down.events));
-  check(racerAt(down.state, 'vanilla-02')?.tripped === false, 'but not one 15 spaces away');
+  const down = rollFor(s, 'p1', 3);
+  check(racerAt(down.state, 'bristleback')?.tripped === true, 'Bristleback trips on Baba Yaga', logLines(down.events));
+  check(racerAt(down.state, 'baba-yaga')?.tripped === true, 'the racer on its space goes down too');
+  check(racerAt(down.state, 'vanilla-01')?.tripped === true, 'and the one next to it');
+  check(racerAt(down.state, 'vanilla-02')?.tripped === false, 'but not one 2 spaces away');
   check(logLines(down.events).includes('quills'), 'logged');
 });
 

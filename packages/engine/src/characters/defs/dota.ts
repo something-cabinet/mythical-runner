@@ -19,9 +19,19 @@ import { defFor, isRunning } from './shared.js';
  *  - A warp is not a move, so a warped racer passes nobody. It is still an arrival, though:
  *    "racers are stopped on a space after they've finished moving onto it, or otherwise
  *    arriving there by other means", so the space a warp lands on fires as usual.
+ *  - "Within N spaces near me" is a window of N spaces centred on the racer, not N spaces
+ *    each way: 3 is my space and the one either side, 5 reaches two each way. See `near`.
  */
 
 const def = defFor('dota');
+
+/**
+ * Whether `other` is in the `span`-space window centred on `self` — the design's "within
+ * `span` spaces near me". Both directions; sharing the space counts.
+ */
+function near(self: { readonly pos: number }, other: { readonly pos: number }, span: 3 | 5): boolean {
+  return Math.abs(other.pos - self.pos) <= (span - 1) / 2;
+}
 
 // ---------------------------------------------------------------------------
 
@@ -216,9 +226,9 @@ const antiMage = def('anti-mage', 'Anti-Mage', 'I can skip my main move and warp
 
 /**
  * CHRONOSPHERE — "Once per race, before or after my main move, I can trip every racer
- * within 5 spaces of me."
+ * within 2 spaces of me."
  *
- * Either direction, teammates included — time stops for everyone in the bubble but me.
+ * The design's 5-space bubble: my space and two either side. Either direction, teammates included — time stops for everyone in the bubble but me.
  * Asked twice a turn while it is unspent: before the roll, and again once the main move
  * has landed, with the bubble counted from where I stand then. Not after a tripped turn
  * or a main move that went nowhere: there is no "after" to a move that never happened.
@@ -226,7 +236,7 @@ const antiMage = def('anti-mage', 'Anti-Mage', 'I can skip my main move and warp
 const facelessVoid = def(
   'faceless-void',
   'Faceless Void',
-  'Once per race, before or after my main move, I can trip every racer within 5 spaces of me.',
+  'Once per race, before or after my main move, I can trip every racer within 2 spaces of me.',
   {
     beforeMainMove: (h) => offerChrono(h, 'before'),
     afterMainMove: (h) => offerChrono(h, 'after'),
@@ -256,11 +266,11 @@ function offerChrono(h: HookCtx, when: 'before' | 'after') {
   });
 }
 
-/** Faceless Void's targets: running racers within 5 spaces that can still go down. */
+/** Faceless Void's targets: running racers in the 5-space bubble that can still go down. */
 function inBubble(h: HookCtx) {
   return h
     .running()
-    .filter((r) => r.racerId !== h.self.racerId && !r.tripped && Math.abs(r.pos - h.self.pos) <= 5);
+    .filter((r) => r.racerId !== h.self.racerId && !r.tripped && near(h.self, r, 5));
 }
 
 /**
@@ -340,15 +350,15 @@ const kunkka = def(
   },
 );
 
-/** DEGEN AURA — "Other racers within 3 spaces of me get -2 to their main move." */
+/** DEGEN AURA — "Other racers on my space or next to it get -2 to their main move." */
 const omniknight = def(
   'omniknight',
   'Omniknight',
-  'Other racers within 3 spaces of me get -2 to their main move.',
+  'Other racers on my space or next to it get -2 to their main move.',
   {
     modifyMainMove: (h, value, mover) => {
       if (!isRunning(h.self) || mover.racerId === h.self.racerId) return value;
-      if (Math.abs(mover.pos - h.self.pos) > 3) return value;
+      if (!near(h.self, mover, 3)) return value;
       const slowed = Math.max(0, value - 2);
       if (slowed !== value) h.log(`${h.nameOf(h.self)}'s aura slows ${h.nameOf(mover)}: -2.`);
       return slowed;
@@ -751,8 +761,8 @@ const abaddon = def(
 );
 
 /**
- * SLEIGHT OF FIST — "I can skip my main move to move 2 for each other racer within 3
- * spaces of me."
+ * SLEIGHT OF FIST — "I can skip my main move to move 2 for each other racer on my space or
+ * next to it."
  *
  * A dash through the pack: worth nothing out in front alone, and worth more than any roll
  * in traffic, so Ember Spirit wants to be where the crowd is — the opposite of Drow.
@@ -764,17 +774,17 @@ const abaddon = def(
 const emberSpirit = def(
   'ember-spirit',
   'Ember Spirit',
-  'I can skip my main move to move 2 for each other racer within 3 spaces of me.',
+  'I can skip my main move to move 2 for each other racer on my space or next to it.',
   {
     beforeMainMove: (h) => {
       if (!isRunning(h.self) || h.self.tripped) return;
-      const near = withinThree(h);
-      if (near.length === 0) return;
+      const crowd = inReach(h);
+      if (crowd.length === 0) return;
       h.ask({
         player: h.self.owner,
-        prompt: `Sleight of Fist? ${near.length} racer${near.length === 1 ? ' is' : 's are'} within 3 spaces.`,
+        prompt: `Sleight of Fist? ${crowd.length} racer${crowd.length === 1 ? ' is' : 's are'} on your space or next to it.`,
         options: [
-          option('dash', `Sleight of Fist (+${near.length * 2})`),
+          option('dash', `Sleight of Fist (+${crowd.length * 2})`),
           option('roll', 'Roll normally'),
         ],
         key: 'sleight',
@@ -783,20 +793,20 @@ const emberSpirit = def(
     },
     resume: (h, key, choice) => {
       if (key !== 'sleight' || choice !== ('dash' as ChoiceId)) return;
-      const near = withinThree(h);
+      const crowd = inReach(h);
       h.skipMainMove();
-      if (near.length === 0) return;
-      h.log(`${h.nameOf(h.self)} dashes through ${near.length} racer${near.length === 1 ? '' : 's'}: ${near.length * 2} spaces.`);
-      h.move(h.self, near.length * 2);
+      if (crowd.length === 0) return;
+      h.log(`${h.nameOf(h.self)} dashes through ${crowd.length} racer${crowd.length === 1 ? '' : 's'}: ${crowd.length * 2} spaces.`);
+      h.move(h.self, crowd.length * 2);
     },
   },
 );
 
-/** Ember Spirit's crowd: running racers within 3 spaces, itself excluded. */
-function withinThree(h: HookCtx) {
+/** Ember Spirit's crowd: running racers on its space or next to it, itself excluded. */
+function inReach(h: HookCtx) {
   return h
     .running()
-    .filter((r) => r.racerId !== h.self.racerId && Math.abs(r.pos - h.self.pos) <= 3);
+    .filter((r) => r.racerId !== h.self.racerId && near(h.self, r, 3));
 }
 
 /**
@@ -848,7 +858,7 @@ const earthSpirit = def(
 );
 
 /**
- * QUILL SPRAY — "If I trip, I also trip all racers within 3 spaces of me."
+ * QUILL SPRAY — "If I trip, I also trip all racers on my space or next to it."
  *
  * The fall goes off like a spray of quills: anyone nearby goes down with me, either
  * direction, teammates included. Racers already down, or shrugging it off, are unaffected
@@ -858,13 +868,13 @@ const earthSpirit = def(
 const bristleback = def(
   'bristleback',
   'Bristleback',
-  'If I trip, I also trip all racers within 3 spaces of me.',
+  'If I trip, I also trip all racers on my space or next to it.',
   {
     onRacerTripped: (h, target) => {
       if (target.racerId !== h.self.racerId || !h.self.tripped) return;
       const caught = h
         .running()
-        .filter((r) => r.racerId !== h.self.racerId && !r.tripped && Math.abs(r.pos - h.self.pos) <= 3);
+        .filter((r) => r.racerId !== h.self.racerId && !r.tripped && near(h.self, r, 3));
       if (caught.length === 0) return;
       h.log(`${h.nameOf(h.self)} goes down in a spray of quills, taking ${caught.length} with it.`);
       for (const r of caught) h.trip(r);
@@ -875,9 +885,6 @@ const bristleback = def(
 /**
  * PRECISION AURA — "I use a d6. If no other racer is on my space or next to it, I use a d8
  * instead."
- *
- * The design's "within 3 spaces near me" is a three-space window — her own space and one
- * either side — not three spaces each way like Omniknight's aura.
  *
  * Drow shoots best with room to work: crowded, the die is everyone else's; clear of the
  * pack, it is better. `dieSides` covers every roll of her die, so a duel or
@@ -891,7 +898,7 @@ const drowRanger = def(
     dieSides: (h) => {
       const crowded = h
         .running()
-        .some((r) => r.racerId !== h.self.racerId && Math.abs(r.pos - h.self.pos) <= 1);
+        .some((r) => r.racerId !== h.self.racerId && near(h.self, r, 3));
       return crowded ? 6 : 8;
     },
   },
