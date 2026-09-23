@@ -15,6 +15,11 @@ export interface CombinedThrow {
   readonly sides: number;
   /** Each die's face, in the order thrown. */
   readonly dice: readonly number[];
+  /**
+   * Each die's colour, when the dice are coloured and summed rather than multiplied —
+   * Invoker's blue, pink and orange.
+   */
+  readonly colours?: readonly string[];
 }
 
 /**
@@ -106,8 +111,10 @@ export interface HookCtx {
    * too. The throw is announced, so the board tumbles the die like a main move's.
    *
    * Call it from the `resume` of an `askRoll`, so the player whose die it is throws it.
+   *
+   * `plain` throws an ordinary d6 whatever the racer's own die is — Legion Commander's duel.
    */
-  rollDie(target: MutableRacer): number;
+  rollDie(target: MutableRacer, opts?: { readonly plain?: boolean }): number;
 
   /**
    * Stops the game until `roller`'s player presses Roll, then calls this power's `resume`
@@ -320,7 +327,7 @@ export interface Hooks {
 
   /**
    * A racer was just tripped. Fires for every racer still in, the tripped one first, so
-   * `target` may be `self` (Tidehunter getting up) or anyone (Oracle's prediction). Must
+   * `target` may be `self` (Tidehunter getting up) or anyone (Abaddon helping them up). Must
    * not `ask`: trips happen inside hooks that can't suspend.
    */
   onRacerTripped?(h: HookCtx, target: MutableRacer): void;

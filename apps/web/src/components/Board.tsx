@@ -1,6 +1,7 @@
 import { FINISH, racerRange, trackForRace, type PlayerView, type RacerId, type RaceNumber } from '@mr/engine';
 import { useEffect, useState, useSyncExternalStore, type CSSProperties } from 'react';
-import { hasSprite, ordinal, racerInitials, racerName, racerSprite, rawName, seatColor } from '../lib/present';
+import { hasSprite, ordinal, racerInitials, racerName, racerSprite, rawName, seatColor, type BoardLink } from '../lib/present';
+import { Tether } from './Tether';
 import { ROLL_TUMBLE_MS, type ShownPower, type ShownRoll } from '../lib/useBoardPositions';
 
 /**
@@ -165,6 +166,13 @@ const points = (corners: readonly (readonly [number, number])[]): string => corn
  * A d6 is the familiar rounded square with pips. Anything else — Ogre Magi's d3s, a die
  * with no well-known shape — is a plain square with the number on it.
  */
+/** Invoker's die colours, as drawn. */
+const DIE_COLOURS: Readonly<Record<string, string>> = { blue: '#3f7fe0', pink: '#e35fb4', orange: '#f08a24' };
+
+function dieColour(colour: string | undefined): string | undefined {
+  return colour === undefined ? undefined : DIE_COLOURS[colour];
+}
+
 function DieShape({ die, face, size, color }: { die: number; face: number; size: number; color: string }) {
   const stroke = { stroke: color };
   const number = (fontSize: number, dy = 0) => (
@@ -261,7 +269,9 @@ function Die({ view, roll, x, y, size, color, portrait }: {
   color: string;
   portrait: boolean;
 }) {
-  // Usually one die; Ogre Magi throws two d3s and multiplies them, and both are shown.
+  // Usually one die; Ogre Magi throws two d3s and multiplies them, Phantom Assassin two d6s
+  // for a crit, and Invoker three coloured d6s summed by colour. Every die is shown,
+  // Invoker's in their own colours.
   const final = roll.dice ?? [roll.face];
   const top = roll.die;
   const [faces, setFaces] = useState(() => (roll.instant ? final : final.map(() => 1 + Math.floor(Math.random() * top))));
@@ -308,8 +318,12 @@ function Die({ view, roll, x, y, size, color, portrait }: {
   const gap = each * 0.3;
   const span = final.length * each + (final.length - 1) * gap;
   const thrown =
-    roll.dice && roll.dice.length > 1
-      ? `${roll.dice.join(' × ')} = ${roll.face}`
+    roll.dice && roll.colours
+      ? `${roll.dice.map((d, i) => `${roll.colours?.[i] ?? ''} ${d}`).join(', ')} → ${roll.face}`
+      : roll.dice && roll.dice.length > 1
+      ? roll.die === 3
+        ? `${roll.dice.join(' × ')} = ${roll.face}`
+        : `${roll.dice.join(', ')} → ${roll.face}`
       : `${roll.face}${roll.die !== 6 ? ` (d${roll.die})` : ''}`;
   const labelX = portrait ? x : x + span / 2 + 22;
   const labelY = portrait ? y + size / 2 + 30 : y - (maths ? 15 : 0);
@@ -320,7 +334,7 @@ function Die({ view, roll, x, y, size, color, portrait }: {
       {faces.map((face, i) => (
         <g key={i} transform={`translate(${x - span / 2 + each / 2 + i * (each + gap)} ${y})`}>
           <g className="dice-body">
-            <DieShape die={roll.die} face={face} size={each} color={color} />
+            <DieShape die={roll.die} face={face} size={each} color={dieColour(roll.colours?.[i]) ?? color} />
           </g>
         </g>
       ))}
@@ -406,6 +420,8 @@ interface BoardProps {
   readonly power?: ShownPower | null;
   /** The racer whose turn it is, which gets a glow. */
   readonly activeRacer?: RacerId | null;
+  /** Ties between racers (Grimstroke's Soulbind, ...), drawn as tethers between their pieces. */
+  readonly links?: readonly BoardLink[];
 }
 
 export function Board({
@@ -418,6 +434,7 @@ export function Board({
   roll = null,
   power = null,
   activeRacer = null,
+  links = [],
 }: BoardProps) {
   const track = trackForRace(raceNo);
   const g = geometry(!useWide());
@@ -457,6 +474,23 @@ export function Board({
       spaceGlows.set(i, colors);
     }
   }
+
+  /** Where a racer's piece is drawn: racers sharing a space fan out, finishers line up by rank. */
+  const placeOf = (r: (typeof live)[number]): { pos: number; x: number; y: number; radius: number; rank: number | null } => {
+    const pos = drawnPos(r.racerId, r.pos);
+    if (pos >= FINISH) {
+      const n = Math.max(0, finished.findIndex((f) => f.racerId === r.racerId));
+      const area = finishSplit.tokens;
+      const s = slot(n, finished.length, area.w - 8, area.h - 8, R_FINISH);
+      return { pos, x: center(area).x + s.dx, y: center(area).y + s.dy, radius: s.r, rank: r.finishedRank };
+    }
+    const group = groups.get(pos) ?? [r.racerId];
+    const b = boxes[pos] ?? boxes[0] ?? { x: 0, y: 0, w: 0, h: 0 };
+    const area = pos === 0 ? startSplit.tokens : b;
+    const c = center(area);
+    const s = slot(group.indexOf(r.racerId), group.length, area.w - 6, area.h - 6, 30);
+    return { pos, x: c.x + s.dx, y: c.y + s.dy, radius: s.r, rank: null };
+  };
 
   /** Direction of travel at a space, in degrees, for drawing arrows. */
   const heading = (index: number): number => {
@@ -608,6 +642,15 @@ export function Board({
           FINISH
         </text>
 
+        {/* Under the pieces, so a rope runs into each token rather than across its face, and
+            under the die, which it would otherwise cross on its way over the infield. */}
+        {links.map((link) => {
+          const a = live.find((r) => r.racerId === link.a);
+          const b = live.find((r) => r.racerId === link.b);
+          if (!a || !b) return null;
+          return <Tether key={link.key} from={placeOf(a)} to={placeOf(b)} color={link.color} kind={link.kind} title={link.title} />;
+        })}
+
         {roll && (() => {
           const owner = view.board.find((b) => b.racerId === roll.racerId)?.owner;
           const size = g.portrait ? 96 : 120;
@@ -626,30 +669,7 @@ export function Board({
         })()}
 
         {live.map((r) => {
-          const pos = drawnPos(r.racerId, r.pos);
-          let x: number;
-          let y: number;
-          let radius: number;
-          let rank: number | null = null;
-
-          if (pos >= FINISH) {
-            const n = Math.max(0, finished.findIndex((f) => f.racerId === r.racerId));
-            rank = r.finishedRank;
-            const area = finishSplit.tokens;
-            const s = slot(n, finished.length, area.w - 8, area.h - 8, R_FINISH);
-            x = center(area).x + s.dx;
-            y = center(area).y + s.dy;
-            radius = s.r;
-          } else {
-            const group = groups.get(pos) ?? [r.racerId];
-            const b = boxes[pos] ?? boxes[0] ?? { x: 0, y: 0, w: 0, h: 0 };
-            const area = pos === 0 ? startSplit.tokens : b;
-            const c = center(area);
-            const s = slot(group.indexOf(r.racerId), group.length, area.w - 6, area.h - 6, 30);
-            x = c.x + s.dx;
-            y = c.y + s.dy;
-            radius = s.r;
-          }
+          const { pos, x, y, radius, rank } = placeOf(r);
 
           const mine = r.owner === view.you;
           const powered = power !== null && power.racerId === r.racerId && !power.instant;

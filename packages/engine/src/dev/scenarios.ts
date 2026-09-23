@@ -1556,7 +1556,7 @@ scenario('Sets — a new room drafts from the classic set, and the host can mix 
   );
 });
 
-scenario('Sets — Dota alone has 28 racers: enough for six players', () => {
+scenario('Sets — Dota alone has 38 racers: enough for six players', () => {
   const lobby = lobbyWith('p1', 'p2', 'p3', 'p4', 'p5');
   const five = applyAction(applyAction(lobby, toggle('p1', 'dota')).state, toggle('p1', 'classic')).state;
   check(
@@ -1564,7 +1564,7 @@ scenario('Sets — Dota alone has 28 racers: enough for six players', () => {
     'five players may start',
   );
 
-  // Six players draft 24 racers, which the set now covers with four to spare — so an
+  // Six players draft 24 racers, which the set now covers with fourteen to spare — so an
   // Egg still has somewhere to hatch from in a Dota-only game.
   const six = applyAction(five, { t: 'lobby/join', by: playerId('p6'), name: 'P6' }).state;
   check(
@@ -1574,7 +1574,7 @@ scenario('Sets — Dota alone has 28 racers: enough for six players', () => {
   const dealt = playGame({ seed: 9200, playerCount: 6, sets: ['dota'] }).state;
   const hands = Object.values(dealt.hands).flat();
   check(hands.length === 24, 'six full hands', String(hands.length));
-  check(racersInSets(['dota']).length - hands.length === 4, 'with four left undrafted');
+  check(racersInSets(['dota']).length - hands.length === 18, 'with eighteen left undrafted');
 });
 
 scenario('Sets — the draft deals only from the chosen sets', () => {
@@ -1805,7 +1805,7 @@ scenario('Anti-Mage — can skip the main move to warp up to 3 ahead', () => {
   check(racerAt(fell.state, 'anti-mage')?.tripped === true, `and blinking onto TRIP at ${trap} still trips`);
 });
 
-scenario('Faceless Void — once per race, before or after the move, trips everyone within 2', () => {
+scenario('Faceless Void — before or after the move, trips everyone within 2, then cools down', () => {
   const s = raceState(
     [
       { player: 'p1', racer: 'faceless-void', pos: 10 },
@@ -1832,16 +1832,20 @@ scenario('Faceless Void — once per race, before or after the move, trips every
   const late = applyAction(waited.state, decide('p1', 'chrono'));
   check(racerAt(late.state, 'vanilla-03')?.tripped === true && racerAt(late.state, 'vanilla-01')?.tripped === false, '13 is in reach now, 8 is not');
   const saved = applyAction(waited.state, decide('p1', 'wait'));
-  check(racerAt(saved.state, 'faceless-void')?.memo['chronoUsed'] !== true && saved.state.pending === null, 'or saved for another turn');
+  check(racerAt(saved.state, 'faceless-void')?.memo['timers'] === undefined && saved.state.pending === null, 'or saved for another turn');
+  const cooling = racerAt(chrono.state, 'faceless-void')?.memo['timers'] as Record<string, number> | undefined;
+  check(cooling?.['chrono'] === 4, 'cast: 4 more of its turns to cool down', JSON.stringify(cooling));
 
   const used = raceState(
     [
-      { player: 'p1', racer: 'faceless-void', pos: 10, memo: { chronoUsed: true } },
+      { player: 'p1', racer: 'faceless-void', pos: 10, memo: { timers: { chrono: 1 } } },
       { player: 'p2', racer: 'vanilla-01', pos: 8 },
     ],
     'p1',
   );
-  check(applyAction(used, roll('p1')).state.pending === null, 'not offered a second time');
+  const blocked = applyAction(used, roll('p1'));
+  check(blocked.state.pending === null, 'not offered while cooling down');
+  check(racerAt(blocked.state, 'faceless-void')?.memo['timers'] === undefined, 'and ready again once that turn ends');
 });
 
 scenario('Silencer — once per race, everyone else loses their powers for a rolled number of turns', () => {
@@ -2051,48 +2055,87 @@ scenario('Legion Commander — DUEL! whenever a racer shares its space; the winn
   check(rolled.value === (rolled.natural ?? NaN) + 1, 'and every main move after it is one longer', JSON.stringify(rolled));
 });
 
-scenario('Oracle — predicts who trips first; right is worth 3', () => {
+scenario('Oracle — calls odd or even; each hit in a row is worth one more', () => {
   const s = raceState(
     [
-      { player: 'p1', racer: 'oracle', pos: 0 },
-      { player: 'p2', racer: 'vanilla-01', pos: 0 },
+      { player: 'p1', racer: 'oracle', pos: 1 },
+      { player: 'p2', racer: 'vanilla-01', pos: 1 },
     ],
     'p1',
   );
+  const rolledOf = (events: readonly GameEvent[]): { value: number; natural?: number } =>
+    events.find((e) => e.t === 'dice/rolled') as { value: number; natural?: number };
+
   const asked = applyAction(s, roll('p1'));
-  check(asked.state.pending?.prompt === 'Who will trip first?', 'asks on its first turn');
-  check(asked.state.pending?.options.length === 2, 'anyone may be named, itself included');
+  check(asked.state.pending?.prompt.includes('odd or even') === true, 'asked for a call before rolling');
 
-  const board = (prediction: string): GameState =>
-    raceState(
-      [
-        { player: 'p1', racer: 'oracle', pos: 0, memo: { prediction } },
-        { player: 'p2', racer: 'vanilla-01', pos: 1 },
-        { player: 'p3', racer: 'banana', pos: 3 },
-      ],
-      'p2',
-    );
-  const right = rollFor(board('vanilla-01'), 'p2', 5);
-  check(pointsOf(right.state, 'p1') === 3, 'called it: +3', String(pointsOf(right.state, 'p1')));
+  // Seed after seed: call, roll, and keep the first result `found` accepts.
+  const callUntil = (
+    from: GameState,
+    call: string,
+    found: (rolled: { value: number; natural?: number }) => boolean,
+  ): { state: GameState; events: readonly GameEvent[] } => {
+    for (let seed = 1; seed < 2000; seed++) {
+      const res = applyAction(applyAction({ ...from, seed }, roll('p1')).state, decide('p1', call));
+      const rolled = rolledOf(res.events);
+      if (rolled && found(rolled)) return res;
+    }
+    throw new Error('no seed found');
+  };
 
-  const wrong = rollFor(board('banana'), 'p2', 5);
-  check(pointsOf(wrong.state, 'p1') === 0, 'wrong: nothing');
-  check(racerAt(wrong.state, 'oracle')?.memo['foreseen'] === true, 'and the prediction is spent');
+  const hit = callUntil(s, 'odd', (r) => r.natural !== undefined);
+  const first = rolledOf(hit.events);
+  check(first.natural !== undefined && first.natural % 2 === 1 && first.value === first.natural + 1, 'a hit: +1', JSON.stringify(first));
+  check(racerAt(hit.state, 'oracle')?.memo['streak'] === 1, 'a streak of 1');
 
-  // Predicting its own trip is allowed, and pays like any other right call.
-  const self = raceState(
-    [
-      { player: 'p1', racer: 'oracle', pos: 1, memo: { prediction: 'oracle' } },
-      { player: 'p2', racer: 'baba-yaga', pos: 4 },
-    ],
-    'p1',
-  );
-  const tripped = rollFor(self, 'p1', 3);
-  check(racerAt(tripped.state, 'oracle')?.tripped === true, 'Oracle trips on Baba Yaga');
-  check(pointsOf(tripped.state, 'p1') === 3, 'having foreseen its own trip: +3', logLines(tripped.events));
+  const on = { ...s, board: s.board.map((r) => (r.racerId === racerId('oracle') ? { ...r, memo: { streak: 2 } } : r)) };
+  const third = callUntil(on, 'even', (r) => r.natural !== undefined);
+  const three = rolledOf(third.events);
+  check(three.value === (three.natural ?? NaN) + 3, 'a third hit in a row: +3', JSON.stringify(three));
+
+  const miss = callUntil(on, 'even', (r) => r.natural === undefined);
+  check(rolledOf(miss.events).value % 2 === 1, 'a miss: no bonus');
+  check(racerAt(miss.state, 'oracle')?.memo['streak'] === undefined, 'and the streak is gone');
 });
 
-scenario('Storm Spirit — rolls a d6, and a d20 once per race', () => {
+scenario('Largo — +1 per racer on its space, itself included, and +1 to everyone sharing it', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'largo', pos: 5 },
+      { player: 'p2', racer: 'vanilla-01', pos: 5 },
+      { player: 'p3', racer: 'vanilla-02', pos: 5 },
+      { player: 'p4', racer: 'vanilla-03', pos: 9 },
+    ],
+    'p1',
+  );
+  const rolledOf = (events: readonly GameEvent[]): { value: number; natural?: number } =>
+    events.find((e) => e.t === 'dice/rolled') as { value: number; natural?: number };
+
+  const own = rolledOf(applyAction(s, roll('p1')).events);
+  check(own.value === (own.natural ?? NaN) + 3, 'a band of three: +3', JSON.stringify(own));
+
+  const band = rolledOf(applyAction(raceState(
+    [
+      { player: 'p2', racer: 'vanilla-01', pos: 5 },
+      { player: 'p1', racer: 'largo', pos: 5 },
+      { player: 'p3', racer: 'vanilla-02', pos: 12 },
+    ],
+    'p2',
+  ), roll('p2')).events);
+  check(band.value === (band.natural ?? NaN) + 1, 'a racer sharing its space: +1', JSON.stringify(band));
+
+  const alone = rolledOf(applyAction(raceState(
+    [
+      { player: 'p2', racer: 'vanilla-01', pos: 6 },
+      { player: 'p1', racer: 'largo', pos: 5 },
+      { player: 'p3', racer: 'vanilla-02', pos: 12 },
+    ],
+    'p2',
+  ), roll('p2')).events);
+  check(alone.natural === undefined, 'next to it is not on it: nothing', JSON.stringify(alone));
+});
+
+scenario('Storm Spirit — rolls a d6, or a d20 on a 6-turn cooldown', () => {
   const s = raceState(
     [
       { player: 'p1', racer: 'storm-spirit', pos: 1 },
@@ -2117,10 +2160,10 @@ scenario('Storm Spirit — rolls a d6, and a d20 once per race', () => {
   check(big.size === 20 && Math.max(...big) === 20, 'the d20: faces 1 to 20', [...big].join(','));
 
   const used = applyAction(asked.state, decide('p1', 'overload')).state;
-  const me = racerAt(used, 'storm-spirit');
-  check(me?.memo['overloadUsed'] === true && me.memo['overloading'] === undefined, 'spent, and back to the d6 after the turn');
-  const again = raceState([{ player: 'p1', racer: 'storm-spirit', pos: 1, memo: { overloadUsed: true } }, { player: 'p2', racer: 'vanilla-01', pos: 20 }], 'p1');
-  check(applyAction(again, roll('p1')).state.pending === null, 'not offered a second time');
+  const timers = racerAt(used, 'storm-spirit')?.memo['timers'] as Record<string, number> | undefined;
+  check(timers?.['overload'] === 5 && timers['overloading'] === undefined, 'cooling down, and back to the d6 after the turn', JSON.stringify(timers));
+  const again = raceState([{ player: 'p1', racer: 'storm-spirit', pos: 1, memo: { timers: { overload: 2 } } }, { player: 'p2', racer: 'vanilla-01', pos: 20 }], 'p1');
+  check(applyAction(again, roll('p1')).state.pending === null, 'not offered while cooling down');
 });
 
 scenario('Bloodseeker — +1 to the main move for each other racer down', () => {
@@ -2459,7 +2502,7 @@ scenario('Bristleback — a trip takes everyone on its space or next to it down 
   check(logLines(down.events).includes('quills'), 'logged');
 });
 
-scenario('Drow Ranger — a d6 in the pack, a d8 with room to shoot', () => {
+scenario('Drow Ranger — a d6 in the pack, a d10 with room to shoot', () => {
   const thrown = (events: readonly GameEvent[]): number =>
     (events.find((e) => e.t === 'dice/thrown') as { value: number } | undefined)?.value ?? NaN;
   const faces = (other: number): Set<number> => {
@@ -2476,7 +2519,7 @@ scenario('Drow Ranger — a d6 in the pack, a d8 with room to shoot', () => {
   };
 
   const d6 = (seen: Set<number>): boolean => seen.size === 6 && Math.max(...seen) === 6;
-  const d8 = (seen: Set<number>): boolean => seen.size === 8 && Math.max(...seen) === 8;
+  const d10 = (seen: Set<number>): boolean => seen.size === 10 && Math.max(...seen) === 10;
   const same = faces(5);
   check(d6(same), 'a racer on her space: faces 1 to 6', [...same].join(','));
   const ahead = faces(6);
@@ -2484,7 +2527,7 @@ scenario('Drow Ranger — a d6 in the pack, a d8 with room to shoot', () => {
   const behind = faces(4);
   check(d6(behind), 'behind counts too', [...behind].join(','));
   const clear = faces(7);
-  check(d8(clear), 'two spaces away is clear: faces 1 to 8', [...clear].join(','));
+  check(d10(clear), 'two spaces away is clear: faces 1 to 10', [...clear].join(','));
 });
 
 scenario('Night Stalker — +2 on its odd turns, -1 on its even ones', () => {
@@ -2532,6 +2575,367 @@ scenario('Slark — +1 per silver cup and +2 per gold, from every race so far', 
   };
   const fed = rolledOf(applyAction(shelved, roll('p1')).events);
   check(fed.value === (fed.natural ?? NaN) + 3, 'a gold and a silver: +3, and the chips count for nothing', JSON.stringify(fed));
+});
+
+const rolledOf = (events: readonly GameEvent[]): { value: number; natural?: number } =>
+  events.find((e) => e.t === 'dice/rolled') as { value: number; natural?: number };
+
+scenario('Void Spirit — nudges one other racer 1 space either way', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'void-spirit', pos: 5 },
+      { player: 'p2', racer: 'vanilla-01', pos: 12 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(s, roll('p1'));
+  check(asked.state.pending?.options.length === 3, 'forward, back, or pass', asked.state.pending?.options.map((o) => o.id).join(','));
+  const back = applyAction(asked.state, decide('p1', 'nudge:vanilla-01:-1'));
+  check(racerAt(back.state, 'vanilla-01')?.pos === 11, 'nudged back to 11', String(racerAt(back.state, 'vanilla-01')?.pos));
+  check(has(back.events, 'dice/rolled'), 'and Void Spirit still rolls');
+});
+
+scenario('Lich — after its move, pulls everyone to its space', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'lich', pos: 5 },
+      { player: 'p2', racer: 'vanilla-01', pos: 2 },
+      { player: 'p3', racer: 'vanilla-02', pos: 20 },
+    ],
+    'p1',
+  );
+  const after = rollFor(s, 'p1', 3);
+  const at = racerAt(after.state, 'lich')?.pos;
+  check(racerAt(after.state, 'vanilla-01')?.pos === at, 'the one behind is pulled up', `${racerAt(after.state, 'vanilla-01')?.pos} vs ${at}`);
+  check(racerAt(after.state, 'vanilla-02')?.pos === at, 'the one ahead is pulled back', `${racerAt(after.state, 'vanilla-02')?.pos} vs ${at}`);
+});
+
+scenario('Magnus — drags every racer it passes to where it stops, and finishes ahead of them', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'magnus', pos: 5 },
+      { player: 'p2', racer: 'vanilla-01', pos: 5 },
+      { player: 'p3', racer: 'vanilla-02', pos: 7 },
+    ],
+    'p1',
+  );
+  const moved = rollFor(s, 'p1', 4);
+  check(racerAt(moved.state, 'vanilla-02')?.pos === 9, 'the racer on its path is dragged to 9', String(racerAt(moved.state, 'vanilla-02')?.pos));
+  check(racerAt(moved.state, 'vanilla-01')?.pos === 5, 'the racer on its starting space stays');
+
+  const home = raceState(
+    [
+      { player: 'p2', racer: 'vanilla-01', pos: 27 },
+      { player: 'p1', racer: 'magnus', pos: 26 },
+      { player: 'p3', racer: 'vanilla-02', pos: 1 },
+    ],
+    'p1',
+  );
+  const over = rollFor(home, 'p1', 5);
+  check(racerAt(over.state, 'magnus')?.finishedRank === 1, 'Magnus takes 1st', String(racerAt(over.state, 'magnus')?.finishedRank));
+  check(racerAt(over.state, 'vanilla-01')?.finishedRank === 2, 'and the dragged racer 2nd', String(racerAt(over.state, 'vanilla-01')?.finishedRank));
+});
+
+scenario('Underlord — skips its move to warp to another racer', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'underlord', pos: 3 },
+      { player: 'p2', racer: 'vanilla-01', pos: 14 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(s, roll('p1'));
+  check(asked.state.pending?.options[0]?.id === 'gate:14', 'offers the racer on 14', asked.state.pending?.options[0]?.id);
+  const gone = applyAction(asked.state, decide('p1', 'gate:14'));
+  check(racerAt(gone.state, 'underlord')?.pos === 14, 'warped to 14');
+  check(!has(gone.events, 'dice/rolled'), 'and gives up the roll');
+});
+
+scenario('Doom — racers on its space or next to it have no powers', () => {
+  const near = raceState(
+    [
+      { player: 'p1', racer: 'hare', pos: 10 },
+      { player: 'p2', racer: 'doom', pos: 11 },
+      { player: 'p3', racer: 'vanilla-01', pos: 1 },
+    ],
+    'p1',
+  );
+  const doomed = rolledOf(applyAction(near, roll('p1')).events);
+  check(doomed.natural === undefined, 'Hare next to Doom gets no +2', JSON.stringify(doomed));
+  const far = raceState(
+    [
+      { player: 'p1', racer: 'hare', pos: 10 },
+      { player: 'p2', racer: 'doom', pos: 12 },
+      { player: 'p3', racer: 'vanilla-01', pos: 1 },
+    ],
+    'p1',
+  );
+  const free = rolledOf(applyAction(far, roll('p1')).events);
+  check(free.value === (free.natural ?? NaN) + 2, 'two spaces away, Hare has its +2', JSON.stringify(free));
+});
+
+scenario("Sven — God's Strength: +3 for 3 of its turns, then a cooldown", () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'sven', pos: 1 },
+      { player: 'p2', racer: 'vanilla-01', pos: 1 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(s, roll('p1'));
+  check(asked.state.pending?.prompt.includes("God's Strength") === true, 'offered before the roll');
+  const cast = applyAction(asked.state, decide('p1', 'strength'));
+  const first = rolledOf(cast.events);
+  check(first.value === (first.natural ?? NaN) + 3, 'this turn: +3', JSON.stringify(first));
+  const timers = racerAt(cast.state, 'sven')?.memo['timers'] as Record<string, number> | undefined;
+  check(timers?.['strength'] === 2 && timers['strengthCooldown'] === 5, 'two more turns of it, five of cooldown', JSON.stringify(timers));
+
+  const second = applyAction(applyAction(cast.state, roll('p2')).state, roll('p1'));
+  check(second.state.pending === null || !second.state.pending.prompt.includes("God's Strength"), 'not offered again while cooling down');
+  const next = rolledOf(second.events);
+  check(next.value === (next.natural ?? NaN) + 3, 'next turn: still +3', JSON.stringify(next));
+});
+
+scenario('Kez — picks an odd-only or even-only d6 for the turn', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'kez', pos: 1 },
+      { player: 'p2', racer: 'vanilla-01', pos: 20 },
+    ],
+    'p1',
+  );
+  const thrown = (events: readonly GameEvent[]): number =>
+    (events.find((e) => e.t === 'dice/thrown') as { value: number } | undefined)?.value ?? NaN;
+  const odd = new Set<number>();
+  const even = new Set<number>();
+  for (let seed = 1; seed <= 200; seed++) {
+    const at = applyAction({ ...s, seed }, roll('p1')).state;
+    odd.add(thrown(applyAction(at, decide('p1', 'odd')).events));
+    even.add(thrown(applyAction(at, decide('p1', 'even')).events));
+  }
+  check([...odd].sort().join(',') === '1,3,5', 'odd: 1, 3, 5', [...odd].join(','));
+  check([...even].sort().join(',') === '2,4,6', 'even: 2, 4, 6', [...even].join(','));
+});
+
+scenario('Invoker — moves the sum of the dice showing its colour', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'invoker', pos: 1 },
+      { player: 'p2', racer: 'vanilla-01', pos: 25 },
+    ],
+    'p1',
+  );
+  let ok = true;
+  let zero = false;
+  let big = false;
+  for (let seed = 1; seed <= 300; seed++) {
+    const at = applyAction({ ...s, seed }, roll('p1')).state;
+    const res = applyAction(at, decide('p1', 'pink'));
+    const t = res.events.find((e) => e.t === 'dice/thrown') as
+      | { value: number; dice?: number[]; colours?: string[] }
+      | undefined;
+    if (!t?.dice || !t.colours || t.dice.length !== 3) {
+      ok = false;
+      break;
+    }
+    const want = t.dice.reduce((sum, d, i) => sum + (t.colours?.[i] === 'pink' ? d : 0), 0);
+    if (t.value !== want) ok = false;
+    if (t.value === 0) zero = true;
+    if (t.value > 6) big = true;
+  }
+  check(ok, 'three coloured dice, and the pink ones summed');
+  check(zero && big, 'from nothing at all to more than a d6 can roll');
+});
+
+scenario('Legion Commander — a duel is a plain d6 plus earlier duel wins, whatever the die', () => {
+  // Chaos Knight's d20 and Ogre Magi's d3 × d3 stay out of it: both throw a d6.
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'legion-commander', pos: 3, memo: { mainMoveBonus: 2 } },
+      { player: 'p2', racer: 'chaos-knight', pos: 7 },
+    ],
+    'p1',
+  );
+  const faces = new Set<number>();
+  let dice = true;
+  const duel = pressRolls(rollFor(s, 'p1', 4, { by: 'p1', choice: 'duel:chaos-knight' }));
+  for (const e of duel.events) {
+    if (e.t !== 'dice/thrown' || e.power !== ('legion-commander' as never)) continue;
+    if (e.die !== undefined || e.dice !== undefined) dice = false;
+    faces.add(e.value);
+  }
+  const logged = /rolls \d \+ 2 = \d/.test(logLines(duel.events));
+  check(dice && faces.size > 0 && duel.asked.length === 2 && Math.max(...faces) <= 6, 'both throw a plain d6', [...faces].join(','));
+  check(logged, "and the Commander's two earlier wins are added on");
+});
+
+scenario('Juggernaut — Omnislash hops to the nearer racer 1 or 2 ahead until the chain runs out', () => {
+  // From 5: 6 and 7 are both in reach, so 6; then 7, then 9; from 9 nothing at 10 or 11, so it ends.
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'juggernaut', pos: 5 },
+      { player: 'p2', racer: 'vanilla-01', pos: 6 },
+      { player: 'p3', racer: 'vanilla-02', pos: 7 },
+      { player: 'p4', racer: 'vanilla-03', pos: 9 },
+      { player: 'p5', racer: 'vanilla-04', pos: 12 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(s, roll('p1'));
+  check(asked.state.pending?.options[0]?.id === 'slash', 'offered before rolling', asked.state.pending?.prompt);
+  const slashed = applyAction(asked.state, decide('p1', 'slash'));
+  check(racerAt(slashed.state, 'juggernaut')?.pos === 9, 'ends on 9, via 6 and 7', String(racerAt(slashed.state, 'juggernaut')?.pos));
+  const slashes = slashed.events.filter((e) => e.t === 'ability/triggered' && e.racerId === racerId('juggernaut')).length;
+  check(slashes === 3, 'three hops, three happenings for Scoocher', String(slashes));
+  check(!has(slashed.events, 'dice/rolled'), 'and gives up the roll');
+  check(slashed.events.filter((e) => e.t === 'racer/warped').length === 1, 'one warp: only the last space counts');
+  const timers = racerAt(slashed.state, 'juggernaut')?.memo['timers'] as Record<string, number> | undefined;
+  check(timers?.['omnislash'] === 3, 'cooling down', JSON.stringify(timers));
+
+  const clear = raceState(
+    [
+      { player: 'p1', racer: 'juggernaut', pos: 5 },
+      { player: 'p2', racer: 'vanilla-01', pos: 8 },
+    ],
+    'p1',
+  );
+  check(applyAction(clear, roll('p1')).state.pending === null, 'nobody 1 or 2 ahead: not offered');
+});
+
+scenario('Spirit Breaker — an arrow space is a move too, so it bashes whoever it sweeps past', () => {
+  // Wild Wilds: 4 + 3 lands on the arrow at 7, which sweeps it 3 on to 10, past the racer on 8.
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'spirit-breaker', pos: 4 },
+      { player: 'p2', racer: 'vanilla-01', pos: 8 },
+    ],
+    'p1',
+    2,
+  );
+  const swept = rollFor(s, 'p1', 3);
+  check(racerAt(swept.state, 'spirit-breaker')?.pos === 10, 'swept on to 10', String(racerAt(swept.state, 'spirit-breaker')?.pos));
+  check(swept.state.pending?.prompt.includes('charges past') === true, 'and the racer it swept past rolls for the bash', swept.state.pending?.prompt);
+});
+
+scenario('Lina — a Fiery Soul stack a turn, +1 per 2 stacks, and a trip burns them all', () => {
+  // Three stacks going in, four after this turn's: +2.
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'lina', pos: 2, memo: { fierySoul: 3 } },
+      { player: 'p2', racer: 'vanilla-01', pos: 20 },
+    ],
+    'p1',
+  );
+  // `rollFor` matches the move as rolled, modifiers included: 3 + 2.
+  const moved = rollFor(s, 'p1', 5);
+  check(posOf(moved.state, 'lina') === 7 && rolledOf(moved.events).natural === 3, '3 + 2 from four stacks', String(posOf(moved.state, 'lina')));
+  check(racerAt(moved.state, 'lina')?.memo['fierySoul'] === 4, 'and one stack gained');
+
+  const capped = rollFor({ ...s, board: s.board.map((r) => ({ ...r, memo: r.racerId === racerId('lina') ? { fierySoul: 8 } : r.memo })) }, 'p1', 5);
+  check(posOf(capped.state, 'lina') === 7 && rolledOf(capped.events).natural === 1, 'eight stacks is the cap: +4', String(posOf(capped.state, 'lina')));
+});
+
+scenario('Phantom Assassin — two d6s, the first counts, tripled when the second is a 6', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'phantom-assassin', pos: 1 },
+      { player: 'p2', racer: 'vanilla-01', pos: 25 },
+    ],
+    'p1',
+  );
+  const thrownOf = (events: readonly GameEvent[]) =>
+    events.find((e) => e.t === 'dice/thrown' && !e.power) as { dice?: number[]; value: number } | undefined;
+  const crit = rollUntil(s, 'p1', (res) => thrownOf(res.events)?.dice?.[1] === 6);
+  const critDice = thrownOf(crit.events)?.dice ?? [];
+  check(posOf(crit.state, 'phantom-assassin') === 1 + critDice[0]! * 3, 'a 6 on the second die triples the first', critDice.join(','));
+  check(logLines(crit.events).includes('Coup de Grace'), 'and says so');
+  const plain = rollUntil(s, 'p1', (res) => (thrownOf(res.events)?.dice?.[1] ?? 6) !== 6);
+  const plainDice = thrownOf(plain.events)?.dice ?? [];
+  check(posOf(plain.state, 'phantom-assassin') === 1 + plainDice[0]!, 'otherwise just the first', plainDice.join(','));
+});
+
+scenario('Tusk — Walrus Punch trips a racer on its space, before and after the main move', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'tusk', pos: 4 },
+      { player: 'p2', racer: 'lina', pos: 4, memo: { fierySoul: 5 } },
+      { player: 'p3', racer: 'vanilla-01', pos: 7 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(s, roll('p1'));
+  check(asked.state.pending?.options.some((o) => String(o.id) === 'punch:lina') === true, 'offered the racer on its space', asked.state.pending?.prompt);
+  const punched = applyAction(asked.state, decide('p1', 'punch:lina'));
+  check(racerAt(punched.state, 'lina')?.tripped === true, 'Lina goes down');
+  check(racerAt(punched.state, 'lina')?.memo['fierySoul'] === undefined, 'and loses her Fiery Soul stacks');
+
+  const after = rollFor(s, 'p1', 3, { by: 'p1', choice: 'pass' });
+  check(after.state.pending?.options.some((o) => String(o.id) === 'punch:vanilla-01') === true, 'landing on 7, a second punch is offered', after.state.pending?.prompt);
+});
+
+scenario('Grimstroke — Soulbind picks two racers within 5 of each other', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'grimstroke', pos: 3 },
+      { player: 'p2', racer: 'vanilla-01', pos: 8 },
+      { player: 'p3', racer: 'vanilla-02', pos: 20 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(s, roll('p1'));
+  const firsts = asked.state.pending?.options.map((o) => String(o.id)) ?? [];
+  check(firsts.includes('bind:vanilla-01') && !firsts.includes('bind:vanilla-02'), 'only racers with someone in reach', firsts.join(','));
+  const second = applyAction(asked.state, decide('p1', 'bind:vanilla-01'));
+  const partners = second.state.pending?.options.map((o) => String(o.id)) ?? [];
+  check(partners.join(',') === 'with:grimstroke,pass', 'then a partner within 5 — Grimstroke itself', partners.join(','));
+  const bound = applyAction(second.state, decide('p1', 'with:grimstroke'));
+  const link = racerAt(bound.state, 'grimstroke')?.memo['soulbind'] as { a: string; b: string } | undefined;
+  check(link?.a === 'vanilla-01' && link.b === 'grimstroke', 'the link is made', JSON.stringify(link));
+  const timers = racerAt(bound.state, 'grimstroke')?.memo['timers'] as Record<string, number> | undefined;
+  check(timers?.['soulbind'] === 3, 'and cools down', JSON.stringify(timers));
+});
+
+scenario('Grimstroke — the Soulbind stops a move, shortens a warp, snaps on a loop, and ends on its next turn', () => {
+  const bound = (holds: number): GameState =>
+    raceState(
+      [
+        { player: 'p2', racer: 'vanilla-01', pos: 5 },
+        { player: 'p1', racer: 'grimstroke', pos: 2, memo: { soulbind: { a: 'vanilla-01', b: 'vanilla-02', holds }, timers: { soulbind: 3 } } },
+        { player: 'p3', racer: 'vanilla-02', pos: 3 },
+      ],
+      'p2',
+    );
+  const held = rollFor(bound(0), 'p2', 6);
+  check(posOf(held.state, 'vanilla-01') === 8, 'a 6 from 5 stops on 8, 5 from its partner on 3', String(posOf(held.state, 'vanilla-01')));
+  check(logLines(held.events).includes('Soulbind holds'), 'and says why');
+
+  const snapped = rollFor(bound(12), 'p2', 6);
+  check(posOf(snapped.state, 'vanilla-01') === 11, 'a link that has held 12 times snaps and lets go', String(posOf(snapped.state, 'vanilla-01')));
+  check(racerAt(snapped.state, 'grimstroke')?.memo['soulbind'] === undefined, 'and is gone');
+
+  const hooked = raceState(
+    [
+      { player: 'p2', racer: 'pudge', pos: 15 },
+      { player: 'p1', racer: 'grimstroke', pos: 2, memo: { soulbind: { a: 'vanilla-01', b: 'vanilla-02', holds: 0 } } },
+      { player: 'p3', racer: 'vanilla-01', pos: 3 },
+      { player: 'p4', racer: 'vanilla-02', pos: 2 },
+    ],
+    'p2',
+  );
+  const asked = applyAction(hooked, roll('p2'));
+  const warped = applyAction(asked.state, decide('p2', 'hook:vanilla-01'));
+  check(posOf(warped.state, 'vanilla-01') === 7, "a Meat Hook to 15 only reaches 7, 5 from the partner on 2", String(posOf(warped.state, 'vanilla-01')));
+
+  const own = raceState(
+    [
+      { player: 'p1', racer: 'grimstroke', pos: 2, memo: { soulbind: { a: 'vanilla-01', b: 'vanilla-02', holds: 0 }, timers: { soulbind: 3 } } },
+      { player: 'p2', racer: 'vanilla-01', pos: 5 },
+      { player: 'p3', racer: 'vanilla-02', pos: 3 },
+    ],
+    'p1',
+  );
+  const next = applyAction(own, roll('p1'));
+  check(racerAt(next.state, 'grimstroke')?.memo['soulbind'] === undefined, "Grimstroke's next turn ends the link");
 });
 
 // --- Report -----------------------------------------------------------------

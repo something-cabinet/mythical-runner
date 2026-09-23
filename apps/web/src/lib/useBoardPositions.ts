@@ -50,6 +50,8 @@ export interface ShownRoll {
   readonly die: number;
   /** Each die's face, when several were thrown and combined into `face` (Ogre Magi). */
   readonly dice?: readonly number[] | undefined;
+  /** Each die's colour, when coloured dice were summed into `face` (Invoker). */
+  readonly colours?: readonly string[] | undefined;
   /**
    * The main move this settles into, or null while powers are still having their say —
    * a die on the table with a question hanging over it.
@@ -72,6 +74,7 @@ type Step =
       readonly value: number;
       readonly die: number;
       readonly dice?: readonly number[] | undefined;
+      readonly colours?: readonly string[] | undefined;
       readonly power?: RacerId | undefined;
     }
   | {
@@ -314,6 +317,7 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
           face: next.value,
           die: next.die,
           dice: next.dice,
+          colours: next.colours,
           move: null,
           replaced: false,
           power: next.power,
@@ -372,6 +376,7 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
               face: e.value,
               die: e.die ?? 6,
               dice: e.dice,
+              colours: e.colours,
               move: null,
               replaced: false,
               power: e.power,
@@ -414,7 +419,7 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
           queue.current.push({ t: 'power', racer: e.racerId, text: e.text });
           continue;
         } else if (e.t === 'dice/thrown') {
-          queue.current.push({ t: 'throw', racer: e.racerId, value: e.value, die: e.die ?? 6, dice: e.dice, power: e.power });
+          queue.current.push({ t: 'throw', racer: e.racerId, value: e.value, die: e.die ?? 6, dice: e.dice, colours: e.colours, power: e.power });
         } else if (e.t === 'dice/rolled') {
           queue.current.push({
             t: 'roll',

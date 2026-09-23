@@ -6,6 +6,9 @@ import {
   racerText,
   powerOf,
   copyTarget,
+  leashesOf,
+  LEASH,
+  SOULBIND,
   RACE_AWARDS,
   totalPoints,
   type CharacterSetId,
@@ -15,6 +18,7 @@ import {
   type RacerId,
   type RaceNumber,
   type RacerState,
+  type Soulbind,
 } from '@mr/engine';
 
 /**
@@ -173,8 +177,9 @@ export function borrowedPower(view: PlayerView, racer: RacerState): RacerId | nu
 }
 
 /**
- * A limited-use power's remaining charges, for the lists: Templar Assassin's Refraction,
- * Faceless Void's Chronosphere, Silencer's Global Silence and Storm Spirit's d20. Null for every other card.
+ * A limited-use power's remaining charges or cooldown, for the lists: Templar Assassin's
+ * Refraction, Silencer's Global Silence, and the cooldowns on Faceless Void's Chronosphere,
+ * Storm Spirit's d20 and Sven's God's Strength. Null for every other card.
  *
  * `power` is the card the racer is running (see `borrowedPower`), so a Morphling borrowing
  * one shows it too. The counts come from the same `memo` keys the powers write.
@@ -189,21 +194,32 @@ export function abilityToken(
       const left = Math.max(0, 3 - used);
       return { label: `refraction ${left}/3`, ready: left > 0, title: `Refraction: ignores the next ${left} trips` };
     }
-    case 'faceless-void': {
-      const used = racer.memo['chronoUsed'] === true;
+    case 'faceless-void':
+      return cooldownToken(racer, 'chrono', 'chrono', 'Chronosphere');
+    case 'storm-spirit':
+      return cooldownToken(racer, 'overload', 'd20', 'Overload (d20)');
+    case 'juggernaut':
+      return cooldownToken(racer, 'omnislash', 'omnislash', 'Omnislash');
+    case 'grimstroke':
+      return cooldownToken(racer, 'soulbind', 'soulbind', 'Soulbind');
+    case 'lina': {
+      const stacks = typeof racer.memo['fierySoul'] === 'number' ? (racer.memo['fierySoul'] as number) : 0;
       return {
-        label: used ? 'chrono used' : 'chrono ready',
-        ready: !used,
-        title: used ? 'Chronosphere already used this race' : 'Chronosphere ready (once per race)',
+        label: `fiery soul ${stacks}/8`,
+        ready: stacks >= 2,
+        title: `Fiery Soul: ${stacks} stack${stacks === 1 ? '' : 's'}, +${Math.floor(stacks / 2)} to her main move`,
       };
     }
-    case 'storm-spirit': {
-      const used = racer.memo['overloadUsed'] === true;
-      return {
-        label: used ? 'd20 used' : 'd20 ready',
-        ready: !used,
-        title: used ? 'Overload (d20) already used this race' : 'Overload ready: one d20 roll this race',
-      };
+    case 'sven': {
+      const active = timerOf(racer, 'strength');
+      if (active > 0) {
+        return {
+          label: `strength ${active}`,
+          ready: true,
+          title: `God's Strength: +3 for ${active === 1 ? 'this turn' : `${active} more turns`}`,
+        };
+      }
+      return cooldownToken(racer, 'strengthCooldown', 'strength', "God's Strength");
     }
     case 'silencer': {
       const used = racer.memo['silenceUsed'] === true;
@@ -218,6 +234,25 @@ export function abilityToken(
   }
 }
 
+/** A racer's own-turn countdown `name` (see the engine's `TIMERS`), or 0 when it has run out. */
+function timerOf(racer: RacerState, name: string): number {
+  const timers = racer.memo['timers'] as Readonly<Record<string, number>> | undefined;
+  return timers?.[name] ?? 0;
+}
+
+/** A cooldown badge: ready, or how many of the racer's turns until it is. */
+function cooldownToken(
+  racer: RacerState,
+  timer: string,
+  short: string,
+  name: string,
+): { label: string; ready: boolean; title: string } {
+  const wait = timerOf(racer, timer);
+  return wait > 0
+    ? { label: `${short} in ${wait}`, ready: false, title: `${name} ready again in ${wait} ${wait === 1 ? 'turn' : 'turns'}` }
+    : { label: `${short} ready`, ready: true, title: `${name} ready` };
+}
+
 /** Silencer's hush on a racer: how many of its own turns it has no powers for. Null when none. */
 export function silencedToken(racer: RacerState): { label: string; title: string } | null {
   const v = racer.memo['silenced'];
@@ -226,6 +261,64 @@ export function silencedToken(racer: RacerState): { label: string; title: string
   return {
     label: `silenced ${turns}`,
     title: `Silenced: no powers for ${turns === 1 ? 'its next turn' : `its next ${turns} turns`}`,
+  };
+}
+
+/**
+ * A tie between two racers that the board draws as a tether: a rope from one piece to the
+ * other, in `color`. `kind` picks the look (see `Tether`).
+ */
+export interface BoardLink {
+  readonly key: string;
+  readonly a: RacerId;
+  readonly b: RacerId;
+  readonly color: string;
+  readonly kind: string;
+  readonly title: string;
+}
+
+/**
+ * Where each kind of link comes from. A new power that ties racers together adds a
+ * source here and the board draws it; nothing else needs to change.
+ */
+const LINK_SOURCES: readonly ((view: PlayerView) => BoardLink[])[] = [
+  // Grimstroke's Soulbind, in Grimstroke's seat colour.
+  (view) =>
+    view.board.flatMap((caster) => {
+      const link = caster.memo[SOULBIND] as Soulbind | undefined;
+      if (!link || caster.eliminated) return [];
+      return [
+        {
+          key: `soulbind:${caster.racerId}`,
+          a: link.a,
+          b: link.b,
+          color: seatColor(view, caster.owner),
+          kind: 'soulbind',
+          title: `${racerName(view, caster.racerId)}'s Soulbind: ${racerName(view, link.a)} and ${racerName(view, link.b)} can't get more than ${LEASH} spaces apart`,
+        },
+      ];
+    }),
+];
+
+/** Every link to draw on the board: both ends still running. */
+export function boardLinks(view: PlayerView): BoardLink[] {
+  const running = (id: RacerId): boolean => {
+    const r = view.board.find((x) => x.racerId === id);
+    return r !== undefined && !r.eliminated && r.finishedRank === null;
+  };
+  return LINK_SOURCES.flatMap((source) => source(view)).filter((l) => running(l.a) && running(l.b));
+}
+
+/**
+ * Grimstroke's Soulbind on a racer: who it can't stray more than 5 spaces from until the
+ * caster's next turn. Null when it is bound to nobody.
+ */
+export function soulbindToken(view: PlayerView, racer: RacerState): { label: string; title: string } | null {
+  const partners = leashesOf(view, racer).map(({ partner }) => racerName(view, partner.racerId));
+  if (partners.length === 0) return null;
+  return {
+    label: 'soulbound',
+    title: `Soulbound to ${partners.join(' and ')}: can't get more than ${LEASH} spaces apart`,
   };
 }
 

@@ -2,7 +2,7 @@ import { FINISH, type RacerId, type RaceNumber } from '@mr/engine';
 import { useRef, type RefObject } from 'react';
 import { Board } from '../components/Board';
 import { ActionBar, RacerCard, RacerToken, Standings, Waiting } from '../components/bits';
-import { abilityToken, borrowedPower, duelBonusToken, silencedToken, ordinal, playerName, powerText, racerName, rawName } from '../lib/present';
+import { abilityToken, boardLinks, borrowedPower, duelBonusToken, silencedToken, soulbindToken, ordinal, playerName, powerText, racerName, rawName } from '../lib/present';
 import { legalOf, useRoomContext } from '../lib/roomContext';
 import type { NumberedLine } from '../lib/useEventLog';
 
@@ -75,6 +75,7 @@ export function RaceScreen() {
               tripSpaces={racing ? board.tripSpaces : []}
               roll={board.roll}
               power={board.power}
+              links={boardLinks(view)}
               activeRacer={
                 // Follow the die while its move plays out; the server has already moved on.
                 board.roll ? board.roll.racerId : upNow
@@ -95,6 +96,7 @@ export function RaceScreen() {
                 const ability = r.finishedRank === null && !r.eliminated ? abilityToken(r, power ?? r.racerId) : null;
                 const duel = r.finishedRank === null && !r.eliminated ? duelBonusToken(r) : null;
                 const hush = r.finishedRank === null && !r.eliminated ? silencedToken(r) : null;
+                const bound = soulbindToken(view, r);
                 return (
                   <div key={r.racerId} className="field-row" data-out={r.eliminated}>
                     <RacerToken view={view} racer={r.racerId} owner={r.owner} />
@@ -125,6 +127,11 @@ export function RaceScreen() {
                       {hush && (
                         <span className="tag tag-bad num" title={hush.title}>
                           {hush.label}
+                        </span>
+                      )}
+                      {bound && (
+                        <span className="tag tag-bad" title={bound.title}>
+                          {bound.label}
                         </span>
                       )}
                       {duel && (

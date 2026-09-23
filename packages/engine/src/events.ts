@@ -121,7 +121,7 @@ export interface DiceThrown {
   /** The face, before modifiers. */
   readonly value: number;
   /**
-   * Sides of the die, when it isn't a d6: Chaos Knight's 20, Drow Ranger's 8. Lets the
+   * Sides of the die, when it isn't a d6: Chaos Knight's 20, Drow Ranger's 10. Lets the
    * client draw the right die.
    */
   readonly die?: number;
@@ -130,6 +130,11 @@ export interface DiceThrown {
    * d3 × d3. `die` is then the sides of each one.
    */
   readonly dice?: readonly number[];
+  /**
+   * Each die's colour, parallel to `dice`, when they were coloured and summed rather than
+   * multiplied — Invoker's blue, pink and orange.
+   */
+  readonly colours?: readonly string[];
   /**
    * The racer whose power called for this roll — Tidehunter getting up, a Spirit Breaker victim's
    * bash roll, either side of a duel. Absent for a main move, which is the only roll a

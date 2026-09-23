@@ -1,6 +1,6 @@
 import { racerId, type RacerId } from '../ids.js';
 import type { RacerState } from '../state.js';
-import { FINISH } from '../tracks/index.js';
+import { FINISH, START } from '../tracks/index.js';
 import { option, racerTarget, type Hooks } from './hooks.js';
 import { getHooks } from './registry.js';
 
@@ -15,6 +15,7 @@ import { getHooks } from './registry.js';
 
 export const COPY_CAT = racerId('copy-cat');
 export const MORPHLING = racerId('morphling');
+export const DOOM = racerId('doom');
 
 /**
  * Powers that are someone else's power, and where on the board that someone stands.
@@ -39,6 +40,58 @@ export function silencedTurns(racer: RacerState): number {
   const v = racer.memo[SILENCED];
   return v === true ? 1 : typeof v === 'number' ? v : 0;
 }
+/**
+ * `memo` key holding a racer's own-turn countdowns — cooldowns, and timed effects like
+ * Sven's God's Strength — as `{ name: turnsLeft }`. The engine ticks each one down at the
+ * end of every turn of that racer's, silenced or not, so a hushed power still cools down.
+ */
+export const TIMERS = 'timers';
+
+/** How many of its own turns `racer` has left on timer `name`; 0 when it has run out. */
+export function timerLeft(racer: RacerState, name: string): number {
+  const timers = racer.memo[TIMERS] as Readonly<Record<string, number>> | undefined;
+  return timers?.[name] ?? 0;
+}
+/**
+ * `memo` key on Grimstroke holding its Soulbind, a `Soulbind`: two racers kept within
+ * `LEASH` spaces of each other until Grimstroke's next turn, when the engine clears it.
+ * Held by the engine rather than the power's hooks, so the link holds on every racer's
+ * turn — and whether or not Grimstroke has its powers at that moment.
+ */
+export const SOULBIND = 'soulbind';
+/** How far apart a Soulbind lets its two racers get. */
+export const LEASH = 5;
+/**
+ * How many times a Soulbind may hold a racer back before it snaps. A link that keeps
+ * pulling on the same racers is stuck in a loop — a power that keeps trying the move the
+ * link refuses — so it gives way rather than hang the game.
+ */
+export const LEASH_SNAP = 12;
+
+export interface Soulbind {
+  readonly a: RacerId;
+  readonly b: RacerId;
+  /** Times this link has held a racer back so far. */
+  readonly holds: number;
+}
+
+/** The Soulbinds on `racer`: who each one ties it to, and the Grimstroke holding it. */
+export function leashesOf(
+  s: BoardLike,
+  racer: RacerState,
+): { caster: RacerState; link: Soulbind; partner: RacerState }[] {
+  const running = (r: RacerState | undefined): r is RacerState =>
+    r !== undefined && !r.eliminated && r.finishedRank === null && r.pos !== FINISH;
+  if (!running(racer)) return [];
+  return s.board.flatMap((caster) => {
+    const link = caster.memo[SOULBIND] as Soulbind | undefined;
+    if (!link || caster.eliminated) return [];
+    const other = link.a === racer.racerId ? link.b : link.b === racer.racerId ? link.a : null;
+    const partner = other === null ? undefined : s.board.find((r) => r.racerId === other);
+    return running(partner) ? [{ caster, link, partner }] : [];
+  });
+}
+
 /** `memo` key holding a permanent main move bonus, from Legion Commander's duel. */
 export const MAIN_MOVE_BONUS = 'mainMoveBonus';
 /** `memo` key set when a racer has given up its coming main move for a power. */
@@ -96,14 +149,46 @@ export function copyTarget(s: BoardLike, self: RacerState): RacerId | null {
  * asked it. `undefined` means work it out from the board.
  */
 export function hooksFor(s: BoardLike, racer: RacerState, pinned?: RacerId | null): Hooks {
-  // Silencer: "they can only roll for main move" — for the whole of each silenced turn.
-  if (silencedTurns(racer) > 0 && s.phase?.t === 'racing' && s.phase.moving === racer.racerId) {
-    return NO_HOOKS;
-  }
+  if (powersSuppressed(s, racer)) return NO_HOOKS;
   const power = powerOf(racer);
   const where = MIMICS.get(power);
   if (!where) return getHooks(power);
   return mimicHooks(where, pinned !== undefined ? pinned : copyTarget(s, racer));
+}
+
+/**
+ * Whether `racer` has no powers at all right now: silenced on its own turn, or standing in
+ * Doom's aura.
+ */
+export function powersSuppressed(s: BoardLike, racer: RacerState): boolean {
+  return silencedNow(s, racer) || doomed(s, racer);
+}
+
+/** Silencer: "they have no powers" — for the whole of each silenced turn of theirs. */
+function silencedNow(s: BoardLike, racer: RacerState): boolean {
+  return silencedTurns(racer) > 0 && s.phase?.t === 'racing' && s.phase.moving === racer.racerId;
+}
+
+/**
+ * DOOM — "Any racer on my space or next to it has no powers."
+ *
+ * Read off the board on every dispatch, so the aura follows Doom and lets go the moment a
+ * racer steps out of it. Doom is never doomed itself, and a silenced Doom has no aura. The
+ * Start space is exempt: every racer begins there, and a Doom on it would strip the whole
+ * field of its "before race" powers for good.
+ */
+function doomed(s: BoardLike, racer: RacerState): boolean {
+  if (racer.pos === START || powerOf(racer) === DOOM) return false;
+  return s.board.some(
+    (d) =>
+      d !== racer &&
+      powerOf(d) === DOOM &&
+      !d.eliminated &&
+      d.finishedRank === null &&
+      d.pos !== FINISH &&
+      Math.abs(d.pos - racer.pos) <= 1 &&
+      !silencedNow(s, d),
+  );
 }
 
 const copyCache = new Map<string, Hooks>();

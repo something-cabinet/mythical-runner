@@ -5,11 +5,17 @@ import {
   copyTarget,
   hooksFor,
   isMimic,
+  LEASH,
+  LEASH_SNAP,
+  leashesOf,
   MAIN_MOVE_BONUS,
   powerOf,
+  powersSuppressed,
   SILENCED,
   silencedTurns,
   SKIP_MAIN,
+  SOULBIND,
+  type Soulbind,
 } from '../characters/powers.js';
 import { invariant } from '../errors.js';
 import type { GameEvent } from '../events.js';
@@ -468,6 +474,14 @@ function doMoveStep(ctx: Ctx, job: Extract<Job, { t: 'move' }>, rng: Rng): void 
     next = Math.max(START, Math.min(FINISH, next));
   }
 
+  // Grimstroke's Soulbind: a step that would take the racer out of reach of its partner
+  // ends the move where it stands, like a clamp at Start.
+  if (leashHolds(ctx, rng, racer, racer.pos, next)) {
+    job.remaining = 0;
+    applyDisplacement(ctx, racer, rng);
+    return settle();
+  }
+
   const from = racer.pos;
   racer.pos = next;
   job.remaining -= 1;
@@ -486,6 +500,67 @@ function doMoveStep(ctx: Ctx, job: Extract<Job, { t: 'move' }>, rng: Rng): void 
   // The move is over. Huge Baby may bounce the racer off its space before it truly stops.
   applyDisplacement(ctx, racer, rng);
   settle();
+}
+
+/**
+ * Grimstroke's Soulbind: whether a racer going from `from` to `to` would leave the reach of
+ * a racer it is bound to. Only a step that widens the gap is held back, so a pair already
+ * too far apart — split by something that is neither a move nor a warp, like Huge Baby's
+ * bounce — can still close it.
+ *
+ * Every hold is counted on its link, and a link that has held `LEASH_SNAP` times snaps
+ * instead: holding it any longer would keep refusing a power that keeps trying, forever.
+ */
+function leashHolds(ctx: Ctx, rng: Rng, racer: MutableRacer, from: number, to: number): boolean {
+  for (const { caster, link, partner } of leashesOf(ctx.s, racer)) {
+    const gap = Math.abs(to - partner.pos);
+    if (gap <= LEASH || gap <= Math.abs(from - partner.pos)) continue;
+    if (!holdLink(ctx, rng, caster as MutableRacer, link)) continue;
+    powerHappened(
+      ctx,
+      rng,
+      caster as MutableRacer,
+      'soulbind',
+      `The Soulbind holds ${racerLabel(racer.racerId, ctx.s.racerSets)} within ${LEASH} of ${racerLabel(partner.racerId, ctx.s.racerSets)}.`,
+    );
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Where a warp to `to` actually lands `racer`: the nearest space still in reach of every
+ * racer it is Soulbound to. A warp that can't be kept in reach snaps the link as a move
+ * would.
+ */
+function leashedWarp(ctx: Ctx, rng: Rng, racer: MutableRacer, to: number): number {
+  let at = to;
+  for (const { caster, link, partner } of leashesOf(ctx.s, racer)) {
+    const kept = Math.max(partner.pos - LEASH, Math.min(partner.pos + LEASH, at));
+    if (kept === at || Math.abs(at - partner.pos) <= Math.abs(racer.pos - partner.pos)) continue;
+    if (!holdLink(ctx, rng, caster as MutableRacer, link)) continue;
+    powerHappened(
+      ctx,
+      rng,
+      caster as MutableRacer,
+      'soulbind',
+      `The Soulbind holds ${racerLabel(racer.racerId, ctx.s.racerSets)} within ${LEASH} of ${racerLabel(partner.racerId, ctx.s.racerSets)}.`,
+    );
+    at = kept;
+  }
+  return at;
+}
+
+/** Counts one hold on `caster`'s link; false, with the link gone, once it snaps instead. */
+function holdLink(ctx: Ctx, rng: Rng, caster: MutableRacer, link: Soulbind): boolean {
+  if (link.holds < LEASH_SNAP) {
+    caster.memo[SOULBIND] = { ...link, holds: link.holds + 1 };
+    return true;
+  }
+  delete caster.memo[SOULBIND];
+  const name = (id: RacerId): string => racerLabel(id, ctx.s.racerSets);
+  powerHappened(ctx, rng, caster, 'soulbind', `The Soulbind between ${name(link.a)} and ${name(link.b)} strains too far and snaps!`);
+  return false;
 }
 
 /**
@@ -755,12 +830,13 @@ function tripRacer(ctx: Ctx, rng: Rng, target: MutableRacer, by: RacerId | null)
  */
 function warpRacer(
   ctx: Ctx,
+  rng: Rng,
   target: MutableRacer,
   pos: number,
   resolveStop = true,
   triggerSpace = true,
 ): void {
-  const to = Math.max(START, Math.min(FINISH, pos));
+  const to = leashedWarp(ctx, rng, target, Math.max(START, Math.min(FINISH, pos)));
   if (to === target.pos) return;
   target.pos = to;
   ctx.emit({ t: 'racer/warped', racerId: target.racerId, to });
@@ -779,6 +855,8 @@ interface Thrown {
   readonly die: number;
   /** Each die's face, when several were combined into `face`. */
   readonly dice?: readonly number[];
+  /** Each die's colour, when coloured dice were summed (Invoker). */
+  readonly colours?: readonly string[];
 }
 
 /** Rolls `racer`'s own die: a d6, unless a power (Chaos Knight, Ogre Magi) says otherwise. */
@@ -787,7 +865,12 @@ function rollDieOf(ctx: Ctx, rng: Rng, racer: MutableRacer): Thrown {
   const h = makeHookCtx(ctx, rng, racer);
   if (hooks.throwDie) {
     const combined = hooks.throwDie(h);
-    return { face: combined.face, die: combined.sides, dice: combined.dice };
+    return {
+      face: combined.face,
+      die: combined.sides,
+      dice: combined.dice,
+      ...(combined.colours ? { colours: combined.colours } : {}),
+    };
   }
   const sides = hooks.dieSides?.(h) ?? 6;
   return { face: rng.roll(sides), die: sides };
@@ -802,6 +885,7 @@ function thrownEvent(racer: MutableRacer, thrown: Thrown, power?: RacerId): Game
     value: thrown.face,
     ...(thrown.die === 6 ? {} : { die: thrown.die }),
     ...(thrown.dice ? { dice: [...thrown.dice] } : {}),
+    ...(thrown.colours ? { colours: [...thrown.colours] } : {}),
     ...(power ? { power } : {}),
   };
 }
@@ -829,6 +913,9 @@ function doResume(ctx: Ctx, job: Extract<Job, { t: 'resume' }>, rng: Rng): void 
   if (!racer) return; // the power's owner left the board while we waited
 
   const hooks = hooksFor(ctx.s, racer, job.copy);
+  // A deferred reaction (Abaddon, Tidehunter) can come due after its racer has walked into
+  // Doom's aura: it fizzles.
+  if (!hooks.resume && powersSuppressed(ctx.s, racer)) return;
   invariant(hooks.resume, `${job.racer} suspended but defines no resume handler`);
   hooks.resume(makeHookCtx(ctx, rng, racer), job.key, job.choice, job.data);
 }
@@ -908,7 +995,7 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
     },
 
     // A warp is explicitly not a move, so no racer/moved event and no pass check.
-    warp: (target, pos) => warpRacer(ctx, target, pos),
+    warp: (target, pos) => warpRacer(ctx, rng, target, pos),
 
     trip: (target) => tripRacer(ctx, rng, target, self.racerId),
 
@@ -951,8 +1038,8 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
       return lost;
     },
 
-    rollDie: (target) => {
-      const thrown = rollDieOf(ctx, rng, target);
+    rollDie: (target, opts) => {
+      const thrown: Thrown = opts?.plain ? { face: rng.roll(6), die: 6 } : rollDieOf(ctx, rng, target);
       ctx.emit(thrownEvent(target, thrown, self.racerId));
       return thrown.face;
     },

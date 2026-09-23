@@ -1,20 +1,24 @@
 import { racerId, type ChoiceId } from '../../ids.js';
-import { option, racerTarget, type HookCtx } from '../hooks.js';
+import { option, racerTarget, type HookCtx, type MutableRacer } from '../hooks.js';
 import type { RacerDef } from '../types.js';
 import { FINISH, START } from '../../tracks/index.js';
+import { LEASH, MAIN_MOVE_BONUS, SOULBIND, timerLeft, TIMERS, type Soulbind } from '../powers.js';
 import { defFor, isRunning } from './shared.js';
 
 /**
- * The Dota set: twenty-eight heroes from Dota 2, designed in `docs/new-character-set.md`.
+ * The Dota set: forty-two heroes from Dota 2, designed in `docs/new-character-set.md`.
  *
  * Same conventions as the classic set: optional ("I can") powers ask and default to
  * declining, log lines name racers with `h.nameOf`, and one `h.log` per happening.
  *
  * Rulings the design doc leaves open, settled here:
  *
- *  - "Once per round" (Faceless Void, Silencer) means once per race: both are one-shot
- *    ultimates. Silencer casts before the owner's main move; Faceless Void before or after.
- *  - "Skip my main move" powers (Earthshaker, Anti-Mage, Ember Spirit) are offered before the main move,
+ *  - "Once per round" (Silencer) means once per race: a one-shot ultimate, cast before the
+ *    owner's main move.
+ *  - An "N-turn cooldown" (Faceless Void, Storm Spirit, Sven, Juggernaut, Grimstroke) counts the racer's own turns,
+ *    tripped and silenced ones included: used on turn T, it is ready again on turn T+N.
+ *    Kept as an engine timer (see `TIMERS`), which also times Sven's buff.
+ *  - "Skip my main move" powers (Earthshaker, Anti-Mage, Ember Spirit, Underlord, Juggernaut) are offered before the main move,
  *    and not at all on a tripped turn, which has no main move to skip.
  *  - A warp is not a move, so a warped racer passes nobody. It is still an arrival, though:
  *    "racers are stopped on a space after they've finished moving onto it, or otherwise
@@ -31,6 +35,12 @@ const def = defFor('dota');
  */
 function near(self: { readonly pos: number }, other: { readonly pos: number }, span: 3 | 5): boolean {
   return Math.abs(other.pos - self.pos) <= (span - 1) / 2;
+}
+
+/** Starts `self`'s timer `name`: `turns` of its own turns, the current one included. */
+function startTimer(h: HookCtx, name: string, turns: number): void {
+  const timers = (h.self.memo[TIMERS] ?? {}) as Record<string, number>;
+  h.self.memo[TIMERS] = { ...timers, [name]: turns };
 }
 
 // ---------------------------------------------------------------------------
@@ -70,7 +80,7 @@ const bountyHunter = def(
 const spiritBreaker = def(
   'spirit-breaker',
   'Spirit Breaker',
-  'When I pass another racer, they roll a die. On a 1, they trip.',
+  'When I pass a racer, they roll a die. On a 1, they trip.',
   {
     onPass: (h, passed) => {
       if (!isRunning(passed)) return;
@@ -108,7 +118,7 @@ const spiritBreaker = def(
 const earthshaker = def(
   'earthshaker',
   'Earthshaker',
-  'I can skip my main move to trip the other racers on my space, and move 2 for each racer I tripped. Not on the Start space.',
+  'I can skip my main move to trip every other racer on my space, then move 2 for each one I tripped. Not on the Start space.',
   {
     beforeMainMove: (h) => {
       if (!isRunning(h.self) || h.self.tripped || h.self.pos === START) return;
@@ -195,7 +205,7 @@ const templarAssassin = def(
 );
 
 /** BLINK — "I can skip my main move and warp to any space up to 3 ahead." */
-const antiMage = def('anti-mage', 'Anti-Mage', 'I can skip my main move and warp to any space up to 3 ahead.', {
+const antiMage = def('anti-mage', 'Anti-Mage', 'I can skip my main move to warp 1, 2 or 3 spaces ahead.', {
   beforeMainMove: (h) => {
     if (!isRunning(h.self) || h.self.tripped) return;
     const spaces = [...new Set([1, 2, 3].map((d) => Math.min(FINISH, h.self.pos + d)))].filter(
@@ -225,24 +235,25 @@ const antiMage = def('anti-mage', 'Anti-Mage', 'I can skip my main move and warp
 });
 
 /**
- * CHRONOSPHERE — "Once per race, before or after my main move, I can trip every racer
- * within 2 spaces of me."
+ * CHRONOSPHERE — "Before or after my main move, I can trip every racer within 2 spaces of
+ * me. 5-turn cooldown."
  *
  * The design's 5-space bubble: my space and two either side. Either direction, teammates included — time stops for everyone in the bubble but me.
- * Asked twice a turn while it is unspent: before the roll, and again once the main move
+ * Asked twice a turn while it is ready: before the roll, and again once the main move
  * has landed, with the bubble counted from where I stand then. Not after a tripped turn
  * or a main move that went nowhere: there is no "after" to a move that never happened.
  */
+const CHRONO_COOLDOWN = 5;
 const facelessVoid = def(
   'faceless-void',
   'Faceless Void',
-  'Once per race, before or after my main move, I can trip every racer within 2 spaces of me.',
+  `Before or after my main move, I can trip every racer within 2 spaces of me. Ready again ${CHRONO_COOLDOWN} turns later.`,
   {
     beforeMainMove: (h) => offerChrono(h, 'before'),
     afterMainMove: (h) => offerChrono(h, 'after'),
     resume: (h, key, choice) => {
       if (key !== 'chrono' || choice !== ('chrono' as ChoiceId)) return;
-      h.self.memo['chronoUsed'] = true;
+      startTimer(h, 'chrono', CHRONO_COOLDOWN);
       h.log(`${h.nameOf(h.self)} drops a Chronosphere!`);
       for (const r of inBubble(h)) h.trip(r);
     },
@@ -250,14 +261,14 @@ const facelessVoid = def(
   5,
 );
 
-/** Asks Faceless Void whether to drop the Chronosphere now, if it is unspent and would catch anyone. */
+/** Asks Faceless Void whether to drop the Chronosphere now, if it is ready and would catch anyone. */
 function offerChrono(h: HookCtx, when: 'before' | 'after') {
-  if (!isRunning(h.self) || h.self.memo['chronoUsed'] === true) return;
+  if (!isRunning(h.self) || timerLeft(h.self, 'chrono') > 0) return;
   const caught = inBubble(h);
   if (caught.length === 0) return;
   h.ask({
     player: h.self.owner,
-    prompt: `Chronosphere ${when === 'before' ? 'before' : 'after'} your move? It catches ${caught.map((r) => h.nameOf(r)).join(', ')}. Once per race.`,
+    prompt: `Chronosphere ${when === 'before' ? 'before' : 'after'} your move? It catches ${caught.map((r) => h.nameOf(r)).join(', ')}. ${CHRONO_COOLDOWN}-turn cooldown.`,
     options: [
       option('chrono', `Trip ${caught.length}`),
       option('wait', when === 'before' ? 'Not yet — ask after my move' : 'Save it'),
@@ -276,8 +287,7 @@ function inBubble(h: HookCtx) {
 
 /**
  * GLOBAL SILENCE — "Once per race, before my main move, I can silence every other racer.
- * I roll a die: for that many of their turns, they have no powers and can only roll for
- * their main move."
+ * I roll a die: for that many of their turns, they have no powers."
  *
  * Their whole turns, passive powers included, and nothing else: on everyone else's turns
  * their powers work as normal. Counted in each racer's own turns, tripped ones included.
@@ -285,7 +295,7 @@ function inBubble(h: HookCtx) {
 const silencer = def(
   'silencer',
   'Silencer',
-  'Once per race, before my main move, I can silence every other racer. I roll a die: for that many of their turns, they have no powers and can only roll for their main move.',
+  'Once per race, before my main move, I can silence every other racer. I roll a die: they have no powers for that many of their own turns.',
   {
     beforeMainMove: (h) => {
       if (!isRunning(h.self) || h.self.memo['silenceUsed'] === true) return;
@@ -326,7 +336,7 @@ const silencer = def(
 const kunkka = def(
   'kunkka',
   'Kunkka',
-  'After my main move, I can warp back to the space I started it on.',
+  'After my main move, I can warp back to where I started it.',
   {
     afterMainMove: (h, from) => {
       if (!isRunning(h.self) || h.self.pos === from || h.self.pos === FINISH) return;
@@ -397,7 +407,7 @@ const ogreMagi = def(
 const morphling = def(
   'morphling',
   'Morphling',
-  "I have the power of any racer currently last. If there's a tie, I pick.",
+  "I have the power of the racer in last place. If there's a tie, I pick.",
   {},
 );
 
@@ -424,6 +434,9 @@ const dotaAlchemist = def(
  * DUEL — "Whenever a racer shares my space, I can shout DUEL! We roll our dice, and
  * whoever rolls highest gets +1 to their main move for the rest of the race. I win ties."
  *
+ * Both sides throw a plain d6, whatever their own die — no d20s, no Ogre Magi products —
+ * and add the +1s they have already won from duels. No other main move modifier counts.
+ *
  * Triggered like the Duelist's: on the stop that brings someone onto this space as well
  * as on Legion Commander's own, so it fires on another player's turn too and the question
  * goes to a player who is not the active one. Every stop that results in sharing offers
@@ -432,7 +445,7 @@ const dotaAlchemist = def(
 const legionCommander = def(
   'legion-commander',
   'Legion Commander',
-  'Whenever a racer shares my space, I can shout DUEL! We roll our dice, and whoever rolls highest gets +1 to their main move for the rest of the race. I win ties.',
+  'Whenever a racer shares my space, I can shout DUEL! We each roll a d6 and add our past duel wins. The winner gets +1 to their main move for the rest of the race. I win ties.',
   {
     onOtherStops: (h, other) => {
       if (!isRunning(h.self) || !isRunning(other) || other.pos !== h.self.pos) return;
@@ -477,25 +490,25 @@ const legionCommander = def(
         });
         return;
       }
-      const { foe: foeId, mine: rolled } = data as { foe: string; mine?: number };
+      const { foe: foeId, mine: rolled, mineText } = data as { foe: string; mine?: number; mineText?: string };
       const foe = h.racers().find((r) => r.racerId === foeId);
       if (!foe || !isRunning(foe)) return;
       if (key === 'duelMine') {
-        const mine = h.rollDie(h.self);
+        const mine = duelThrow(h, h.self);
         h.askRoll(foe, {
-          prompt: `${h.nameOf(h.self)} rolled ${mine} in the DUEL. Roll for ${h.nameOf(foe)} — you need to beat it.`,
+          prompt: `${h.nameOf(h.self)} rolled ${mine.text} in the DUEL. Roll for ${h.nameOf(foe)} — you need to beat it.`,
           key: 'duelTheirs',
-          data: { foe: foeId, mine },
+          data: { foe: foeId, mine: mine.total, mineText: mine.text },
         });
         return;
       }
       if (key !== 'duelTheirs' || rolled === undefined) return;
       const mine = rolled;
-      const theirs = h.rollDie(foe);
+      const theirs = duelThrow(h, foe);
       // "I win ties."
-      const winner = mine >= theirs ? h.self : foe;
+      const winner = mine >= theirs.total ? h.self : foe;
       h.log(
-        `DUEL! ${h.nameOf(h.self)} rolls ${mine}, ${h.nameOf(foe)} rolls ${theirs}. ` +
+        `DUEL! ${h.nameOf(h.self)} rolls ${mineText ?? mine}, ${h.nameOf(foe)} rolls ${theirs.text}. ` +
           `${h.nameOf(winner)} wins +1 to their main move for the rest of the race.`,
       );
       h.addMainMoveBonus(winner, 1);
@@ -504,62 +517,97 @@ const legionCommander = def(
 );
 
 /**
- * FALSE PROMISE — "At the start of my first turn, I predict which racer will trip first.
- * If I'm right, I get 3 points."
+ * One side's duel score: a plain d6 plus the +1s it has won from earlier duels. `text`
+ * shows the sum when there is a bonus, e.g. "4 + 1 = 5".
+ */
+function duelThrow(h: HookCtx, racer: MutableRacer): { total: number; text: string } {
+  const face = h.rollDie(racer, { plain: true });
+  const had = racer.memo[MAIN_MOVE_BONUS];
+  const bonus = typeof had === 'number' ? had : 0;
+  const total = face + bonus;
+  return { total, text: bonus === 0 ? String(face) : `${face} + ${bonus} = ${total}` };
+}
+
+/**
+ * FATE'S EDICT — "Before my main move, I call odd or even. My main move gets +1 for each
+ * correct call in my current streak. A miss resets it."
  *
- * The first trip after the prediction settles it, right or wrong. A trip shrugged off
- * never happened, so it settles nothing.
+ * Checked against the final die, after any rerolls. A hit adds one to the streak and the
+ * whole streak to the move — +1, then +2, then +3 — and a miss sets it back to nothing.
+ * A turn with no roll (tripped, or a move replaced by a power) calls nothing and leaves
+ * the streak as it was.
  */
 const oracle = def(
   'oracle',
   'Oracle',
-  "At the start of my first turn, I predict which racer will trip first. If I'm right, I get 3 points.",
+  'Before my main move, I call odd or even. Each correct call in a row is worth 1 more: +1, then +2, then +3… A wrong call resets it.',
   {
     beforeMainMove: (h) => {
-      if (h.self.memo['prediction'] !== undefined || !isRunning(h.self)) return;
-      h.self.memo['prediction'] = null;
+      delete h.self.memo['call'];
+      delete h.self.memo['hit'];
+      if (!isRunning(h.self) || h.self.tripped) return;
+      const streak = oracleStreak(h.self);
       h.ask({
         player: h.self.owner,
-        prompt: 'Who will trip first?',
-        options: h.running().map((r) => option(`trip:${r.racerId}`, h.nameOf(r), racerTarget(r.racerId))),
-        key: 'foresee',
+        prompt: `Call it: odd or even? A hit is worth +${streak + 1}.`,
+        options: [option('odd', 'Odd'), option('even', 'Even')],
+        key: 'call',
       });
     },
     resume: (h, key, choice) => {
-      if (key !== 'foresee') return;
-      const pick = String(choice).slice('trip:'.length);
-      h.self.memo['prediction'] = pick;
-      h.log(`${h.nameOf(h.self)} foresees ${h.nameOf(racerId(pick))} tripping first.`);
+      if (key !== 'call') return;
+      h.self.memo['call'] = String(choice);
     },
-    onRacerTripped: (h, target) => {
-      const pick = h.self.memo['prediction'];
-      if (typeof pick !== 'string' || h.self.memo['foreseen'] === true) return;
-      h.self.memo['foreseen'] = true;
-      if (target.racerId !== pick) return;
-      h.log(`${h.nameOf(h.self)} saw it coming: ${h.nameOf(target)} tripped first. +3 points.`);
-      h.award(h.self.owner, 3);
+    onMainRollFinal: (h, mover, value) => {
+      const call = h.self.memo['call'];
+      if (mover.racerId !== h.self.racerId || typeof call !== 'string') return;
+      delete h.self.memo['call'];
+      if ((value % 2 === 1 ? 'odd' : 'even') === call) {
+        h.self.memo['streak'] = oracleStreak(h.self) + 1;
+        h.self.memo['hit'] = true;
+        return;
+      }
+      if (oracleStreak(h.self) > 0) h.log(`${h.nameOf(h.self)} called ${call} and missed: the streak is broken.`);
+      delete h.self.memo['streak'];
+    },
+    modifyMainMove: (h, value, mover) => {
+      if (mover.racerId !== h.self.racerId) return value;
+      // Only on a hit: a streak carried from before waits for the next one.
+      if (h.self.memo['hit'] !== true) return value;
+      delete h.self.memo['hit'];
+      const streak = oracleStreak(h.self);
+      h.log(`${h.nameOf(h.self)} foresaw it: +${streak}.`);
+      return value + streak;
     },
   },
 );
 
+/** Oracle's current run of correct calls. */
+function oracleStreak(racer: MutableRacer): number {
+  const streak = racer.memo['streak'];
+  return typeof streak === 'number' ? streak : 0;
+}
+
 /**
- * OVERLOAD — "I roll a d6. Once per race, I can roll a d20 instead."
+ * OVERLOAD — "Before my main move, I can roll a d20 instead of a d6. 6-turn cooldown."
  *
  * Offered before the main move, and not on a tripped turn, which has no roll to swap. The
  * d20 is my die for the rest of that turn — a reroll throws it again — and the d6 is back
- * from the next.
+ * from the next. The d20 is a one-turn timer, so it lapses at the turn's end even if the
+ * power was lost mid-turn to Doom's aura.
  */
+const OVERLOAD_COOLDOWN = 6;
 const stormSpirit = def(
   'storm-spirit',
   'Storm Spirit',
-  'I roll a d6. Once per race, I can roll a d20 instead.',
+  `Before my main move, I can roll a d20 instead of my d6. Ready again ${OVERLOAD_COOLDOWN} turns later.`,
   {
-    dieSides: (h) => (h.self.memo['overloading'] === true ? 20 : 6),
+    dieSides: (h) => (timerLeft(h.self, 'overloading') > 0 ? 20 : 6),
     beforeMainMove: (h) => {
-      if (!isRunning(h.self) || h.self.tripped || h.self.memo['overloadUsed'] === true) return;
+      if (!isRunning(h.self) || h.self.tripped || timerLeft(h.self, 'overload') > 0) return;
       h.ask({
         player: h.self.owner,
-        prompt: 'Overload? Roll a d20 instead of your d6 this turn. Once per race.',
+        prompt: `Overload? Roll a d20 instead of your d6 this turn. ${OVERLOAD_COOLDOWN}-turn cooldown.`,
         options: [option('overload', 'Roll the d20'), option('d6', 'Roll the d6')],
         key: 'overload',
         defaultChoice: 'd6' as ChoiceId,
@@ -567,12 +615,9 @@ const stormSpirit = def(
     },
     resume: (h, key, choice) => {
       if (key !== 'overload' || choice !== ('overload' as ChoiceId)) return;
-      h.self.memo['overloadUsed'] = true;
-      h.self.memo['overloading'] = true;
+      startTimer(h, 'overload', OVERLOAD_COOLDOWN);
+      startTimer(h, 'overloading', 1);
       h.log(`${h.nameOf(h.self)} overloads: a d20 this turn!`);
-    },
-    onTurnEnd: (h) => {
-      delete h.self.memo['overloading'];
     },
   },
 );
@@ -630,7 +675,7 @@ const clockwerk = def(
  * nobody, but the racer does arrive: my space's effect and stop powers fire for them —
  * hook Baba Yaga and I'm the one who trips.
  */
-const pudge = def('pudge', 'Pudge', 'Before my main move, I can warp a racer to my space.', {
+const pudge = def('pudge', 'Pudge', 'Before my main move, I can warp any racer to my space.', {
   beforeMainMove: (h) => {
     if (!isRunning(h.self)) return;
     const targets = h.running().filter((r) => r.racerId !== h.self.racerId && r.pos !== h.self.pos);
@@ -687,7 +732,7 @@ const techies = def(
 const chaosKnight = def(
   'chaos-knight',
   'Chaos Knight',
-  'I roll a d20, and get -9 to my main move. It can take me backwards.',
+  'I roll a d20 and get -9 to my main move, so I can go backwards.',
   {
     dieSides: () => 20,
     modifyMainMove: (h, value, mover) => {
@@ -708,7 +753,7 @@ const chaosKnight = def(
 const abaddon = def(
   'abaddon',
   'Abaddon',
-  'Whenever another racer trips, I can help them up at once. If I do, I move 3.',
+  'Whenever another racer trips, I can help them straight back up. If I do, I move 3.',
   {
     onRacerTripped: (h, target) => {
       if (target.racerId === h.self.racerId || !isRunning(h.self) || !isRunning(target)) return;
@@ -802,7 +847,7 @@ function inReach(h: HookCtx) {
 const earthSpirit = def(
   'earth-spirit',
   'Earth Spirit',
-  'Before my main move, I can kick one racer on my space 3 spaces forward or backward.',
+  'Before my main move, I can kick one racer on my space 3 spaces forward or back.',
   {
     beforeMainMove: (h) => {
       if (!isRunning(h.self) || h.self.tripped) return;
@@ -863,7 +908,7 @@ const bristleback = def(
 );
 
 /**
- * PRECISION AURA — "I use a d6. If no other racer is on my space or next to it, I use a d8
+ * PRECISION AURA — "I use a d6. If no other racer is on my space or next to it, I use a d10
  * instead."
  *
  * Drow shoots best with room to work: crowded, the die is everyone else's; clear of the
@@ -873,13 +918,13 @@ const bristleback = def(
 const drowRanger = def(
   'drow-ranger',
   'Drow Ranger',
-  'I use a d6. If no other racer is on my space or next to it, I use a d8 instead.',
+  'I roll a d10 instead of a d6 when no other racer is on my space or next to it.',
   {
     dieSides: (h) => {
       const crowded = h
         .running()
         .some((r) => r.racerId !== h.self.racerId && near(h.self, r, 3));
-      return crowded ? 6 : 8;
+      return crowded ? 6 : 10;
     },
   },
   3,
@@ -936,6 +981,530 @@ const slark = def(
   },
 );
 
+/**
+ * AETHER REMNANT — "Before my main move, I can move one other racer 1 space forward or
+ * backward."
+ *
+ * A little nudge, anywhere on the board. It is a move, so it can pass a racer and the
+ * space it lands on fires. Nobody on Start can go back, and nobody across the line is
+ * running to be nudged.
+ */
+const voidSpirit = def(
+  'void-spirit',
+  'Void Spirit',
+  'Before my main move, I can move any other racer 1 space forward or back.',
+  {
+    beforeMainMove: (h) => {
+      if (!isRunning(h.self) || h.self.tripped) return;
+      const targets = h.running().filter((r) => r.racerId !== h.self.racerId);
+      if (targets.length === 0) return;
+      h.ask({
+        player: h.self.owner,
+        prompt: 'Aether Remnant? Move one racer 1 space.',
+        options: [
+          ...targets.flatMap((r) => [
+            option(`nudge:${r.racerId}:1`, `${h.nameOf(r)} 1 forward`, racerTarget(r.racerId)),
+            ...(r.pos > START
+              ? [option(`nudge:${r.racerId}:-1`, `${h.nameOf(r)} 1 back`, racerTarget(r.racerId))]
+              : []),
+          ]),
+          option('pass', 'Leave everyone be'),
+        ],
+        key: 'nudge',
+        defaultChoice: 'pass' as ChoiceId,
+      });
+    },
+    resume: (h, key, choice) => {
+      if (key !== 'nudge' || choice === ('pass' as ChoiceId)) return;
+      const [, targetId, dir] = String(choice).split(':');
+      const target = h.racers().find((r) => r.racerId === racerId(String(targetId)));
+      if (!target || !isRunning(target)) return;
+      const distance = dir === '-1' ? -1 : 1;
+      h.log(`${h.nameOf(h.self)} shifts ${h.nameOf(target)} 1 space ${distance < 0 ? 'back' : 'forward'}.`);
+      h.move(target, distance);
+    },
+  },
+);
+
+/**
+ * CHAIN FROST — "After my main move, I pull everyone to my space."
+ *
+ * Not optional, and it means everyone: racers behind are pulled forward, racers ahead
+ * dragged back, teammates too. Each pull is a move, so it can pass and the space fires —
+ * which, with everyone landing on Lich's own space, is the same space for all. Not from
+ * the finish line: that would haul the whole field over it.
+ */
+const lich = def('lich', 'Lich', 'After my main move, I pull every other racer to my space. Not from the finish line.', {
+  afterMainMove: (h) => {
+    if (!isRunning(h.self) || h.self.pos === FINISH) return;
+    const pulled = h.running().filter((r) => r.racerId !== h.self.racerId && r.pos !== h.self.pos);
+    if (pulled.length === 0) return;
+    h.log(`${h.nameOf(h.self)} pulls everyone to space ${h.self.pos}.`);
+    // Moves are queued at the front, so queue in reverse to pull in board order.
+    for (const r of [...pulled].reverse()) h.move(r, h.self.pos - r.pos);
+  },
+});
+
+/**
+ * SKEWER — "I drag every racer on my path along with me to where I stop. If that's the
+ * finish line, I'm placed first."
+ *
+ * "On my path" is every racer I pass: stopped on a space I crossed, strictly between
+ * where I started and where I end, on any forward move of mine. Racers sharing my
+ * starting space aren't on the path. They're warped along, so the drag passes nobody, but
+ * they do arrive — my space fires for them. Over the finish line, I'm placed before the
+ * racers I dragged across with me.
+ */
+const magnus = def(
+  'magnus',
+  'Magnus',
+  "Racers I pass are dragged along to the space where I stop. If I cross the finish line, I'm placed ahead of them.",
+  {
+    onPass: (h, passed) => {
+      if (h.self.eliminated || !isRunning(passed)) return;
+      if (h.self.pos === FINISH && h.self.finishedRank === null) h.takePlace();
+      h.log(`${h.nameOf(h.self)} skewers ${h.nameOf(passed)} along.`);
+      h.warp(passed, h.self.pos);
+    },
+  },
+);
+
+/**
+ * FIEND'S GATE — "I can skip my main move to warp to any other racer."
+ *
+ * Forwards or backwards, onto any space another running racer stands on. Offered before
+ * the main move and not on a tripped turn, like every "skip my main move" power.
+ */
+const underlord = def('underlord', 'Underlord', "I can skip my main move to warp to any other racer's space.", {
+  beforeMainMove: (h) => {
+    if (!isRunning(h.self) || h.self.tripped) return;
+    const spaces = [...new Set(h.running().map((r) => r.pos))]
+      .filter((p) => p !== h.self.pos)
+      .sort((a, b) => b - a);
+    if (spaces.length === 0) return;
+    h.ask({
+      player: h.self.owner,
+      prompt: "Fiend's Gate instead of rolling?",
+      options: [
+        ...spaces.map((p) =>
+          option(
+            `gate:${p}`,
+            `To ${h
+              .at(p)
+              .filter(isRunning)
+              .map((r) => h.nameOf(r))
+              .join(', ')} (space ${p})`,
+            { t: 'space', index: p },
+          ),
+        ),
+        option('roll', 'Roll normally'),
+      ],
+      key: 'gate',
+      defaultChoice: 'roll' as ChoiceId,
+    });
+  },
+  resume: (h, key, choice) => {
+    if (key !== 'gate' || choice === ('roll' as ChoiceId)) return;
+    const pos = Number(String(choice).slice('gate:'.length));
+    h.skipMainMove();
+    h.log(`${h.nameOf(h.self)} steps through Fiend's Gate to space ${pos}.`);
+    h.warp(h.self, pos);
+  },
+});
+
+/**
+ * DOOM — "Any racer on my space or next to it has no powers."
+ *
+ * No hooks: the aura is read off the board wherever powers are looked up. See `doomed` in
+ * `characters/powers.ts`.
+ */
+const doom = def('doom', 'Doom', 'Other racers on my space or next to it have no powers, except on the Start space.', {}, 3);
+
+/**
+ * GOD'S STRENGTH — "I can activate my power to get +3 to my main move for 3 turns. 6-turn
+ * cooldown."
+ *
+ * Activated before the main move, so the turn it's cast is the first of the three. The
+ * three are my own turns, tripped ones included — a trip wastes one.
+ */
+const STRENGTH_TURNS = 3;
+const STRENGTH_COOLDOWN = 6;
+const sven = def(
+  'sven',
+  'Sven',
+  `Before my main move, I can get +3 to my main move this turn and my next ${STRENGTH_TURNS - 1}. Ready again ${STRENGTH_COOLDOWN} turns later.`,
+  {
+    beforeMainMove: (h) => {
+      if (!isRunning(h.self) || h.self.tripped || timerLeft(h.self, 'strengthCooldown') > 0) return;
+      h.ask({
+        player: h.self.owner,
+        prompt: `God's Strength? +3 to your main move for ${STRENGTH_TURNS} turns. ${STRENGTH_COOLDOWN}-turn cooldown.`,
+        options: [option('strength', "God's Strength"), option('wait', 'Not yet')],
+        key: 'strength',
+        defaultChoice: 'wait' as ChoiceId,
+      });
+    },
+    resume: (h, key, choice) => {
+      if (key !== 'strength' || choice !== ('strength' as ChoiceId)) return;
+      startTimer(h, 'strength', STRENGTH_TURNS);
+      startTimer(h, 'strengthCooldown', STRENGTH_COOLDOWN);
+      h.log(`${h.nameOf(h.self)} roars: God's Strength!`);
+    },
+    modifyMainMove: (h, value, mover) => {
+      if (mover.racerId !== h.self.racerId || timerLeft(h.self, 'strength') === 0) return value;
+      h.log(`${h.nameOf(h.self)}'s God's Strength: +3.`);
+      return value + 3;
+    },
+  },
+);
+
+/**
+ * SHODO SAI — "Before my main move, I can choose to roll an odd-only or an even-only d6."
+ *
+ * The odd die shows 1, 3 or 5, the even one 2, 4 or 6. The pick is for this turn's die,
+ * rerolls included, and lapses at the turn's end; any other roll is a plain d6.
+ */
+const kez = def(
+  'kez',
+  'Kez',
+  'Before my main move, I can roll an odd-only die (1, 3, 5) or an even-only die (2, 4, 6) instead of my d6.',
+  {
+    beforeMainMove: (h) => {
+      if (!isRunning(h.self) || h.self.tripped) return;
+      h.ask({
+        player: h.self.owner,
+        prompt: 'Which die this turn?',
+        options: [option('odd', 'Odd: 1, 3 or 5'), option('even', 'Even: 2, 4 or 6'), option('d6', 'A plain d6')],
+        key: 'stance',
+        defaultChoice: 'd6' as ChoiceId,
+      });
+    },
+    resume: (h, key, choice) => {
+      if (key !== 'stance' || (choice !== ('odd' as ChoiceId) && choice !== ('even' as ChoiceId))) return;
+      startTimer(h, choice, 1);
+      h.log(`${h.nameOf(h.self)} picks the ${choice} die.`);
+    },
+    throwDie: (h) => {
+      const third = h.rng.roll(3);
+      if (timerLeft(h.self, 'odd') > 0) return { face: third * 2 - 1, sides: 6, dice: [third * 2 - 1] };
+      if (timerLeft(h.self, 'even') > 0) return { face: third * 2, sides: 6, dice: [third * 2] };
+      const face = h.rng.roll(6);
+      return { face, sides: 6, dice: [face] };
+    },
+  },
+);
+
+/**
+ * INVOKE — "Before my main move, I choose a colour: blue, pink or orange. I roll 3 dice,
+ * each landing on a random colour, and move the sum of the dice showing my colour."
+ *
+ * Anywhere from 0 to 18. The colour is chosen every turn and kept for any roll of mine
+ * until the next pick — a duel or a bash throws the same three dice. Blue until the first.
+ */
+const INVOKER_COLOURS = ['blue', 'pink', 'orange'] as const;
+const invoker = def(
+  'invoker',
+  'Invoker',
+  'Before my main move, I pick blue, pink or orange. I roll 3 dice that each land on a random colour, and move the total of the dice in my colour (0 to 18).',
+  {
+    beforeMainMove: (h) => {
+      if (!isRunning(h.self) || h.self.tripped) return;
+      const current = String(h.self.memo['invokeColour'] ?? 'blue');
+      h.ask({
+        player: h.self.owner,
+        prompt: 'Invoke which colour?',
+        options: INVOKER_COLOURS.map((c) => option(c, c[0]!.toUpperCase() + c.slice(1))),
+        key: 'invoke',
+        defaultChoice: current as ChoiceId,
+      });
+    },
+    resume: (h, key, choice) => {
+      if (key !== 'invoke' || !(INVOKER_COLOURS as readonly string[]).includes(String(choice))) return;
+      h.self.memo['invokeColour'] = String(choice);
+    },
+    throwDie: (h) => {
+      const colour = String(h.self.memo['invokeColour'] ?? 'blue');
+      const dice = [0, 1, 2].map(() => ({ face: h.rng.roll(6), colour: INVOKER_COLOURS[h.rng.roll(3) - 1]! }));
+      const face = dice.filter((d) => d.colour === colour).reduce((sum, d) => sum + d.face, 0);
+      h.log(
+        `${h.nameOf(h.self)} invokes ${colour}: ${dice.map((d) => `${d.colour} ${d.face}`).join(', ')} — ${face}.`,
+      );
+      return { face, sides: 6, dice: dice.map((d) => d.face), colours: dice.map((d) => d.colour) };
+    },
+  },
+);
+
+/**
+ * CROAK OF GENIUS — "My main move gets +1 for each racer on my space, me included. Every
+ * other racer on my space gets +1 to their main move."
+ *
+ * The band plays together: counted as each main move is settled, from where the mover
+ * stands then. Teammates, tripped racers and rivals all count. Start is no exception, so
+ * Largo opens the race to a full house.
+ */
+const largo = def(
+  'largo',
+  'Largo',
+  'I get +1 to my main move for each racer on my space, me included. Other racers on my space get +1 to theirs.',
+  {
+    modifyMainMove: (h, value, mover) => {
+      if (!isRunning(h.self)) return value;
+      if (mover.racerId === h.self.racerId) {
+        const band = 1 + h.sharing().filter(isRunning).length;
+        h.log(`${h.nameOf(h.self)} croaks for a band of ${band}: +${band}.`);
+        return value + band;
+      }
+      if (mover.pos !== h.self.pos) return value;
+      h.log(`${h.nameOf(h.self)}'s song carries ${h.nameOf(mover)}: +1.`);
+      return value + 1;
+    },
+  },
+);
+
+/**
+ * OMNISLASH — "I can skip my main move to warp onto a racer 1 or 2 spaces ahead of me,
+ * the nearer one if both. Then I must keep hopping the same way until no racer is 1 or 2
+ * spaces ahead. Only the space I finish on takes effect. Ready again 4 turns later."
+ *
+ * The choice is only whether to start: the chain then runs itself, always to the nearer
+ * racer, so it takes every hop it can. Each hop is its own happening — Scoocher scooches
+ * once per slash. The hops are one warp to the end of the chain, so the spaces in between
+ * never fire and nobody is passed. Racers across the finish line are out of reach, so the
+ * chain never carries Juggernaut over it.
+ */
+const OMNISLASH_COOLDOWN = 4;
+const juggernaut = def(
+  'juggernaut',
+  'Juggernaut',
+  `I can skip my main move to warp onto a racer 1 or 2 spaces ahead of me, the nearer one if both. Then I must keep hopping the same way until no racer is 1 or 2 spaces ahead. Only the space I finish on takes effect. Ready again ${OMNISLASH_COOLDOWN} turns later.`,
+  {
+    beforeMainMove: (h) => {
+      if (!isRunning(h.self) || h.self.tripped || timerLeft(h.self, 'omnislash') > 0) return;
+      const hops = omnislashPath(h);
+      if (hops.length === 0) return;
+      const end = hops[hops.length - 1]!;
+      h.ask({
+        player: h.self.owner,
+        prompt: `Omnislash instead of rolling? ${hops.length} hop${hops.length === 1 ? '' : 's'}, ending on space ${end}. Ready again ${OMNISLASH_COOLDOWN} turns later.`,
+        options: [option('slash', `Omnislash to space ${end}`, { t: 'space', index: end }), option('roll', 'Roll normally')],
+        key: 'omnislash',
+        defaultChoice: 'roll' as ChoiceId,
+      });
+    },
+    resume: (h, key, choice) => {
+      if (key !== 'omnislash' || choice !== ('slash' as ChoiceId)) return;
+      const hops = omnislashPath(h);
+      h.skipMainMove();
+      startTimer(h, 'omnislash', OMNISLASH_COOLDOWN);
+      if (hops.length === 0) return;
+      hops.forEach((pos, i) =>
+        h.log(`${h.nameOf(h.self)} Omnislashes to space ${pos}${i === hops.length - 1 ? ', and stops.' : '…'}`),
+      );
+      h.warp(h.self, hops[hops.length - 1]!);
+    },
+  },
+);
+
+/** Juggernaut's chain from where it stands: each hop to the nearest racer 1 or 2 ahead. */
+function omnislashPath(h: HookCtx): number[] {
+  const spaces = new Set(h.running().filter((r) => r.racerId !== h.self.racerId).map((r) => r.pos));
+  const hops: number[] = [];
+  let at = h.self.pos;
+  for (;;) {
+    const next = [at + 1, at + 2].find((p) => spaces.has(p));
+    if (next === undefined) return hops;
+    hops.push(next);
+    at = next;
+  }
+}
+
+/**
+ * FIERY SOUL — "Every turn I gain a stack of Fiery Soul, up to 8. I get +1 to my main move
+ * for every 2 stacks. Tripping resets them."
+ *
+ * The stack comes before the main move, so it counts on the turn it's gained: +1 from the
+ * second turn, +4 from the eighth. A tripped turn gains nothing — the trip has just burned
+ * them all — and neither does a silenced one.
+ */
+const FIERY_SOUL_MAX = 8;
+const lina = def(
+  'lina',
+  'Lina',
+  `Each turn I'm not tripped, I gain a Fiery Soul stack, up to ${FIERY_SOUL_MAX}. I get +1 to my main move for every 2 stacks. Tripping clears them.`,
+  {
+    beforeMainMove: (h) => {
+      if (!isRunning(h.self) || h.self.tripped) return;
+      h.self.memo['fierySoul'] = Math.min(FIERY_SOUL_MAX, fierySoul(h.self) + 1);
+    },
+    modifyMainMove: (h, value, mover) => {
+      if (mover.racerId !== h.self.racerId) return value;
+      const bonus = Math.floor(fierySoul(h.self) / 2);
+      if (bonus === 0) return value;
+      h.log(`${h.nameOf(h.self)}'s Fiery Soul burns at ${fierySoul(h.self)} stacks: +${bonus}.`);
+      return value + bonus;
+    },
+    onRacerTripped: (h, target) => {
+      if (target.racerId !== h.self.racerId || !h.self.tripped || fierySoul(h.self) === 0) return;
+      delete h.self.memo['fierySoul'];
+      h.log(`${h.nameOf(h.self)} goes down and her Fiery Soul gutters out.`);
+    },
+  },
+);
+
+/** Lina's Fiery Soul stacks. */
+function fierySoul(racer: MutableRacer): number {
+  const stacks = racer.memo['fierySoul'];
+  return typeof stacks === 'number' ? stacks : 0;
+}
+
+/**
+ * COUP DE GRACE — "I roll two d6s and move the first. If the second is a 6, I move triple
+ * the first instead."
+ *
+ * The pair is my die for anything that has me roll, like Ogre Magi's: rerolls, a bash, the
+ * face a power reads. A crit is one in six, and worth 3 to 18.
+ */
+const phantomAssassin = def(
+  'phantom-assassin',
+  'Phantom Assassin',
+  'I roll two d6s and move the first. If the second is a 6, I move triple the first instead.',
+  {
+    throwDie: (h) => {
+      const a = h.rng.roll(6);
+      const b = h.rng.roll(6);
+      const face = b === 6 ? a * 3 : a;
+      if (b === 6) h.log(`${h.nameOf(h.self)} lands a Coup de Grace: ${a} × 3 = ${face}!`);
+      return { face, sides: 6, dice: [a, b] };
+    },
+  },
+);
+
+/**
+ * WALRUS PUNCH — "Before my main move, and again after it, I can punch a racer on my space
+ * to trip them."
+ *
+ * One racer a punch, anyone on my space still standing, teammates included. The first
+ * punch isn't offered on a tripped turn — Tusk is on the floor too — and the second only
+ * after a main move that went somewhere, like every "after my main move" power.
+ */
+const tusk = def(
+  'tusk',
+  'Tusk',
+  'Before my main move, and again after it, I can punch a racer on my space to trip them.',
+  {
+    beforeMainMove: (h) => {
+      if (!h.self.tripped) offerPunch(h);
+    },
+    afterMainMove: (h) => offerPunch(h),
+    resume: (h, key, choice) => {
+      if (key !== 'punch' || choice === ('pass' as ChoiceId)) return;
+      const victim = punchable(h).find((r) => choice === (`punch:${r.racerId}` as ChoiceId));
+      if (!victim) return;
+      h.log(`${h.nameOf(h.self)} winds up a Walrus Punch on ${h.nameOf(victim)}!`);
+      h.trip(victim);
+    },
+  },
+);
+
+/** Asks Tusk whether to punch, if anyone on its space is still standing. */
+function offerPunch(h: HookCtx) {
+  if (!isRunning(h.self)) return;
+  const targets = punchable(h);
+  if (targets.length === 0) return;
+  h.ask({
+    player: h.self.owner,
+    prompt: 'Walrus Punch a racer on your space?',
+    options: [
+      ...targets.map((r) => option(`punch:${r.racerId}`, `Punch ${h.nameOf(r)}`, racerTarget(r.racerId))),
+      option('pass', 'Not now'),
+    ],
+    key: 'punch',
+    defaultChoice: 'pass' as ChoiceId,
+  });
+}
+
+/** Tusk's targets: running racers on its space still on their feet. */
+function punchable(h: HookCtx) {
+  return h.sharing().filter((r) => isRunning(r) && !r.tripped);
+}
+
+/**
+ * SOULBIND — "Before my main move, I can bind two racers within 5 spaces of each other.
+ * Until my next turn, neither can get more than 5 spaces from the other. If the link would
+ * have to hold them back forever, it snaps. Ready again 4 turns later."
+ *
+ * Any two running racers, Grimstroke among them. The engine keeps the leash (see `SOULBIND`
+ * and `leashesOf`): a move that would step out of reach stops short, and a warp lands on
+ * the nearest space still in reach. Only a step that widens the gap is held, so a pair
+ * that ends up too far apart some other way can still come back together. A link that has
+ * to hold its racers back again and again is stuck refusing a power that keeps trying — a
+ * loop — so after `LEASH_SNAP` holds it snaps rather than hang the game. Crossing the
+ * finish line frees both racers, and Grimstroke's next turn ends the link, tripped or
+ * silenced.
+ *
+ * Cast on a tripped turn too: it's a spell, not a move.
+ */
+const SOULBIND_COOLDOWN = 4;
+const grimstroke = def(
+  'grimstroke',
+  'Grimstroke',
+  `Before my main move, I can bind two racers within ${LEASH} spaces of each other, me included. Until my next turn, neither can get more than ${LEASH} spaces from the other. If the link would have to hold them back forever, it snaps. Ready again ${SOULBIND_COOLDOWN} turns later.`,
+  {
+    beforeMainMove: (h) => {
+      if (!isRunning(h.self) || timerLeft(h.self, 'soulbind') > 0) return;
+      const firsts = h.running().filter((r) => bindable(h, r).length > 0);
+      if (firsts.length === 0) return;
+      h.ask({
+        player: h.self.owner,
+        prompt: `Soulbind two racers within ${LEASH} spaces of each other? Pick the first. ${SOULBIND_COOLDOWN}-turn cooldown.`,
+        options: [
+          ...firsts.map((r) => option(`bind:${r.racerId}`, h.nameOf(r), racerTarget(r.racerId))),
+          option('pass', 'Not now'),
+        ],
+        key: 'soulbind',
+        defaultChoice: 'pass' as ChoiceId,
+      });
+    },
+    resume: (h, key, choice, data) => {
+      if (choice === ('pass' as ChoiceId)) return;
+      if (key === 'soulbind') {
+        const first = h.running().find((r) => choice === (`bind:${r.racerId}` as ChoiceId));
+        if (!first) return;
+        const partners = bindable(h, first);
+        if (partners.length === 0) return;
+        h.ask({
+          player: h.self.owner,
+          prompt: `Soulbind ${h.nameOf(first)} to whom?`,
+          options: [
+            ...partners.map((r) => option(`with:${r.racerId}`, h.nameOf(r), racerTarget(r.racerId))),
+            option('pass', 'Never mind'),
+          ],
+          key: 'soulbindWith',
+          data: { first: first.racerId },
+          defaultChoice: 'pass' as ChoiceId,
+        });
+        return;
+      }
+      if (key !== 'soulbindWith') return;
+      const first = h.running().find((r) => r.racerId === (data as { first: string }).first);
+      if (!first) return;
+      const second = bindable(h, first).find((r) => choice === (`with:${r.racerId}` as ChoiceId));
+      if (!second) return;
+      const link: Soulbind = { a: first.racerId, b: second.racerId, holds: 0 };
+      h.self.memo[SOULBIND] = link;
+      startTimer(h, 'soulbind', SOULBIND_COOLDOWN);
+      h.log(
+        `${h.nameOf(h.self)} Soulbinds ${h.nameOf(first)} and ${h.nameOf(second)}: neither can stray more than ${LEASH} from the other.`,
+      );
+    },
+  },
+);
+
+/** Who `first` can be Soulbound to: other running racers within `LEASH` of it. */
+function bindable(h: HookCtx, first: MutableRacer) {
+  return h.running().filter((r) => r.racerId !== first.racerId && Math.abs(r.pos - first.pos) <= LEASH);
+}
+
 export const DOTA_RACERS: readonly RacerDef[] = [
   bountyHunter,
   spiritBreaker,
@@ -965,4 +1534,18 @@ export const DOTA_RACERS: readonly RacerDef[] = [
   drowRanger,
   nightStalker,
   slark,
+  voidSpirit,
+  lich,
+  magnus,
+  underlord,
+  doom,
+  sven,
+  kez,
+  invoker,
+  largo,
+  juggernaut,
+  lina,
+  phantomAssassin,
+  tusk,
+  grimstroke,
 ];

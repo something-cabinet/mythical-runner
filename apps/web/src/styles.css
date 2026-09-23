@@ -833,6 +833,59 @@ select {
   opacity: 0.6;
 }
 
+/* A tether between two racers (see `Tether`): a dark outline, a core in the linking racer's
+   colour (`currentColor`), and a dashed sheen drifting along it so it reads as live. The
+   ends follow the pieces as they hop, where the browser can animate a path. Kinds restyle
+   `.tether-<kind>`; these are the shared rope. */
+.board .tether {
+  pointer-events: stroke;
+  fill: none;
+  stroke-linecap: round;
+}
+
+.board .tether path {
+  fill: none;
+  transition: d 150ms ease-out;
+}
+
+.board .tether-shadow {
+  stroke: #1b1724;
+  stroke-width: 9;
+  opacity: 0.55;
+}
+
+.board .tether-core {
+  stroke: currentColor;
+  stroke-width: 5;
+  filter: drop-shadow(0 0 4px currentColor);
+}
+
+.board .tether-flow {
+  stroke: rgb(255 255 255 / 0.75);
+  stroke-width: 2;
+  stroke-dasharray: 3 11;
+  animation: tether-flow 1.2s linear infinite;
+}
+
+@keyframes tether-flow {
+  to {
+    stroke-dashoffset: -14;
+  }
+}
+
+/* Grimstroke's Soulbind: an ink-dark rope, pulsing faintly. */
+.board .tether-soulbind .tether-core {
+  stroke-dasharray: 10 4;
+  animation: range-glow 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board .tether path {
+    transition: none;
+    animation: none;
+  }
+}
+
 .board .piece {
   transition: transform 150ms ease-out;
 }

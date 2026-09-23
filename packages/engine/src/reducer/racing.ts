@@ -7,7 +7,7 @@ import { goldToken, silverToken, totalPoints, type Token } from '../scoring.js';
 import { FINISH, START, type RaceNumber } from '../tracks/index.js';
 import { FINISHERS_PER_RACE, RACE_COUNT, racersPerRace } from '../state.js';
 import { beginCommit } from './commit.js';
-import { hooksFor, SILENCED, silencedTurns } from '../characters/powers.js';
+import { hooksFor, SILENCED, silencedTurns, SOULBIND, TIMERS } from '../characters/powers.js';
 import { awardFor, makeHookCtx, runQueue } from './pipeline.js';
 import { activeRacers, findRacer, racersOf, type Ctx, scoreOf, seatAt } from './working.js';
 
@@ -168,6 +168,8 @@ export function takeTurn(ctx: Ctx, rng: Rng, racerId?: RacerId): void {
   invariant(racer, `racer ${pick} is not on the board`);
   s.phase.moving = pick;
   s.turnStartPos = racer.pos;
+  // A Soulbind lasts until its caster's next turn, silenced or tripped or not.
+  delete racer.memo[SOULBIND];
 
   // Standing up from a trip is handled inside the mainMove job, because "your powers can
   // still trigger" on a tripped turn — only the roll and movement are skipped.
@@ -238,6 +240,17 @@ export function endTurn(ctx: Ctx, rng: Rng): void {
     const left = silencedTurns(hushed) - 1;
     if (left > 0) hushed.memo[SILENCED] = left;
     else delete hushed.memo[SILENCED];
+  }
+  // And one tick off each of its countdowns: cooldowns and timed powers.
+  const timers = hushed?.memo[TIMERS] as Record<string, number> | undefined;
+  if (hushed && timers) {
+    const left = Object.fromEntries(
+      Object.entries(timers)
+        .map(([name, turns]) => [name, turns - 1] as const)
+        .filter(([, turns]) => turns > 0),
+    );
+    if (Object.keys(left).length > 0) hushed.memo[TIMERS] = left;
+    else delete hushed.memo[TIMERS];
   }
 
   if (phase.finished.length >= FINISHERS_PER_RACE) {
