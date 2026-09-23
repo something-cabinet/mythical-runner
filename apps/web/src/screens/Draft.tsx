@@ -1,59 +1,12 @@
 import { currentDrafter, racersPerPlayer, type PlayerId, type RacerId } from '@mr/engine';
 import { useEffect, useState } from 'react';
 import { ActionBar, PlayerToken, RacerCard, Waiting } from '../components/bits';
-import { listNames, playerName, racerName, rawName, waitingOn } from '../lib/present';
+import { playerName, racerName, rawName } from '../lib/present';
 import { legalOf, useRoomContext } from '../lib/roomContext';
 
-/** Covers both the roll-off for draft order and the snake draft itself. */
+/** The snake draft. Draft order is already rolled by the time this shows. */
 export function DraftScreen() {
-  const { view } = useRoomContext();
-  return view.phase.t === 'draftRoll' ? <RollOff /> : <Picking />;
-}
-
-function RollOff() {
-  const { view, message, canAct, send } = useRoomContext();
-  if (view.phase.t !== 'draftRoll') return null;
-  const rolls = view.phase.rolls;
-  const myRoll = legalOf(message, 'draft/roll')[0];
-  const outstanding = waitingOn(view).filter((p) => p !== view.you);
-
-  return (
-    <>
-      <main className="page">
-        <section className="card stack">
-          <h1 style={{ fontSize: '1.5rem' }}>Roll for draft order</h1>
-          <p className="muted">Highest roll picks first. Anyone who ties rolls again.</p>
-        </section>
-
-        <section className="card">
-          {view.seatOrder.map((pid) => {
-            const value = rolls[pid] ?? null;
-            return (
-              <div key={pid} className="player-row">
-                <PlayerToken view={view} pid={pid} />
-                <span className="name">{rawName(view, pid)}{pid === view.you && <span className="muted"> (you)</span>}</span>
-                <span className="die num" data-empty={value === null} aria-label={value === null ? 'not rolled' : `rolled ${value}`}>
-                  {value ?? '?'}
-                </span>
-              </div>
-            );
-          })}
-        </section>
-      </main>
-
-      <ActionBar>
-        {myRoll ? (
-          <button type="button" className="btn btn-primary btn-lg btn-block" disabled={!canAct} onClick={() => send(myRoll)}>
-            Roll the die
-          </button>
-        ) : (
-          <Waiting>
-            {outstanding.length > 0 ? `Waiting for ${listNames(view, outstanding)} to roll` : 'Settling the order…'}
-          </Waiting>
-        )}
-      </ActionBar>
-    </>
-  );
+  return <Picking />;
 }
 
 function Picking() {
@@ -141,6 +94,9 @@ function Picking() {
                 </div>
               </div>
               {pid === picker && <span className="tag tag-gold">picking</span>}
+              <span className="die num" aria-label={`rolled ${phase.rolls[pid]} for draft order`}>
+                {phase.rolls[pid]}
+              </span>
             </div>
           ))}
         </section>

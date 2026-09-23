@@ -192,7 +192,7 @@ function Connected({ code, credentials, name }: { code: string; credentials: Cre
     <RoomContext.Provider value={value}>
       <TopBar wide={wide} />
       {view.phase.t === 'lobby' && <LobbyScreen />}
-      {(view.phase.t === 'draftRoll' || view.phase.t === 'draft') && <DraftScreen />}
+      {view.phase.t === 'draft' && <DraftScreen />}
       {view.phase.t === 'commit' && <CommitScreen />}
       {showRace && <RaceScreen />}
       {view.phase.t === 'scored' && !holding && <ResultsScreen />}
@@ -250,9 +250,7 @@ function TopBar({ wide }: { wide: boolean }) {
   const label =
     phase.t === 'lobby'
       ? 'Lobby'
-      : phase.t === 'draftRoll'
-        ? 'Draft · roll for order'
-        : phase.t === 'draft'
+      : phase.t === 'draft'
           ? `Draft · pick ${Math.min(phase.pick + 1, phase.order.length * 4)} of ${phase.order.length * 4}`
           : phase.t === 'commit'
             ? `Race ${phase.raceNo} of 4 · choose`

@@ -5,7 +5,7 @@ import { makeRng, type Rng } from '../rng.js';
 import type { GameEvent } from '../events.js';
 import { DEFAULT_SETS } from '../characters/sets.js';
 import { MAX_PLAYERS, MIN_PLAYERS, type GameState } from '../state.js';
-import { currentDrafter, draftPick, draftRoll } from './draft.js';
+import { currentDrafter, draftPick } from './draft.js';
 import {
   addBot,
   enoughRacers,
@@ -85,7 +85,7 @@ function route(ctx: Ctx, action: Action, rng: Rng): void {
     case 'lobby/setConnected':
       return setConnected(ctx, action);
     case 'lobby/start':
-      return start(ctx, action);
+      return start(ctx, action, rng);
     case 'lobby/addBot':
       return addBot(ctx, action);
     case 'lobby/removeBot':
@@ -94,8 +94,6 @@ function route(ctx: Ctx, action: Action, rng: Rng): void {
       return toggleSet(ctx, action);
     case 'lobby/rematch':
       return rematch(ctx, action, rng);
-    case 'draft/roll':
-      return draftRoll(ctx, action, rng);
     case 'draft/pick':
       return draftPick(ctx, action);
     case 'race/commit':
@@ -149,15 +147,6 @@ function timeout(ctx: Ctx, a: SystemTimeout, rng: Rng): void {
   }
 
   switch (s.phase.t) {
-    case 'draftRoll': {
-      // Roll for everyone still outstanding.
-      for (const [p, v] of Object.entries(s.phase.rolls) as [PlayerId, number | null][]) {
-        if (v === null && s.phase.t === 'draftRoll') {
-          draftRoll(ctx, { t: 'draft/roll', by: p }, rng);
-        }
-      }
-      return;
-    }
     case 'draft': {
       const who = currentDrafter(s.phase.order, s.phase.pick);
       const pick = s.phase.layout[0];
@@ -227,9 +216,6 @@ export function legalActions(state: GameState, player: PlayerId): Action[] {
       }
       return out;
     }
-    case 'draftRoll':
-      return s.phase.rolls[player] === null ? [{ t: 'draft/roll', by: player }] : [];
-
     case 'draft': {
       if (currentDrafter(s.phase.order, s.phase.pick) !== player) return [];
       return s.phase.layout.map((racerId) => ({ t: 'draft/pick', by: player, racerId }));

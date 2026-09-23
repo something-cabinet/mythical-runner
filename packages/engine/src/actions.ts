@@ -68,12 +68,6 @@ export interface LobbyRematch {
   readonly by: PlayerId;
 }
 
-/** Roll-off for draft order. Highest unique roll goes first; ties re-roll. */
-export interface DraftRoll {
-  readonly t: 'draft/roll';
-  readonly by: PlayerId;
-}
-
 export interface DraftPick {
   readonly t: 'draft/pick';
   readonly by: PlayerId;
@@ -130,7 +124,6 @@ export type Action =
   | LobbyRemoveBot
   | LobbyToggleSet
   | LobbyRematch
-  | DraftRoll
   | DraftPick
   | RaceCommit
   | RaceRoll

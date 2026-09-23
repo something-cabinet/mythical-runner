@@ -456,7 +456,7 @@ const rematch = scenario('Play again returns everyone still here to the same lob
   check(info.joinable === true, 'and the room takes new players again');
 
   a.send({ t: 'lobby/start' });
-  await b.waitFor((m) => m.view.phase.t === 'draftRoll', 5000, 'a second game to start');
+  await b.waitFor((m) => m.view.phase.t === 'draft', 5000, 'a second game to start');
   check(true, 'the host can start the second game');
   [a, b].forEach((c) => c.close());
 });
@@ -491,7 +491,7 @@ const bots = scenario('The host can fill seats with bots, and the server plays t
   host.send({ t: 'lobby/start' });
   const stop = autoplay(host);
   const botMoved = await host.waitFor(
-    (m) => m.events.some((e) => (e.t === 'draft/rolled' || e.t === 'draft/picked') && e.player === botId),
+    (m) => m.events.some((e) => e.t === 'draft/picked' && e.player === botId),
     15000,
     'the bot to act',
   );

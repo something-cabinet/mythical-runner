@@ -133,10 +133,8 @@ export function describe(e: GameEvent): string | null {
       return `${e.name} joined.`;
     case 'game/started':
       return `Game started with ${e.seatOrder.length} players.`;
-    case 'draft/rolled':
-      return `${e.player} rolled ${e.value} for draft order.`;
     case 'draft/orderSet':
-      return `Draft order: ${e.order.join(' -> ')}`;
+      return `Draft order: ${e.order.map((p) => `${p}=${e.rolls[p]}`).join(' -> ')}`;
     case 'draft/picked':
       return `${e.player} drafted ${racerName(e.racerId)}.`;
     case 'race/started':

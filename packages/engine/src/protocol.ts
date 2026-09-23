@@ -24,7 +24,6 @@ export const CLIENT_ACTION_TYPES = [
   'lobby/removeBot',
   'lobby/toggleSet',
   'lobby/rematch',
-  'draft/roll',
   'draft/pick',
   'race/commit',
   'race/roll',

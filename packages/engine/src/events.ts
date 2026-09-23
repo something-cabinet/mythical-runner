@@ -47,15 +47,12 @@ export interface GameStarted {
   readonly seatOrder: readonly PlayerId[];
 }
 
-export interface DraftRolled {
-  readonly t: 'draft/rolled';
-  readonly player: PlayerId;
-  readonly value: number;
-}
-
+/** The whole draft roll-off, settled at once when the game starts. */
 export interface DraftOrderSet {
   readonly t: 'draft/orderSet';
   readonly order: readonly PlayerId[];
+  /** Each player's settling roll, after any tie re-rolls. */
+  readonly rolls: Readonly<Record<PlayerId, number>>;
 }
 
 export interface DraftPicked {
@@ -301,7 +298,6 @@ export type GameEvent =
   | GameStarted
   | GameRematch
   | LobbySetsChanged
-  | DraftRolled
   | DraftOrderSet
   | DraftPicked
   | RaceStarted

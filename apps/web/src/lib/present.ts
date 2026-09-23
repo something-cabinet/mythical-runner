@@ -282,10 +282,6 @@ export function waitingOn(view: PlayerView): PlayerId[] {
   if (view.pending) return [view.pending.player];
   const phase = view.phase;
   switch (phase.t) {
-    case 'draftRoll':
-      return (Object.entries(phase.rolls) as [PlayerId, number | null][])
-        .filter(([, v]) => v === null)
-        .map(([p]) => p);
     case 'draft':
       return [currentDrafter(phase.order, phase.pick)];
     case 'commit':
@@ -330,10 +326,10 @@ export function describeEvent(e: GameEvent, view: PlayerView): LogLine | null {
       return { text: `Racer sets: ${setNames(e.sets)}`, tone: 'plain' };
     case 'game/started':
       return { text: 'The game has started', tone: 'turn' };
-    case 'draft/rolled':
-      return { text: `${who(e.player)} rolled ${e.value} for draft order`, tone: 'plain' };
-    case 'draft/orderSet':
-      return { text: `${who(e.order[0] as PlayerId)} drafts first`, tone: 'turn' };
+    case 'draft/orderSet': {
+      const rolls = e.order.map((p) => `${who(p)} ${e.rolls[p]}`).join(', ');
+      return { text: `Draft order rolled (${rolls}) — ${who(e.order[0] as PlayerId)} drafts first`, tone: 'turn' };
+    }
     case 'draft/picked':
       return { text: `${who(e.player)} drafted ${racer(e.racerId)}`, tone: 'plain' };
     case 'race/started':

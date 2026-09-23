@@ -1,4 +1,4 @@
-import type { DraftPick, DraftRoll } from '../actions.js';
+import type { DraftPick } from '../actions.js';
 import { racersInSets } from '../characters/registry.js';
 import { IllegalActionError, invariant } from '../errors.js';
 import type { PlayerId, RacerId } from '../ids.js';
@@ -8,51 +8,37 @@ import { beginCommit } from './commit.js';
 import { type Ctx, hand } from './working.js';
 
 /**
- * Roll-off for draft order: highest goes first.
+ * Roll-off for draft order, settled all at once: highest goes first.
  *
  * "Highest unique" is the published wording, which is really a tie-break rule — anyone
  * sharing a value re-rolls, and only players holding a value nobody else rolled are
- * locked in. Repeating until all values are distinct terminates with probability 1.
+ * locked in. Nobody has a choice to make, so every round is thrown here rather than
+ * waiting on each player to press a button. With at most six players a distinct set of
+ * values always exists, so this terminates with probability 1.
  */
-export function draftRoll(ctx: Ctx, a: DraftRoll, rng: Rng): void {
+export function draftRollOff(ctx: Ctx, rng: Rng): void {
   const { s } = ctx;
-  if (s.phase.t !== 'draftRoll') throw new IllegalActionError(a, 'not in the roll-off');
-  if (!(a.by in s.phase.rolls)) throw new IllegalActionError(a, 'not in this room');
-  if (s.phase.rolls[a.by] !== null) throw new IllegalActionError(a, 'already rolled');
+  const rolls: Record<PlayerId, number> = {};
+  let rolling = [...s.seatOrder];
 
-  const value = rng.rollD6();
-  s.phase.rolls[a.by] = value;
-  ctx.emit({ t: 'draft/rolled', player: a.by, value });
-
-  const entries = Object.entries(s.phase.rolls) as [PlayerId, number | null][];
-  if (entries.some(([, v]) => v === null)) return; // still waiting on someone
-
-  // Clear any tied values so those players roll again.
-  const tally = new Map<number, number>();
-  for (const [, v] of entries) if (v !== null) tally.set(v, (tally.get(v) ?? 0) + 1);
-
-  let tied = false;
-  for (const [p, v] of entries) {
-    if (v !== null && (tally.get(v) ?? 0) > 1) {
-      s.phase.rolls[p] = null;
-      tied = true;
-    }
+  // The bound only guards against an engine bug.
+  for (let attempt = 0; attempt < 1000 && rolling.length > 0; attempt++) {
+    for (const p of rolling) rolls[p] = rng.rollD6();
+    const tally = new Map<number, number>();
+    for (const p of s.seatOrder) tally.set(rolls[p]!, (tally.get(rolls[p]!) ?? 0) + 1);
+    rolling = s.seatOrder.filter((p) => (tally.get(rolls[p]!) ?? 0) > 1);
   }
-  if (tied) return;
+  invariant(rolling.length === 0, 'draft roll-off never settled');
 
-  const order = entries
-    .map(([p, v]) => ({ p, v: v as number }))
-    .sort((x, y) => y.v - x.v)
-    .map(({ p }) => p);
-
-  ctx.emit({ t: 'draft/orderSet', order: [...order] });
-  beginDraft(ctx, order, rng);
+  const order = [...s.seatOrder].sort((x, y) => rolls[y]! - rolls[x]!);
+  ctx.emit({ t: 'draft/orderSet', order: [...order], rolls: { ...rolls } });
+  beginDraft(ctx, order, rolls, rng);
 }
 
-function beginDraft(ctx: Ctx, order: PlayerId[], rng: Rng): void {
+function beginDraft(ctx: Ctx, order: PlayerId[], rolls: Record<PlayerId, number>, rng: Rng): void {
   const { s } = ctx;
   const deck = rng.shuffle(racersInSets(s.racerSets)) as RacerId[];
-  s.phase = { t: 'draft', deck, layout: [], order, pick: 0 };
+  s.phase = { t: 'draft', deck, layout: [], order, rolls, pick: 0 };
   dealWaveIfNeeded(ctx);
 }
 

@@ -11,6 +11,7 @@ import type {
 import { racersInSets } from '../characters/registry.js';
 import { CHARACTER_SETS, isCharacterSetId, type CharacterSetId } from '../characters/sets.js';
 import { IllegalActionError } from '../errors.js';
+import { draftRollOff } from './draft.js';
 import { playerId, type PlayerId } from '../ids.js';
 import type { Rng } from '../rng.js';
 import { draftSize, MAX_PLAYERS, MIN_PLAYERS, type Player } from '../state.js';
@@ -57,7 +58,7 @@ export function setConnected(ctx: Ctx, a: LobbySetConnected): void {
   player.connected = a.connected;
 }
 
-export function start(ctx: Ctx, a: LobbyStart): void {
+export function start(ctx: Ctx, a: LobbyStart, rng: Rng): void {
   const { s } = ctx;
   if (s.phase.t !== 'lobby') throw new IllegalActionError(a, 'game already started');
   if (s.players.length < MIN_PLAYERS) {
@@ -72,10 +73,7 @@ export function start(ctx: Ctx, a: LobbyStart): void {
   ctx.emit({ t: 'game/started', seatOrder: [...s.seatOrder] });
 
   // Everyone rolls off for draft order before anything else happens.
-  s.phase = {
-    t: 'draftRoll',
-    rolls: Object.fromEntries(s.seatOrder.map((p) => [p, null])),
-  };
+  draftRollOff(ctx, rng);
 }
 
 /** Whether the chosen sets hold enough racers for everyone to draft a full team. */

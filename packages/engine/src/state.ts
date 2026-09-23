@@ -107,8 +107,6 @@ export interface DecisionOption {
 export type Phase =
   /** Players joining; nobody has started yet. */
   | { readonly t: 'lobby' }
-  /** Roll-off to determine draft order. Highest unique roll drafts first. */
-  | { readonly t: 'draftRoll'; readonly rolls: Readonly<Record<PlayerId, number | null>> }
   /**
    * Snake draft. `pick` counts picks made so far, so the current round is
    * `floor(pick / playerCount)`; even rounds run forward, odd rounds reverse.
@@ -124,6 +122,8 @@ export type Phase =
       readonly deck: readonly RacerId[];
       readonly layout: readonly RacerId[];
       readonly order: readonly PlayerId[];
+      /** The roll that settled each player's place in `order`, after any tie re-rolls. */
+      readonly rolls: Readonly<Record<PlayerId, number>>;
       readonly pick: number;
     }
   /**

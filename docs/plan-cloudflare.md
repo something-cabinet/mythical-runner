@@ -213,8 +213,8 @@ version with full comments.
 ```ts
 type Phase =
   | { t: 'lobby' }
-  | { t: 'draftRoll'; rolls: Record<PlayerId, number | null> }
-  | { t: 'draft'; deck: RacerId[]; layout: RacerId[]; order: PlayerId[]; pick: number }
+  | { t: 'draft'; deck: RacerId[]; layout: RacerId[]; order: PlayerId[]
+      rolls: Record<PlayerId, number>; pick: number }
   | { t: 'commit'; raceNo: 1|2|3|4; committed: Record<PlayerId, RacerId | null> }
   | { t: 'racing'; raceNo: 1|2|3|4; active: PlayerId; finished: PlayerId[]
       stalledTurns: number; claimedSpaces: number[] }
@@ -246,10 +246,12 @@ type GameState = {
 }
 ```
 
-Three additions phase 1 forced that the original sketch did not have:
+Additions phase 1 forced that the original sketch did not have:
 
-- **`draftRoll` is its own phase.** The roll-off for draft order has real state (who has
-  rolled, who must re-roll after a tie) and could not be folded into `draft`.
+- **The draft roll-off is settled at Start.** It used to be its own phase, with each player
+  pressing Roll and ties re-rolling, which dragged at six players (six distinct values on
+  a d6). Nobody makes a choice in it, so the engine now throws every round at once and
+  stores the settling rolls on `draft` for the screen to show.
 - **`claimedSpaces`** tracks which star spaces have been looted this race. Supply alone is
   not enough: a racer bounced back and forth across a star space by Wild Wilds arrows would
   otherwise farm it indefinitely.
