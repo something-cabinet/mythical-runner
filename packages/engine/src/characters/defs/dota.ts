@@ -247,6 +247,7 @@ const facelessVoid = def(
       for (const r of inBubble(h)) h.trip(r);
     },
   },
+  5,
 );
 
 /** Asks Faceless Void whether to drop the Chronosphere now, if it is unspent and would catch anyone. */
@@ -364,6 +365,7 @@ const omniknight = def(
       return slowed;
     },
   },
+  3,
 );
 
 /**
@@ -675,7 +677,7 @@ const techies = def(
 );
 
 /**
- * CHAOS BOLT — "I roll a d20, and get -9 to my main move. It can take me backwards."
+ * CHAOS STRIKE — "I roll a d20, and get -9 to my main move. It can take me backwards."
  *
  * The d20 is my die for anything that has me roll: rerolls, a duel, Spirit Breaker's bash.
  * The -9 is only on the main move. Below 0 it runs backwards, clamped at Start; at exactly
@@ -690,14 +692,14 @@ const chaosKnight = def(
     dieSides: () => 20,
     modifyMainMove: (h, value, mover) => {
       if (mover.racerId !== h.self.racerId) return value;
-      h.log(`${h.nameOf(h.self)}'s Chaos Bolt: -9.`);
+      h.log(`${h.nameOf(h.self)}'s Chaos Strike: -9.`);
       return value - 9;
     },
   },
 );
 
 /**
- * BORROWED TIME — "Whenever another racer trips, I can help them up at once. If I do, I
+ * APHOTIC SHIELD — "Whenever another racer trips, I can help them up at once. If I do, I
  * move 3."
  *
  * Offered once the trip has settled, so a Tidehunter that shrugged it off by itself isn't
@@ -710,13 +712,13 @@ const abaddon = def(
   {
     onRacerTripped: (h, target) => {
       if (target.racerId === h.self.racerId || !isRunning(h.self) || !isRunning(target)) return;
-      h.defer('mistCoil', { target: target.racerId });
+      h.defer('aphoticShield', { target: target.racerId });
     },
     resume: (h, key, choice, data) => {
       const { target: targetId } = (data ?? {}) as { target?: string };
       const target = h.racers().find((r) => r.racerId === targetId);
       if (!target || !isRunning(target) || !target.tripped || !isRunning(h.self)) return;
-      if (key === 'mistCoil') {
+      if (key === 'aphoticShield') {
         h.ask({
           player: h.self.owner,
           prompt: `${h.nameOf(target)} is down. Help them up and move 3?`,
@@ -776,6 +778,7 @@ const emberSpirit = def(
       h.move(h.self, crowd.length * 2);
     },
   },
+  3,
 );
 
 /** Ember Spirit's crowd: running racers on its space or next to it, itself excluded. */
@@ -856,6 +859,7 @@ const bristleback = def(
       for (const r of caught) h.trip(r);
     },
   },
+  3,
 );
 
 /**
@@ -878,6 +882,7 @@ const drowRanger = def(
       return crowded ? 6 : 8;
     },
   },
+  3,
 );
 
 /**

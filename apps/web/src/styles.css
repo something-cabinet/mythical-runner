@@ -740,6 +740,24 @@ select {
   opacity: 0.45;
 }
 
+/* A space within a racer's positional power — Faceless Void's Chronosphere, Omniknight's
+   aura, and the like — glows in that racer's seat colour, stacking a wash per racer whose
+   reach covers it, plus a bright outer halo so the reach reads at a glance. */
+.board .space-range-glow {
+  stroke-width: 3;
+  opacity: 0.65;
+  mix-blend-mode: plus-lighter;
+  filter: drop-shadow(0 0 8px currentColor) drop-shadow(0 0 8px currentColor);
+  pointer-events: none;
+  animation: range-glow 1.8s ease-in-out infinite;
+}
+
+@keyframes range-glow {
+  50% {
+    opacity: 0.9;
+  }
+}
+
 .board .idx {
   font-size: 14px;
   fill: #1b1724;

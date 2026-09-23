@@ -1,4 +1,4 @@
-import { FINISH, trackForRace, type PlayerView, type RacerId, type RaceNumber } from '@mr/engine';
+import { FINISH, racerRange, trackForRace, type PlayerView, type RacerId, type RaceNumber } from '@mr/engine';
 import { useEffect, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { hasSprite, ordinal, racerInitials, racerName, racerSprite, rawName, seatColor } from '../lib/present';
 import { ROLL_TUMBLE_MS, type ShownPower, type ShownRoll } from '../lib/useBoardPositions';
@@ -440,6 +440,24 @@ export function Board({
     .filter((r) => drawnPos(r.racerId, r.pos) >= FINISH)
     .sort((a, b) => (a.finishedRank ?? 99) - (b.finishedRank ?? 99));
 
+  // The racer whose turn it is, if its power reads or acts on a window of nearby spaces
+  // (Faceless Void's Chronosphere, Omniknight's aura, ...), glows that window on the
+  // board, in its seat colour, so its reach is visible while it's relevant.
+  const spaceGlows = new Map<number, string[]>();
+  for (const r of live) {
+    if (r.racerId !== activeRacer) continue;
+    const span = racerRange(r.racerId);
+    const pos = drawnPos(r.racerId, r.pos);
+    if (!span || pos >= FINISH) continue;
+    const reach = (span - 1) / 2;
+    const color = seatColor(view, r.owner);
+    for (let i = Math.max(0, Math.ceil(pos - reach)); i <= Math.min(track.spaces.length - 1, Math.floor(pos + reach)); i++) {
+      const colors = spaceGlows.get(i) ?? [];
+      colors.push(color);
+      spaceGlows.set(i, colors);
+    }
+  }
+
   /** Direction of travel at a space, in degrees, for drawing arrows. */
   const heading = (index: number): number => {
     const from = boxes[Math.min(index, boxes.length - 2)];
@@ -565,6 +583,18 @@ export function Board({
                         ? `Space ${space.index}: move ${e.amount > 0 ? 'forward' : 'back'} ${Math.abs(e.amount)}`
                         : `Space ${space.index}`}
               </title>
+              {(spaceGlows.get(space.index) ?? []).map((color, gi) => (
+                <rect
+                  key={gi}
+                  className="space-range-glow"
+                  x={b.x}
+                  y={b.y}
+                  width={b.w}
+                  height={b.h}
+                  rx={8}
+                  style={{ fill: color, stroke: color, color }}
+                />
+              ))}
             </g>
           );
         })}

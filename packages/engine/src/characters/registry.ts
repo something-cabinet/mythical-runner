@@ -72,6 +72,11 @@ export function racerText(id: RacerId): string {
   return BY_ID.get(id)?.text ?? '';
 }
 
+/** The "near me" window a racer's power reads or acts on, or undefined if it has none. */
+export function racerRange(id: RacerId): 3 | 5 | undefined {
+  return BY_ID.get(id)?.range;
+}
+
 export const ALL_RACER_IDS: readonly RacerId[] = RACERS.map((r) => r.id);
 
 /** Every racer in the given sets, in roster order: the draft deck before shuffling. */

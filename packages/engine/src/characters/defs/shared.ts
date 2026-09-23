@@ -5,11 +5,12 @@ import type { RacerDef } from '../types.js';
 
 /** A `def` bound to one set, so each set's file names its set once. */
 export function defFor(set: CharacterSetId) {
-  return (id: string, name: string, text: string, hooks: Hooks): RacerDef => ({
+  return (id: string, name: string, text: string, hooks: Hooks, range?: 3 | 5): RacerDef => ({
     id: racerId(id),
     set,
     name,
     text,
+    ...(range !== undefined ? { range } : {}),
     hooks: hooks as unknown as Record<string, unknown>,
   });
 }

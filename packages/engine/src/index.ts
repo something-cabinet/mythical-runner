@@ -30,6 +30,7 @@ export {
   racerName,
   racerLabel,
   racerText,
+  racerRange,
   racersInSets,
   racerSet,
 } from './characters/registry.js';

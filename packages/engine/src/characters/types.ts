@@ -14,5 +14,11 @@ export interface RacerDef {
   readonly name: string;
   /** Rules text, shown in the UI. Empty for vanilla placeholders. */
   readonly text: string;
+  /**
+   * The width of the "near me" window a positional power reads or acts on — 3 for "my
+   * space or next to it", 5 for "within 2 spaces of me" — so the UI can glow those spaces
+   * on the board. Undefined for racers with no such power.
+   */
+  readonly range?: 3 | 5;
   readonly hooks?: Readonly<Record<string, unknown>>;
 }
