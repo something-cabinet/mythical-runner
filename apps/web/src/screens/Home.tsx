@@ -23,7 +23,7 @@ export function Home() {
     try {
       saveName(name);
       const newCode = await createRoom(turnSeconds);
-      navigate(`/r/${newCode}`);
+      navigate(`/r/${newCode}`, false, { nameConfirmed: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create a room.');
       setBusy(false);
@@ -38,7 +38,7 @@ export function Home() {
       return;
     }
     saveName(name);
-    navigate(`/r/${normalized}`);
+    navigate(`/r/${normalized}`, false, { nameConfirmed: true });
   };
 
   return (

@@ -12,7 +12,7 @@ import {
 } from '../lib/identity';
 import { RoomClient } from '../lib/roomClient';
 import { RoomContext, useRoomContext, type RoomContextValue } from '../lib/roomContext';
-import { navigate, roomLink } from '../lib/router';
+import { arrivedWithConfirmedName, navigate, roomLink } from '../lib/router';
 import { isMuted, setMuted, subscribeMuted } from '../lib/sound';
 import { useBoardPositions } from '../lib/useBoardPositions';
 import { useEventLog } from '../lib/useEventLog';
@@ -35,9 +35,11 @@ export function Room({ code }: { code: string }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [credentials, setCredentials] = useState<Credentials | null>(() => loadCredentials(code));
   const [name, setName] = useState(loadName);
-  // Captured once. Auto-join must key off a name saved *before* arriving — never the live
-  // form field, or typing the first letter of a name would join the room as "B".
-  const [hadSavedName] = useState(() => loadName().trim() !== '');
+  // Captured once. Auto-join must key off a name confirmed *before* arriving — never the live
+  // form field, or typing the first letter of a name would join the room as "B". A shared
+  // link always shows the form (prefilled with any saved name) so the name can be changed;
+  // only the home screen, where the name was just typed, skips it.
+  const [nameConfirmed] = useState(() => arrivedWithConfirmedName() && loadName().trim() !== '');
 
   useEffect(() => {
     let cancelled = false;
@@ -49,8 +51,8 @@ export function Room({ code }: { code: string }) {
     };
   }, [code]);
 
-  // Someone who has sat in this room before, or already has a name, goes straight in.
-  const readyToJoin = credentials !== null || (info?.joinable === true && hadSavedName);
+  // Someone who has sat in this room before, or just named themselves on the home screen, goes straight in.
+  const readyToJoin = credentials !== null || (info?.joinable === true && nameConfirmed);
   useEffect(() => {
     if (readyToJoin && info?.exists && !credentials) setCredentials(getOrCreateCredentials(code));
   }, [readyToJoin, info, credentials, code]);

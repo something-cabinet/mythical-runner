@@ -22,11 +22,21 @@ export function usePath(): string {
   return useSyncExternalStore(subscribe, () => location.pathname);
 }
 
-export function navigate(path: string, replace = false): void {
+/** History state set when the player just confirmed their name on the home screen. */
+export interface NavState {
+  readonly nameConfirmed?: boolean;
+}
+
+export function navigate(path: string, replace = false, state: NavState | null = null): void {
   if (path === location.pathname) return;
-  if (replace) history.replaceState(null, '', path);
-  else history.pushState(null, '', path);
+  if (replace) history.replaceState(state, '', path);
+  else history.pushState(state, '', path);
   window.dispatchEvent(new Event(NAVIGATE));
+}
+
+/** True when this page was reached from the home screen, where the name was just typed. */
+export function arrivedWithConfirmedName(): boolean {
+  return (history.state as NavState | null)?.nameConfirmed === true;
 }
 
 export type Route = { readonly name: 'home' } | { readonly name: 'room'; readonly code: string };
