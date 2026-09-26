@@ -23,7 +23,7 @@
 - Oracle: Before my main move, I call odd or even. Each correct call in a row is worth 1 more: +1, then +2, then +3… A wrong call resets it.
 - Storm Spirit: Before my main move, I can roll a d20 instead of my d6. Ready again 6 turns later.
 - Bloodseeker: I get +1 to my main move for each other racer currently tripped.
-- Clockwerk: Before my main move, I push every racer 1 space away from me.
+- Clockwerk: Before or after my main move, I push every racer 1 space away from me.
 - Pudge: Before my main move, I can _warp_ any racer to my space.
 - Techies: Every space I stop on gets a mine. The next racer to stop there trips, and the mine is gone.
 - Chaos Knight: I roll a d20 and get -9 to my main move, so I can go backwards.

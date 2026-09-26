@@ -2226,7 +2226,7 @@ scenario('Bloodseeker — +1 to the main move for each other racer down', () => 
   check(!logLines(rollFor(calm, 'p1', 3).events).includes('blood'), 'nobody down: nothing');
 });
 
-scenario('Clockwerk — pushes every racer 1 away before the main move', () => {
+scenario('Clockwerk — pushes every racer 1 away, before or after the main move', () => {
   const s = raceState(
     [
       { player: 'p1', racer: 'clockwerk', pos: 5 },
@@ -2236,7 +2236,11 @@ scenario('Clockwerk — pushes every racer 1 away before the main move', () => {
     ],
     'p1',
   );
-  const { state, events } = applyAction(s, roll('p1'));
+  const asked = applyAction(s, roll('p1'));
+  const ids = asked.state.pending?.options.map((o) => String(o.id)).join(',');
+  check(ids === 'now,after', 'asks whether to push now or after the move', ids);
+  check(!has(asked.events, 'dice/thrown'), 'before the roll');
+  const { state, events } = applyAction(asked.state, decide('p1', 'now'));
   check(posOf(state, 'vanilla-01') === 9, 'the racer ahead goes 1 forward', `pos ${posOf(state, 'vanilla-01')}`);
   check(posOf(state, 'vanilla-02') === 1, 'the racer behind goes 1 back', `pos ${posOf(state, 'vanilla-02')}`);
   check(posOf(state, 'vanilla-03') === 5, 'the racer on its space stays');
@@ -2245,6 +2249,18 @@ scenario('Clockwerk — pushes every racer 1 away before the main move', () => {
   const firstPush = events.findIndex((e) => e.t === 'racer/moved' && String(e.racerId) !== 'clockwerk');
   check(firstPush >= 0 && firstPush < firstRoll, 'the pushes come first');
 
+  const late = applyAction(asked.state, decide('p1', 'after'));
+  const lateRoll = late.events.findIndex((e) => e.t === 'dice/thrown');
+  const latePush = late.events.findIndex((e) => e.t === 'racer/moved' && String(e.racerId) !== 'clockwerk');
+  check(latePush > lateRoll && lateRoll >= 0, '"after": the main move comes first, then the pushes');
+  const cw = posOf(late.state, 'clockwerk');
+  check(
+    posOf(late.state, 'vanilla-02') === 1 && posOf(late.state, 'vanilla-03') === 4,
+    'pushed away from where Clockwerk landed',
+    `clockwerk ${cw}, vanilla-02 ${posOf(late.state, 'vanilla-02')}, vanilla-03 ${posOf(late.state, 'vanilla-03')}`,
+  );
+  check(late.state.pending === null || late.state.pending === undefined, 'and asks nothing more');
+
   const start = raceState(
     [
       { player: 'p1', racer: 'clockwerk', pos: 5 },
@@ -2252,7 +2268,7 @@ scenario('Clockwerk — pushes every racer 1 away before the main move', () => {
     ],
     'p1',
   );
-  const none = applyAction(start, roll('p1'));
+  const none = applyAction(applyAction(start, roll('p1')).state, decide('p1', 'now'));
   check(posOf(none.state, 'vanilla-01') === 0 && !logLines(none.events).includes('Cogs'), 'nobody is pushed off Start');
 });
 

@@ -643,29 +643,57 @@ const bloodseeker = def(
 );
 
 /**
- * POWER COGS — "Before my main move, I push every racer 1 space away from me."
+ * POWER COGS — "Before or after my main move, I push every racer 1 space away from me."
  *
  * Racers ahead move 1 forward, racers behind move 1 back; racers on my space have no "away"
  * and stay put. Each push is a move, so it can pass, and the space it ends on fires.
+ * Once a turn, not optional: asked before the roll whether to push now or after, and "after"
+ * pushes from wherever the main move lands. No main move, no "after" — the push is lost.
  */
 const clockwerk = def(
   'clockwerk',
   'Clockwerk',
-  'Before my main move, I push every racer 1 space away from me.',
+  'Before or after my main move, I push every racer 1 space away from me.',
   {
     beforeMainMove: (h) => {
+      // A choice left over from a turn whose main move never happened is dropped.
+      h.self.memo[COGS_AFTER] = false;
       if (!isRunning(h.self)) return;
-      const pushed = h
-        .running()
-        .filter((r) => r.racerId !== h.self.racerId && r.pos !== h.self.pos && r.pos !== START);
-      // A racer on Start can't be pushed any further back.
-      if (pushed.length === 0) return;
-      h.log(`${h.nameOf(h.self)}'s Power Cogs push everyone 1 away.`);
-      // Moves are queued at the front, so queue in reverse to push in board order.
-      for (const r of [...pushed].reverse()) h.move(r, r.pos > h.self.pos ? 1 : -1);
+      if (!h.running().some((r) => r.racerId !== h.self.racerId)) return;
+      h.ask({
+        player: h.self.owner,
+        prompt: 'Power Cogs: push every racer 1 away from you now, or after your move?',
+        options: [option('now', 'Push now'), option('after', 'After my move')],
+        key: 'cogs',
+        defaultChoice: 'now' as ChoiceId,
+      });
+    },
+    afterMainMove: (h) => {
+      if (h.self.memo[COGS_AFTER] !== true) return;
+      h.self.memo[COGS_AFTER] = false;
+      if (isRunning(h.self)) powerCogs(h);
+    },
+    resume: (h, key, choice) => {
+      if (key !== 'cogs') return;
+      if (choice === ('after' as ChoiceId)) h.self.memo[COGS_AFTER] = true;
+      else powerCogs(h);
     },
   },
 );
+
+const COGS_AFTER = 'cogsAfter';
+
+/** Clockwerk pushes every racer not on its space 1 away from it. */
+function powerCogs(h: HookCtx): void {
+  const pushed = h
+    .running()
+    .filter((r) => r.racerId !== h.self.racerId && r.pos !== h.self.pos && r.pos !== START);
+  // A racer on Start can't be pushed any further back.
+  if (pushed.length === 0) return;
+  h.log(`${h.nameOf(h.self)}'s Power Cogs push everyone 1 away.`);
+  // Moves are queued at the front, so queue in reverse to push in board order.
+  for (const r of [...pushed].reverse()) h.move(r, r.pos > h.self.pos ? 1 : -1);
+}
 
 /**
  * MEAT HOOK — "Before my main move, I can warp a racer to my space."
