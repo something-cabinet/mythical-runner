@@ -1082,6 +1082,9 @@ const lich = def('lich', 'Lich', 'After my main move, I pull every other racer t
  * starting space aren't on the path. They're warped along, so the drag passes nobody, but
  * they do arrive — my space fires for them. Over the finish line, I'm placed before the
  * racers I dragged across with me.
+ *
+ * Knocked back — a backward arrow, a push — my path runs the other way, and the racers I
+ * go back over are dragged to where I stop just the same, though going back is no pass.
  */
 const magnus = def(
   'magnus',
@@ -1093,6 +1096,14 @@ const magnus = def(
       if (h.self.pos === FINISH && h.self.finishedRank === null) h.takePlace();
       h.log(`${h.nameOf(h.self)} skewers ${h.nameOf(passed)} along.`);
       h.warp(passed, h.self.pos);
+    },
+    // Knocked back over racers — an arrow, a push — Magnus takes them along the same way.
+    onCrossBack: (h, crossed) => {
+      if (!isRunning(h.self)) return;
+      for (const r of crossed) {
+        h.log(`${h.nameOf(h.self)} skewers ${h.nameOf(r)} back along.`);
+        h.warp(r, h.self.pos);
+      }
     },
   },
 );

@@ -398,6 +398,18 @@ function doMoveStep(ctx: Ctx, job: Extract<Job, { t: 'move' }>, rng: Rng): void 
       if (job.triggerSpace) tail.push({ t: 'spaceEffect', racer: job.racer, pos: racer.pos });
       tail.push({ t: 'stopHooks', racer: job.racer, done: [], pos: racer.pos });
     }
+    // Whatever this sets off is queued first, so it lands behind the mover's own settling.
+    if (job.dir === -1 && racer.pos < job.origin && !racer.eliminated) {
+      const crossed = ctx.s.board.filter(
+        (o) =>
+          o.racerId !== racer.racerId &&
+          !o.eliminated &&
+          o.finishedRank === null &&
+          o.pos > racer.pos &&
+          o.pos < job.origin,
+      );
+      if (crossed.length > 0) hooksFor(ctx.s, racer).onCrossBack?.(makeHookCtx(ctx, rng, racer), crossed);
+    }
     if (tail.length > 0) ctx.s.queue.unshift(...tail);
   };
 

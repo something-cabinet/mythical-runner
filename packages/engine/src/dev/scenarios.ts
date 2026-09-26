@@ -2685,6 +2685,45 @@ scenario('Magnus — drags every racer it passes to where it stops, and finishes
   const over = rollFor(home, 'p1', 5);
   check(racerAt(over.state, 'magnus')?.finishedRank === 1, 'Magnus takes 1st', String(racerAt(over.state, 'magnus')?.finishedRank));
   check(racerAt(over.state, 'vanilla-01')?.finishedRank === 2, 'and the dragged racer 2nd', String(racerAt(over.state, 'vanilla-01')?.finishedRank));
+
+  // Wild Wilds' space 16 knocks 4 back: Magnus passes 13 and 14, stops on the arrow and
+  // ends on 12 — where the skewered racers must end up too.
+  const knocked = raceState(
+    [
+      { player: 'p1', racer: 'magnus', pos: 11 },
+      { player: 'p2', racer: 'vanilla-01', pos: 13 },
+      { player: 'p3', racer: 'vanilla-02', pos: 14 },
+    ],
+    'p1',
+    2,
+  );
+  const arrowed = rollFor(knocked, 'p1', 5);
+  const at = (id: string): string => String(racerAt(arrowed.state, id)?.pos);
+  check(
+    at('magnus') === '12' && at('vanilla-01') === '12' && at('vanilla-02') === '12',
+    'knocked back by an arrow, Magnus takes the racers it passed with it',
+    `magnus ${at('magnus')}, vanilla-01 ${at('vanilla-01')}, vanilla-02 ${at('vanilla-02')}`,
+  );
+
+  // From 14, a roll of 2 lands on the arrow at 16 and knocks Magnus back to 12 — over the
+  // racer on 13, who was behind all along and was never passed.
+  const behind = raceState(
+    [
+      { player: 'p1', racer: 'magnus', pos: 14 },
+      { player: 'p2', racer: 'vanilla-01', pos: 13 },
+      { player: 'p3', racer: 'vanilla-02', pos: 11 },
+    ],
+    'p1',
+    2,
+  );
+  const back = rollFor(behind, 'p1', 2);
+  const bat = (id: string): string => String(racerAt(back.state, id)?.pos);
+  check(
+    bat('magnus') === '12' && bat('vanilla-01') === '12',
+    'knocked back over a racer, Magnus drags it back to where it stops',
+    `magnus ${bat('magnus')}, vanilla-01 ${bat('vanilla-01')}`,
+  );
+  check(bat('vanilla-02') === '11', 'a racer beyond where Magnus stops stays put', bat('vanilla-02'));
 });
 
 scenario('Underlord — skips its move to warp to another racer', () => {
