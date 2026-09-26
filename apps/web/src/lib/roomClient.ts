@@ -36,6 +36,7 @@ const FATAL_CLOSE_CODES: ReadonlyMap<number, ErrorCode> = new Map([
   [CLOSE_CODES.bad_credentials, 'bad_credentials'],
   [CLOSE_CODES.room_full, 'room_full'],
   [CLOSE_CODES.room_not_found, 'room_not_found'],
+  [CLOSE_CODES.kicked, 'kicked'],
 ]);
 
 const BACKOFF_MS = [500, 1000, 2000, 4000, 8000];

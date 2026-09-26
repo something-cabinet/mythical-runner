@@ -11,6 +11,7 @@ import {
   enoughRacers,
   hostOf,
   join,
+  kick,
   leave,
   rematch,
   removeBot,
@@ -90,6 +91,8 @@ function route(ctx: Ctx, action: Action, rng: Rng): void {
       return addBot(ctx, action);
     case 'lobby/removeBot':
       return removeBot(ctx, action);
+    case 'lobby/kick':
+      return kick(ctx, action);
     case 'lobby/toggleSet':
       return toggleSet(ctx, action);
     case 'lobby/rematch':
@@ -212,6 +215,9 @@ export function legalActions(state: GameState, player: PlayerId): Action[] {
         if (s.players.length < MAX_PLAYERS) out.push({ t: 'lobby/addBot', by: player });
         for (const bot of s.players.filter((p) => p.bot)) {
           out.push({ t: 'lobby/removeBot', by: player, player: bot.id });
+        }
+        for (const other of s.players.filter((p) => !p.bot && p.id !== player)) {
+          out.push({ t: 'lobby/kick', by: player, player: other.id });
         }
       }
       return out;

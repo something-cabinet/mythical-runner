@@ -28,6 +28,8 @@ export interface PlayerJoined {
 export interface PlayerLeft {
   readonly t: 'player/left';
   readonly player: PlayerId;
+  /** Removed by the host rather than leaving of their own accord. */
+  readonly kicked?: true;
 }
 
 /** The finished game was cleared and the room is back in its lobby. */

@@ -503,6 +503,28 @@ const bots = scenario('The host can fill seats with bots, and the server plays t
   [host, guest].forEach((c) => c.close());
 });
 
+const kick = scenario('The host can kick a player, who stays out', async () => {
+  const code = await createRoom(0);
+  const guestId = identity('Guest');
+  const [host, guest] = await joinInOrder(code, identity('Host'), guestId);
+  await host.waitFor((m) => m.view.players.length === 2);
+
+  check(!guest.state.legal.some((x) => x.t === 'lobby/kick'), 'a guest may not kick');
+  const offered = host.state.legal.find((x) => x.t === 'lobby/kick' && x.player === guestId.playerId);
+  check(!!offered, 'the host is offered a kick for the guest');
+  host.send({ t: 'lobby/kick', player: guestId.playerId });
+
+  const closed = await guest.closed;
+  check(closed.code === 4005, "the guest's connection is closed as kicked", `close ${closed.code}`);
+  const after = await host.waitFor((m) => m.view.players.length === 1, 5000, 'the guest to be removed');
+  check(!after.view.players.some((p) => p.id === guestId.playerId), 'and their seat is gone');
+
+  const back = connect(code, guestId);
+  const refused = await back.closed;
+  check(refused.code === 4005, 'reconnecting with the same seat is refused', `close ${refused.code}`);
+  host.close();
+});
+
 const offlineClock = scenario('A disconnected player only gets a short clock', async () => {
   const code = await createRoom(60);
   const [a, b] = await joinInOrder(code, identity('A'), identity('Gone'));
@@ -563,6 +585,7 @@ for (const run of [
   impersonation,
   reconnect,
   rematch,
+  kick,
   ...(onlyFast ? [] : [clock, offlineClock, bots]),
 ]) {
   await run();

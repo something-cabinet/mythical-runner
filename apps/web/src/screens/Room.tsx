@@ -151,7 +151,9 @@ function Connected({ code, credentials, name }: { code: string; credentials: Cre
                 ? 'That game has already started'
                 : f.code === 'room_full'
                   ? 'That room is full'
-                  : "Couldn't join"
+                  : f.code === 'kicked'
+                    ? 'You were removed from this room'
+                    : "Couldn't join"
         }
         body={f.message}
         action={

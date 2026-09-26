@@ -58,6 +58,7 @@ import type { Env } from './env.js';
  *   meta       { code, createdAt, turnSeconds }   written once
  *   state      GameState                           written per action
  *   secrets    Record<PlayerId, sha256 hex>        written when a new player registers
+ *   kicked     PlayerId[]                          written when the host removes someone
  *   expiresAt  number                              written when the room empties
  */
 
@@ -107,13 +108,15 @@ export class RoomDO extends DurableObject<Env> {
   private meta: Meta | null = null;
   private state: GameState | null = null;
   private secrets: Record<string, string> = {};
+  /** Players the host removed. Their seat is refused for as long as the room lives. */
+  private kicked: string[] = [];
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     // Runs on first creation AND on every wake from hibernation. Nothing may be handled
     // until state is back in memory, which is exactly what blockConcurrencyWhile ensures.
     ctx.blockConcurrencyWhile(async () => {
-      const stored = await ctx.storage.get<unknown>(['meta', 'state', 'secrets']);
+      const stored = await ctx.storage.get<unknown>(['meta', 'state', 'secrets', 'kicked']);
       this.meta = (stored.get('meta') as Meta | undefined) ?? null;
       const saved = stored.get('state') as GameState | undefined;
       // Rooms saved before character sets existed drafted from the classic set, a race
@@ -130,6 +133,7 @@ export class RoomDO extends DurableObject<Env> {
           }
         : null;
       this.secrets = (stored.get('secrets') as Record<string, string> | undefined) ?? {};
+      this.kicked = (stored.get('kicked') as string[] | undefined) ?? [];
     });
   }
 
@@ -149,10 +153,11 @@ export class RoomDO extends DurableObject<Env> {
     const meta: Meta = { code, createdAt: Date.now(), turnSeconds };
     const state = initGame(secureSeed());
 
-    await this.ctx.storage.put({ meta, state, secrets: {}, expiresAt: Date.now() + EMPTY_ROOM_TTL_MS });
+    await this.ctx.storage.put({ meta, state, secrets: {}, kicked: [], expiresAt: Date.now() + EMPTY_ROOM_TTL_MS });
     this.meta = meta;
     this.state = state;
     this.secrets = {};
+    this.kicked = [];
 
     // A room created and never joined must still clean itself up.
     await this.scheduleAlarm();
@@ -201,6 +206,10 @@ export class RoomDO extends DurableObject<Env> {
     const knownDigest = this.secrets[pid];
     if (knownDigest !== undefined && !digestsEqual(knownDigest, digest)) {
       return reject(client, server, 'bad_credentials', 'That seat belongs to someone else.');
+    }
+
+    if (this.kicked.includes(pid)) {
+      return reject(client, server, 'kicked', 'The host removed you from this room.');
     }
 
     const seated = this.state.players.some((p) => p.id === pid);
@@ -281,8 +290,15 @@ export class RoomDO extends DurableObject<Env> {
       return;
     }
 
-    await this.ctx.storage.put('state', this.state);
+    if (action.t === 'lobby/kick') {
+      this.kicked.push(action.player);
+      await this.ctx.storage.put({ state: this.state, kicked: this.kicked });
+    } else {
+      await this.ctx.storage.put('state', this.state);
+    }
     await this.scheduleAlarm();
+    // Closed before the broadcast, so their tab never draws a lobby it is no longer in.
+    if (action.t === 'lobby/kick') this.disconnect(action.player, 'kicked', 'The host removed you from this room.');
     this.broadcast(events);
   }
 
@@ -463,6 +479,19 @@ export class RoomDO extends DurableObject<Env> {
     this.meta = null;
     this.state = null;
     this.secrets = {};
+    this.kicked = [];
+  }
+
+  /** Tells every one of a player's open tabs why, then closes them. */
+  private disconnect(pid: PlayerId, code: keyof typeof CLOSE_CODES, message: string): void {
+    for (const ws of this.ctx.getWebSockets(pid)) {
+      this.sendError(ws, code, message);
+      try {
+        ws.close(CLOSE_CODES[code], message);
+      } catch {
+        // already closed
+      }
+    }
   }
 
   private openSockets(): WebSocket[] {

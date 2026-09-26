@@ -1,6 +1,7 @@
 import type {
   LobbyAddBot,
   LobbyJoin,
+  LobbyKick,
   LobbyLeave,
   LobbyRematch,
   LobbyRemoveBot,
@@ -129,6 +130,18 @@ export function removeBot(ctx: Ctx, a: LobbyRemoveBot): void {
   unseat(ctx, a.player);
 }
 
+/** Unseats another human. Bots go through `removeBot`, and the host leaves rather than kicks. */
+export function kick(ctx: Ctx, a: LobbyKick): void {
+  const { s } = ctx;
+  if (s.phase.t !== 'lobby') throw new IllegalActionError(a, 'game already started');
+  if (hostOf(s.players)?.id !== a.by) throw new IllegalActionError(a, 'only the host may remove players');
+  if (a.player === a.by) throw new IllegalActionError(a, 'leave the room instead');
+  if (!s.players.some((p) => p.id === a.player && !p.bot)) {
+    throw new IllegalActionError(a, 'no such player');
+  }
+  unseat(ctx, a.player, true);
+}
+
 /**
  * Clears a finished game and reopens the lobby, keeping the room and the people in it.
  *
@@ -171,11 +184,11 @@ function seat(ctx: Ctx, player: Player): void {
   ctx.emit({ t: 'player/joined', player: player.id, name: player.name });
 }
 
-function unseat(ctx: Ctx, pid: PlayerId): void {
+function unseat(ctx: Ctx, pid: PlayerId, kicked = false): void {
   const { s } = ctx;
   s.players = s.players.filter((p) => p.id !== pid);
   delete s.hands[pid];
   delete s.used[pid];
   delete s.scores[pid];
-  ctx.emit({ t: 'player/left', player: pid });
+  ctx.emit(kicked ? { t: 'player/left', player: pid, kicked: true } : { t: 'player/left', player: pid });
 }

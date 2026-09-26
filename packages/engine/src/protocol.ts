@@ -22,6 +22,7 @@ export const CLIENT_ACTION_TYPES = [
   'lobby/leave',
   'lobby/addBot',
   'lobby/removeBot',
+  'lobby/kick',
   'lobby/toggleSet',
   'lobby/rematch',
   'draft/pick',
@@ -83,6 +84,7 @@ export type ErrorCode =
   | 'room_not_found'
   | 'room_full'
   | 'game_in_progress'
+  | 'kicked'
   | 'illegal_action'
   | 'internal';
 
@@ -99,6 +101,7 @@ export const CLOSE_CODES = {
   room_full: 4003,
   game_in_progress: 4003,
   room_not_found: 4004,
+  kicked: 4005,
 } as const;
 
 // --- HTTP ---------------------------------------------------------------------

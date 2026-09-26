@@ -60,6 +60,16 @@ export interface LobbyRemoveBot {
 }
 
 /**
+ * Host only, lobby only: unseats another human player. The server also closes their
+ * connection and refuses that seat for the rest of the room's life.
+ */
+export interface LobbyKick {
+  readonly t: 'lobby/kick';
+  readonly by: PlayerId;
+  readonly player: PlayerId;
+}
+
+/**
  * Any seated player, once the game is over: back to the lobby with the same room, for
  * another game with whoever is still here.
  */
@@ -122,6 +132,7 @@ export type Action =
   | LobbyStart
   | LobbyAddBot
   | LobbyRemoveBot
+  | LobbyKick
   | LobbyToggleSet
   | LobbyRematch
   | DraftPick

@@ -23,6 +23,7 @@ export function LobbyScreen() {
   const canStart = legalOf(message, 'lobby/start').length > 0;
   const addBot = legalOf(message, 'lobby/addBot')[0];
   const removeBots = legalOf(message, 'lobby/removeBot');
+  const kicks = legalOf(message, 'lobby/kick');
   const toggles = legalOf(message, 'lobby/toggleSet');
   const seatsLeft = MAX_PLAYERS - view.players.length;
   const deckSize = racersInSets(view.racerSets).length;
@@ -74,7 +75,7 @@ export function LobbyScreen() {
             </span>
           </div>
           {view.players.map((p) => {
-            const remove = removeBots.find((a) => a.player === p.id);
+            const remove = removeBots.find((a) => a.player === p.id) ?? kicks.find((a) => a.player === p.id);
             return (
               <div key={p.id} className={`player-row${p.connected ? '' : ' offline'}`}>
                 <PlayerToken view={view} pid={p.id} />
@@ -89,10 +90,13 @@ export function LobbyScreen() {
                     className="btn btn-ghost"
                     style={{ minHeight: 36, padding: '0 10px' }}
                     disabled={!canAct}
-                    onClick={() => send(remove)}
-                    aria-label={`Remove ${p.name}`}
+                    onClick={() => {
+                      // A bot is one tap to add back; a person has to be sent the link again.
+                      if (p.bot || window.confirm(`Remove ${p.name} from the room? They won't be able to rejoin.`)) send(remove);
+                    }}
+                    aria-label={`${p.bot ? 'Remove' : 'Kick'} ${p.name}`}
                   >
-                    Remove
+                    {p.bot ? 'Remove' : 'Kick'}
                   </button>
                 )}
               </div>

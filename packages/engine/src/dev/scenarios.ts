@@ -1398,6 +1398,41 @@ scenario('Bots — only the host adds and removes them', () => {
   check(removed.players.length === 2 && !removed.players.some((p) => p.bot), 'and removes the bot');
 });
 
+scenario('Kick — only the host removes other humans, and only in the lobby', () => {
+  let s = lobbyWith('host-player', 'guest-player', 'third-player');
+  const host = playerId('host-player');
+  const guest = playerId('guest-player');
+  const third = playerId('third-player');
+  s = applyAction(s, { t: 'lobby/addBot', by: host }).state;
+
+  const kicks = legalActions(s, host).filter((a) => a.t === 'lobby/kick');
+  check(
+    kicks.length === 2 && kicks.every((a) => a.t === 'lobby/kick' && (a.player === guest || a.player === third)),
+    'the host may kick each other human, not themselves or the bot',
+    JSON.stringify(kicks),
+  );
+  check(!legalActions(s, guest).some((a) => a.t === 'lobby/kick'), 'a guest is offered no kicks');
+  check(throws(() => applyAction(s, { t: 'lobby/kick', by: guest, player: third })), 'a guest kicking is rejected');
+  check(throws(() => applyAction(s, { t: 'lobby/kick', by: host, player: host })), 'the host cannot kick themselves');
+  check(
+    throws(() => applyAction(s, { t: 'lobby/kick', by: host, player: playerId('bot-1') })),
+    'Kick cannot remove a bot',
+  );
+
+  const { state: kicked, events } = applyAction(s, { t: 'lobby/kick', by: host, player: guest });
+  check(!kicked.players.some((p) => p.id === guest) && kicked.players.length === 3, 'removes the guest');
+  check(
+    events.some((e) => e.t === 'player/left' && e.player === guest && e.kicked === true),
+    'and says they were kicked',
+  );
+
+  const started = applyAction(kicked, { t: 'lobby/start', by: host }).state;
+  check(
+    throws(() => applyAction(started, { t: 'lobby/kick', by: host, player: third })),
+    'no kicking once the game has started',
+  );
+});
+
 scenario('Bots — never become host', () => {
   let s = lobbyWith('host-player');
   s = applyAction(s, { t: 'lobby/addBot', by: playerId('host-player') }).state;

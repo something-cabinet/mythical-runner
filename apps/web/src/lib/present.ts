@@ -426,7 +426,7 @@ export function describeEvent(e: GameEvent, view: PlayerView): LogLine | null {
     case 'player/joined':
       return { text: `${who(e.player)} joined`, tone: 'plain' };
     case 'player/left':
-      return { text: `${who(e.player)} left`, tone: 'plain' };
+      return { text: `${who(e.player)} ${e.kicked ? 'was removed by the host' : 'left'}`, tone: 'plain' };
     case 'game/rematch':
       return { text: `${who(e.by)} started a rematch`, tone: 'turn' };
     case 'lobby/setsChanged':
