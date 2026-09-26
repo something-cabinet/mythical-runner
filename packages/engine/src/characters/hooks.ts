@@ -182,6 +182,12 @@ export interface HookCtx {
   mainRoll(): MainRollView | null;
   /** Rolls the die again. The old number never happened, so every roll power re-fires. */
   rerollMainMove(): void;
+  /**
+   * Arc Warden: settles which face of the thrown dice counts as the roll. The die is not
+   * rolled again, so it is not a reroll; it is still the die, so every power reading the
+   * number reads this one.
+   */
+  chooseMainRoll(face: number): void;
   /** Replaces how far the main move goes. Still the main move, so still modified. */
   setMainMove(distance: number): void;
   /** The main move does not happen at all, and nothing may modify it back into one. */

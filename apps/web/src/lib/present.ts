@@ -549,6 +549,8 @@ export function describeEvent(e: GameEvent, view: PlayerView): LogLine | null {
       };
     case 'racer/finished':
       return { text: `${racer(e.racerId)} crosses the line ${ordinal(e.rank)}!`, tone: 'good' };
+    case 'squad/withdrawn':
+      return { text: `The rest of ${racer(e.squad)} leaves the track`, tone: 'plain' };
     case 'race/ended':
       return {
         text: e.byStalemate ? `Race ${e.raceNo} ends in a stalemate` : `Race ${e.raceNo} is over`,

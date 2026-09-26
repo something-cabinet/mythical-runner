@@ -285,6 +285,19 @@ export interface RacerFinished {
   readonly rank: number;
 }
 
+/**
+ * A squad (Meepo) leaves the race once one of its pieces is placed: the pieces still on
+ * the track are taken off the board.
+ */
+export interface SquadWithdrawn {
+  readonly t: 'squad/withdrawn';
+  readonly player: PlayerId;
+  /** The squad's card, e.g. Meepo. */
+  readonly squad: RacerId;
+  /** The pieces taken off. */
+  readonly racerIds: readonly RacerId[];
+}
+
 export interface RaceEnded {
   readonly t: 'race/ended';
   readonly raceNo: RaceNumber;
@@ -329,6 +342,7 @@ export type GameEvent =
   | TokenAwarded
   | TokenLost
   | RacerFinished
+  | SquadWithdrawn
   | RaceEnded
   | GameEnded;
 

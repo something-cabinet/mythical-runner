@@ -48,4 +48,5 @@
 - Juggernaut: I can skip my main move to _warp_ onto a racer 1 or 2 spaces ahead of me, the nearer one if both. Then I must keep hopping the same way until no racer is 1 or 2 spaces ahead. Only the space I finish on takes effect. Ready again 4 turns later.
 - Tusk: Before my main move, and again after it, I can punch a racer on my space to trip them.
 - Grimstroke: Before my main move, I can bind two racers within 5 spaces of each other, me included. Until my next turn, neither can get more than 5 spaces from the other. If the link would have to hold them back forever, it snaps. Ready again 4 turns later.
-- Arc Warden: Can roll 2 die and choose which.
+- Arc Warden: I roll two d6s and move whichever one I choose.
+- Meepo: I race as 4 Meepos. On my turn, each Meepo rolls its own die and moves on its own. I finish as soon as any one Meepo crosses the finish line.

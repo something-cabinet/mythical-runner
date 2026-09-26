@@ -1591,7 +1591,7 @@ scenario('Sets — a new room drafts from the classic set, and the host can mix 
   );
 });
 
-scenario('Sets — Dota alone has 38 racers: enough for six players', () => {
+scenario('Sets — Dota alone has 44 racers: enough for six players', () => {
   const lobby = lobbyWith('p1', 'p2', 'p3', 'p4', 'p5');
   const five = applyAction(applyAction(lobby, toggle('p1', 'dota')).state, toggle('p1', 'classic')).state;
   check(
@@ -1609,7 +1609,7 @@ scenario('Sets — Dota alone has 38 racers: enough for six players', () => {
   const dealt = playGame({ seed: 9200, playerCount: 6, sets: ['dota'] }).state;
   const hands = Object.values(dealt.hands).flat();
   check(hands.length === 24, 'six full hands', String(hands.length));
-  check(racersInSets(['dota']).length - hands.length === 18, 'with eighteen left undrafted');
+  check(racersInSets(['dota']).length - hands.length === 20, 'with twenty left undrafted');
 });
 
 scenario('Sets — the draft deals only from the chosen sets', () => {
@@ -2942,6 +2942,129 @@ scenario('Phantom Assassin — two d6s, the first counts, tripled when the secon
   const plain = rollUntil(s, 'p1', (res) => (thrownOf(res.events)?.dice?.[1] ?? 6) !== 6);
   const plainDice = thrownOf(plain.events)?.dice ?? [];
   check(posOf(plain.state, 'phantom-assassin') === 1 + plainDice[0]!, 'otherwise just the first', plainDice.join(','));
+});
+
+scenario('Arc Warden — rolls two d6s and moves the one it picks', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'arc-warden', pos: 1 },
+      { player: 'p2', racer: 'vanilla-01', pos: 25 },
+    ],
+    'p1',
+  );
+  const diceOf = (events: readonly GameEvent[]): number[] =>
+    (events.find((e) => e.t === 'dice/thrown' && !e.power) as { dice?: number[] } | undefined)?.dice ?? [];
+
+  const split = rollUntil(s, 'p1', (res) => {
+    const [a, b] = diceOf(res.events);
+    return a !== undefined && b !== undefined && a !== b;
+  });
+  const [a, b] = diceOf(split.events) as [number, number];
+  const low = Math.min(a, b);
+  const high = Math.max(a, b);
+  check(split.state.pending?.player === playerId('p1'), 'two different faces: Arc Warden is asked which to move');
+  check(String(split.state.pending?.defaultChoice) === String(high), 'the higher one by default');
+
+  const tookLow = applyAction(split.state, decide('p1', String(low)));
+  check(posOf(tookLow.state, 'arc-warden') === 1 + low, 'picking the lower face moves that far', `${a},${b}`);
+  check(rolledOf(tookLow.events).value === low, 'and it is the die every power reads');
+  const tookHigh = applyAction(split.state, decide('p1', String(high)));
+  check(posOf(tookHigh.state, 'arc-warden') === 1 + high, 'picking the higher face moves that far');
+
+  const pair = rollUntil(s, 'p1', (res) => {
+    const [x, y] = diceOf(res.events);
+    return x !== undefined && x === y;
+  });
+  const face = diceOf(pair.events)[0]!;
+  check(pair.state.pending === null && posOf(pair.state, 'arc-warden') === 1 + face, 'a pair leaves nothing to choose');
+
+  // Dice left over from an earlier throw, and a silence that stops this one being a pair.
+  const hushed = raceState(
+    [
+      { player: 'p1', racer: 'arc-warden', pos: 1, memo: { arcDice: [1, 6], silenced: 1 } },
+      { player: 'p2', racer: 'vanilla-01', pos: 25 },
+    ],
+    'p1',
+  );
+  const plain = applyAction(hushed, roll('p1'));
+  check(plain.state.pending === null, 'silenced, it rolls one plain d6 and is offered no old dice');
+});
+
+scenario('Meepo — enters as four racers, all of which move every turn', () => {
+  check(
+    !racersInSets(['dota']).some((id) => String(id).startsWith('meepo-')),
+    'only Meepo himself is dealt into the draft',
+  );
+
+  let s = commitState({ p1: ['meepo'], p2: ['vanilla-01'], p3: ['vanilla-02'] }, 1);
+  s = applyAction(s, commit('p1', 'meepo')).state;
+  s = applyAction(s, commit('p2', 'vanilla-01')).state;
+  s = applyAction(s, commit('p3', 'vanilla-02')).state;
+  const pieces = s.board.filter((r) => r.owner === playerId('p1')).map((r) => String(r.racerId));
+  check(pieces.join(',') === 'meepo,meepo-2,meepo-3,meepo-4', 'committing Meepo puts four pieces on the track', pieces.join(','));
+  check(s.used[playerId('p1')]?.join(',') === 'meepo', 'and spends the one card');
+
+  const race = raceState(
+    [
+      { player: 'p1', racer: 'meepo', pos: 3 },
+      { player: 'p1', racer: 'meepo-2', pos: 3 },
+      { player: 'p1', racer: 'meepo-3', pos: 3 },
+      { player: 'p1', racer: 'meepo-4', pos: 3 },
+      { player: 'p2', racer: 'vanilla-01', pos: 3 },
+    ],
+    'p1',
+  );
+  // The opening turn, which moves one racer only — but all of a squad.
+  let t = applyAction(race, roll('p1', 'meepo-3')).state;
+  const left = t.phase.t === 'racing' ? t.phase.toMove.map(String).sort().join(',') : '';
+  check(moverAt(t) === 'p1' && left === 'meepo,meepo-2,meepo-4', 'after one Meepo goes, the other three still move on the opening turn', left);
+  for (const id of ['meepo', 'meepo-2', 'meepo-4']) t = applyAction(t, roll('p1', id)).state;
+  check(moverAt(t) === 'p2', 'then the turn passes on');
+  check(
+    ['meepo', 'meepo-2', 'meepo-3', 'meepo-4'].every((id) => posOf(t, id) > 3),
+    'each Meepo rolled and moved on its own',
+  );
+});
+
+scenario('Meepo — each piece is its own racer, and one crossing takes the squad off', () => {
+  const tripped = raceState(
+    [
+      { player: 'p1', racer: 'meepo', pos: 5 },
+      { player: 'p1', racer: 'meepo-2', pos: 5, tripped: true },
+      { player: 'p2', racer: 'vanilla-01', pos: 1 },
+    ],
+    'p1',
+  );
+  check(
+    racerAt(tripped, 'meepo-2')?.tripped === true && racerAt(tripped, 'meepo')?.tripped === false,
+    'a trip lies on one Meepo, not the squad',
+  );
+  const up = applyAction(tripped, roll('p1', 'meepo-2')).state;
+  check(posOf(up, 'meepo-2') === 5 && racerAt(up, 'meepo-2')?.tripped === false, 'that one spends its go getting up');
+
+  const s: GameState = {
+    ...raceState(
+      [
+        { player: 'p1', racer: 'meepo', pos: 29 },
+        { player: 'p1', racer: 'meepo-2', pos: 2 },
+        { player: 'p1', racer: 'meepo-3', pos: 29 },
+        { player: 'p1', racer: 'meepo-4', pos: 4 },
+        { player: 'p2', racer: 'vanilla-01', pos: 1 },
+        { player: 'p3', racer: 'vanilla-02', pos: 1 },
+      ],
+      'p1',
+    ),
+  };
+  const res = applyAction({ ...s, phase: { ...s.phase, opened: [playerId('p1')] } as GameState['phase'] }, roll('p1', 'meepo'));
+  const board = res.state.board.map((r) => String(r.racerId));
+  check(racerAt(res.state, 'meepo')?.finishedRank === 1, 'the Meepo that crosses is placed');
+  check(
+    !board.some((id) => id.startsWith('meepo-')),
+    'and the other three leave the board, even one a step from the line',
+    board.join(','),
+  );
+  check(has(res.events, 'squad/withdrawn'), 'which the log reports');
+  check(moverAt(res.state) === 'p2', 'with none of them left to move, the turn passes on');
 });
 
 scenario('Tusk — Walrus Punch trips a racer on its space, before and after the main move', () => {

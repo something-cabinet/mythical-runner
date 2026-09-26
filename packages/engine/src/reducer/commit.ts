@@ -1,6 +1,7 @@
 import type { RaceCommit } from '../actions.js';
 import { IllegalActionError, invariant } from '../errors.js';
 import type { PlayerId, RacerId } from '../ids.js';
+import { piecesOf } from '../characters/registry.js';
 import type { Rng } from '../rng.js';
 import { trackForRace, START, type RaceNumber } from '../tracks/index.js';
 import { racersPerRace } from '../state.js';
@@ -79,16 +80,19 @@ function reveal(ctx: Ctx, rng: Rng): void {
 
   for (const { player, racerId } of picks) used(s, player).push(racerId);
 
-  s.board = picks.map(({ player, racerId }) => ({
-    owner: player,
-    racerId,
-    pos: START,
-    tripped: false,
-    eliminated: false,
-    eliminationOrder: 0,
-    finishedRank: null,
-    memo: {},
-  }));
+  // Meepo's squad enters as separate pieces, each a racer of its own, right behind him.
+  s.board = picks.flatMap(({ player, racerId }) =>
+    piecesOf(racerId).map((piece) => ({
+      owner: player,
+      racerId: piece,
+      pos: START,
+      tripped: false,
+      eliminated: false,
+      eliminationOrder: 0,
+      finishedRank: null,
+      memo: {},
+    })),
+  );
 
   ctx.emit({ t: 'race/started', raceNo, trackId: trackForRace(raceNo).id });
   beginRacing(ctx, raceNo, rng);

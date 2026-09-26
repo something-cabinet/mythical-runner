@@ -14,10 +14,10 @@ import type { RacerDef } from './types.js';
  */
 export const RACERS: readonly RacerDef[] = [...CLASSIC_RACERS, ...DOTA_RACERS];
 
-const SET_SIZES: Readonly<Record<CharacterSetId, number>> = { classic: 36, dota: 42 };
+const SET_SIZES: Readonly<Record<CharacterSetId, number>> = { classic: 36, dota: 44 };
 
 for (const set of CHARACTER_SETS) {
-  const found = RACERS.filter((r) => r.set === set.id).length;
+  const found = RACERS.filter((r) => r.set === set.id && !r.pieceOf).length;
   if (found !== SET_SIZES[set.id]) {
     throw new Error(`Expected ${SET_SIZES[set.id]} racers in set '${set.id}', found ${found}`);
   }
@@ -79,9 +79,28 @@ export function racerRange(id: RacerId): 3 | 5 | undefined {
 
 export const ALL_RACER_IDS: readonly RacerId[] = RACERS.map((r) => r.id);
 
-/** Every racer in the given sets, in roster order: the draft deck before shuffling. */
+/**
+ * Every racer in the given sets, in roster order: the draft deck before shuffling. A
+ * squad's extra pieces are not cards, so they are never in it.
+ */
 export function racersInSets(sets: readonly CharacterSetId[]): RacerId[] {
-  return RACERS.filter((r) => sets.includes(r.set)).map((r) => r.id);
+  return RACERS.filter((r) => sets.includes(r.set) && !r.pieceOf).map((r) => r.id);
+}
+
+/** The pieces a committed racer puts on the board: itself, then any squad (Meepo). */
+export function piecesOf(id: RacerId): RacerId[] {
+  return [id, ...(BY_ID.get(id)?.squad ?? [])];
+}
+
+/**
+ * The squad a racer on the board belongs to — the drafted racer that brought it — or null
+ * for a racer that races alone.
+ */
+export function squadOf(id: RacerId): RacerId | null {
+  const def = BY_ID.get(id);
+  if (!def) return null;
+  if (def.pieceOf) return def.pieceOf;
+  return def.squad ? def.id : null;
 }
 
 /** The set a racer ships in, or undefined for a stand-in like `vanilla-01`. */

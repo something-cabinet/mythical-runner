@@ -6,7 +6,7 @@ import { LEASH, MAIN_MOVE_BONUS, SOULBIND, timerLeft, TIMERS, type Soulbind } fr
 import { defFor, isRunning } from './shared.js';
 
 /**
- * The Dota set: forty-two heroes from Dota 2, designed in `docs/new-character-set.md`.
+ * The Dota set: forty-four heroes from Dota 2, designed in `docs/new-character-set.md`.
  *
  * Same conventions as the classic set: optional ("I can") powers ask and default to
  * declining, log lines name racers with `h.nameOf`, and one `h.log` per happening.
@@ -1539,6 +1539,66 @@ const grimstroke = def(
   },
 );
 
+/**
+ * MAGNETIC FIELD — "I roll two d6s and move whichever one I choose."
+ *
+ * The pair is thrown as my die, and on a main move I say which face counts before anyone
+ * reacts to it; if both show the same there is nothing to choose. Any other roll of mine —
+ * a duel, a bash — takes the higher face, which is the one I'd pick every time.
+ */
+const ARC_DICE = 'arcDice';
+const arcWarden = def('arc-warden', 'Arc Warden', 'I roll two d6s and move whichever one I choose.', {
+  throwDie: (h) => {
+    const a = h.rng.roll(6);
+    const b = h.rng.roll(6);
+    h.self.memo[ARC_DICE] = [a, b];
+    return { face: Math.max(a, b), sides: 6, dice: [a, b] };
+  },
+  onMainRoll: (h, mover) => {
+    if (mover.racerId !== h.self.racerId || !isRunning(h.self)) return;
+    // Used up here, so a throw made without the power — silenced, or before Morphling
+    // took it on — never offers the dice of some earlier throw.
+    const [a, b] = (h.self.memo[ARC_DICE] ?? []) as number[];
+    delete h.self.memo[ARC_DICE];
+    if (a === undefined || b === undefined || a === b) return;
+    if (h.mainRoll()?.value !== Math.max(a, b)) return;
+    const [low, high] = a < b ? [a, b] : [b, a];
+    h.ask({
+      player: h.self.owner,
+      prompt: `Move ${high} or ${low}?`,
+      options: [option(String(high), `Move ${high}`), option(String(low), `Move ${low}`)],
+      key: 'pick',
+      data: [low, high],
+      defaultChoice: String(high) as ChoiceId,
+    });
+  },
+  resume: (h, key, choice, data) => {
+    if (key !== 'pick') return;
+    const face = Number(choice);
+    if (!(data as number[]).includes(face)) return;
+    h.chooseMainRoll(face);
+    h.log(`${h.nameOf(h.self)} takes the ${face}.`);
+  },
+});
+
+/**
+ * DIVIDED WE STAND — "I race as 4 Meepos. On my turn, each Meepo rolls its own die and moves
+ * on its own. I finish as soon as any one Meepo crosses the finish line."
+ *
+ * No hooks: the engine builds it. Committing Meepo puts four pieces on the board (see
+ * `squad`), each a racer in its own right — passed, counted, tripped and targeted one at a
+ * time, so only the Meepo that is hit goes down. They are all the owner's racers, so each
+ * takes its own go every turn, the opening turn included, in the order the owner picks.
+ * When one is placed the other three leave the board: Meepo takes one place at most.
+ */
+const MEEPO_TEXT = 'I race as 4 Meepos. On my turn, each Meepo rolls its own die and moves on its own. I finish as soon as any one Meepo crosses the finish line.';
+const MEEPO_PIECES = ['meepo-2', 'meepo-3', 'meepo-4'] as const;
+const meepo: RacerDef = { ...def('meepo', 'Meepo', MEEPO_TEXT, {}), squad: MEEPO_PIECES.map((id) => racerId(id)) };
+const meepoPieces: RacerDef[] = MEEPO_PIECES.map((id, i) => ({
+  ...def(id, `Meepo ${i + 2}`, MEEPO_TEXT, {}),
+  pieceOf: racerId('meepo'),
+}));
+
 /** Who `first` can be Soulbound to: other running racers within `LEASH` of it. */
 function bindable(h: HookCtx, first: MutableRacer) {
   return h.running().filter((r) => r.racerId !== first.racerId && Math.abs(r.pos - first.pos) <= LEASH);
@@ -1587,4 +1647,7 @@ export const DOTA_RACERS: readonly RacerDef[] = [
   phantomAssassin,
   tusk,
   grimstroke,
+  arcWarden,
+  meepo,
+  ...meepoPieces,
 ];

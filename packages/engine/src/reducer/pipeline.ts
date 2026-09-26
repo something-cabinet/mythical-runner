@@ -1155,6 +1155,12 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
       });
     },
 
+    chooseMainRoll: (face) => {
+      const roll = currentRoll(ctx);
+      if (!roll || !roll.die) return;
+      roll.value = face;
+    },
+
     setMainMove: (distance) => {
       const roll = currentRoll(ctx);
       if (!roll) return;

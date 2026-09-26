@@ -20,5 +20,12 @@ export interface RacerDef {
    * on the board. Undefined for racers with no such power.
    */
   readonly range?: 3 | 5;
+  /**
+   * Meepo: the other pieces that enter the race alongside this racer. Each is a racer of
+   * its own on the board, with the same owner; the card drafted and committed is this one.
+   */
+  readonly squad?: readonly RacerId[];
+  /** A piece of another racer's squad (see `squad`). Never drafted or dealt on its own. */
+  readonly pieceOf?: RacerId;
   readonly hooks?: Readonly<Record<string, unknown>>;
 }

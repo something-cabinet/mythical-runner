@@ -1,5 +1,5 @@
 import type { RaceContinue, RaceRoll } from '../actions.js';
-import { racerName } from '../characters/registry.js';
+import { racerName, squadOf } from '../characters/registry.js';
 import { IllegalActionError, invariant } from '../errors.js';
 import type { PlayerId, RacerId } from '../ids.js';
 import type { Rng } from '../rng.js';
@@ -200,9 +200,11 @@ export function endTurn(ctx: Ctx, rng: Rng): void {
   // Anyone who crossed the line this turn is placed now, in board order. Abilities can
   // push more than one racer over at once, so this is a sweep, not a single check.
   const prevFinishedCount = phase.finished.length;
-  for (const racer of s.board) {
+  // A snapshot, because a placed Meepo takes the rest of his squad off the board.
+  for (const racer of [...s.board]) {
     // Mastermind can fill the podium from inside this loop.
     if (phase.finished.length >= FINISHERS_PER_RACE) break;
+    if (!s.board.includes(racer)) continue;
     if (racer.pos !== FINISH || racer.finishedRank !== null || racer.eliminated) continue;
 
     const rank = phase.finished.length + 1;
@@ -215,6 +217,7 @@ export function endTurn(ctx: Ctx, rng: Rng): void {
       hooksFor(s, other).onRacerFinished?.(makeHookCtx(ctx, rng, other), racer, rank);
       invariant(!s.pending, `${other.racerId} asked a question from onRacerFinished`);
     }
+    withdrawSquad(ctx, racer);
   }
 
   const moved = phase.moving;
@@ -222,16 +225,17 @@ export function endTurn(ctx: Ctx, rng: Rng): void {
   phase.stalledTurns = newFinisher ? 0 : phase.stalledTurns + 1;
 
   // That racer has had its turn. A player's opening turn ends after one racer whatever
-  // else they have waiting; later turns run through the rest of the team.
+  // else they have waiting — bar the rest of its squad, since all of Meepo moves each turn
+  // — and later turns run through the rest of the team.
   const opening = !phase.opened.includes(phase.active);
   if (opening) phase.opened.push(phase.active);
-  phase.toMove = opening
-    ? []
-    : phase.toMove.filter((id) => {
-        if (id === moved) return false;
-        const r = findRacer(s, id);
-        return r !== undefined && r.finishedRank === null && !r.eliminated;
-      });
+  const squad = moved ? squadOf(moved) : null;
+  phase.toMove = phase.toMove.filter((id) => {
+    if (id === moved) return false;
+    if (opening && (squad === null || squadOf(id) !== squad)) return false;
+    const r = findRacer(s, id);
+    return r !== undefined && r.finishedRank === null && !r.eliminated;
+  });
   phase.moving = null;
 
   // One of the silenced racer's turns is over; the hush lifts when they have all gone.
@@ -315,6 +319,23 @@ export function endTurn(ctx: Ctx, rng: Rng): void {
     }
   }
   invariant(false, 'no eligible next player despite active racers remaining');
+}
+
+/**
+ * Meepo: "I finish as soon as any one Meepo crosses the finish line." Once one piece of a
+ * squad is placed, the pieces still out on the track leave the board, so a squad takes one
+ * place at most and nothing can race, hit or be hit by them again this race.
+ */
+function withdrawSquad(ctx: Ctx, placed: (typeof ctx.s.board)[number]): void {
+  const { s } = ctx;
+  const squad = squadOf(placed.racerId);
+  if (squad === null) return;
+  const leaving = s.board.filter(
+    (r) => r !== placed && r.owner === placed.owner && r.finishedRank === null && squadOf(r.racerId) === squad,
+  );
+  if (leaving.length === 0) return;
+  s.board = s.board.filter((r) => !leaving.includes(r));
+  ctx.emit({ t: 'squad/withdrawn', player: placed.owner, squad, racerIds: leaving.map((r) => r.racerId) });
 }
 
 /**
