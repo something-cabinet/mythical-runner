@@ -1,5 +1,6 @@
 import { racersPerRace, type RacerId } from '@mr/engine';
 import { useEffect, useState } from 'react';
+import { Board } from '../components/Board';
 import { ActionBar, PlayerToken, RacerCard, Waiting } from '../components/bits';
 import { awardsFor, listNames, racerName, rawName, trackLabel, waitingOn } from '../lib/present';
 import { legalOf, useRoomContext } from '../lib/roomContext';
@@ -14,6 +15,7 @@ import { legalOf, useRoomContext } from '../lib/roomContext';
 export function CommitScreen() {
   const { view, message, canAct, send } = useRoomContext();
   const [selected, setSelected] = useState<RacerId | null>(null);
+  const [previewOpen] = useState(previewOpenByDefault);
   const entered = view.phase.t === 'commit' ? view.phase.yourCommit.length : 0;
   // A racer just locked in is no longer a legal choice; clear the selection so the next
   // pick starts from nothing.
@@ -29,6 +31,9 @@ export function CommitScreen() {
   const need = racersPerRace(view.seatOrder.length);
   const done = locked.length >= need;
   const others = waitingOn(view).filter((p) => p !== view.you);
+  // The track as it will be at the start line: no pieces, so the board shows only the
+  // spaces a racer's power would play off.
+  const emptyTrack = { ...view, board: [] };
 
   const lockIn = (): void => {
     const action = legal.find((a) => a.racerId === selected);
@@ -51,6 +56,11 @@ export function CommitScreen() {
             {need > 1 && ' With two players you race two different racers each.'}
           </p>
         </section>
+
+        <details className="card track-preview" open={previewOpen}>
+          <summary className="section-title">Track preview · {trackLabel(phase.raceNo)}</summary>
+          <Board view={emptyTrack} raceNo={phase.raceNo} positions={NO_POSITIONS} />
+        </details>
 
         <section className="stack" aria-label="Your racers">
           <div className="racer-grid">
@@ -110,4 +120,14 @@ export function CommitScreen() {
       </ActionBar>
     </>
   );
+}
+
+const NO_POSITIONS: Readonly<Record<string, number>> = {};
+
+/**
+ * Open where the landscape board fits beside the header; on a phone the portrait track is
+ * taller than the screen and would push the racers out of reach, so it starts folded.
+ */
+function previewOpenByDefault(): boolean {
+  return window.matchMedia('(min-width: 960px)').matches;
 }

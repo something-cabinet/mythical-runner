@@ -1544,3 +1544,14 @@ select {
     max-width: 1080px;
   }
 }
+
+/* ---- Track preview (racer pick) ------------------------------------------ */
+
+.track-preview > summary {
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.track-preview[open] > summary {
+  margin-bottom: 10px;
+}
