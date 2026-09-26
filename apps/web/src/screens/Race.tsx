@@ -2,7 +2,7 @@ import { FINISH, type RacerId, type RaceNumber } from '@mr/engine';
 import { useRef, type RefObject } from 'react';
 import { Board } from '../components/Board';
 import { ActionBar, RacerCard, RacerToken, Standings, Waiting } from '../components/bits';
-import { abilityToken, boardLinks, borrowedPower, duelBonusToken, silencedToken, soulbindToken, ordinal, playerName, powerText, racerName, rawName } from '../lib/present';
+import { abilityToken, boardLinks, borrowedPower, duelBonusToken, silencedToken, soulbindToken, ordinal, playerName, powerText, racerName, rawName, turnOrder } from '../lib/present';
 import { legalOf, useRoomContext } from '../lib/roomContext';
 import type { NumberedLine } from '../lib/useEventLog';
 
@@ -66,6 +66,7 @@ export function RaceScreen() {
         <StatusBanner />
         <div className="race-layout">
           <section className="card race-board" style={{ padding: 10 }}>
+            {racing && <TurnOrder view={view} />}
             <Board
               view={view}
               raceNo={phase.raceNo as RaceNumber}
@@ -189,6 +190,32 @@ export function RaceScreen() {
 /** A power's roll waiting on its player (Tidehunter getting up, a duel): the one choice is Roll. */
 function isRollAsk(pending: { readonly options: readonly { readonly id: string }[] }): boolean {
   return pending.options.length === 1 && pending.options[0]?.id === 'roll';
+}
+
+/**
+ * Who goes when: the player up now, then everyone still racing in the order their turns
+ * come round. Each player shows the racers they will move, in their own colour.
+ */
+function TurnOrder({ view }: { view: Parameters<typeof turnOrder>[0] }) {
+  const slots = turnOrder(view);
+  if (slots.length === 0) return null;
+  return (
+    <ol className="turn-order" aria-label="Turn order">
+      {slots.map((slot, i) => (
+        <li key={i} className="turn-slot" data-now={i === 0}>
+          <span className="turn-racers">
+            {slot.racers.map((r) => (
+              <RacerToken key={r} view={view} racer={r} owner={slot.player} size={26} />
+            ))}
+          </span>
+          <span className="turn-name">
+            {i === 0 && <span className="turn-now">Now · </span>}
+            {slot.player === view.you ? 'You' : rawName(view, slot.player)}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
 }
 
 function StatusBanner() {

@@ -400,6 +400,47 @@ export function waitingOn(view: PlayerView): PlayerId[] {
   }
 }
 
+/** A player's place in the coming turns, with the racers they will move. */
+export interface TurnSlot {
+  readonly player: PlayerId;
+  readonly racers: readonly RacerId[];
+}
+
+/**
+ * Who goes when during a race, the player up now first, each player still racing listed
+ * once. Mirrors the engine's hand-off: racers owed a turn out of order (Skipper's "I go next
+ * in turn order") come first, then play continues clockwise from the last of them. Players
+ * with nobody left running are skipped, as the engine skips them.
+ */
+export function turnOrder(view: PlayerView): TurnSlot[] {
+  const phase = view.phase;
+  if (phase.t !== 'racing') return [];
+  const running = (pid: PlayerId): RacerId[] =>
+    view.board.filter((r) => r.owner === pid && r.finishedRank === null && !r.eliminated).map((r) => r.racerId);
+
+  const slots: TurnSlot[] = [{ player: phase.active, racers: running(phase.active) }];
+  const listed = new Set<PlayerId>([phase.active]);
+  let from = phase.active;
+  for (const id of phase.nextUp) {
+    const r = view.board.find((b) => b.racerId === id);
+    if (!r || r.finishedRank !== null || r.eliminated) continue;
+    slots.push({ player: r.owner, racers: [r.racerId] });
+    listed.add(r.owner);
+    from = r.owner;
+  }
+  const n = view.seatOrder.length;
+  const start = view.seatOrder.indexOf(from);
+  for (let i = 1; i <= n; i++) {
+    const pid = view.seatOrder[(start + i) % n];
+    if (pid === undefined || listed.has(pid)) continue;
+    const racers = running(pid);
+    if (racers.length === 0) continue;
+    slots.push({ player: pid, racers });
+    listed.add(pid);
+  }
+  return slots;
+}
+
 export function listNames(view: PlayerView, pids: readonly PlayerId[]): string {
   const names = pids.map((p) => playerName(view, p));
   if (names.length <= 1) return names[0] ?? '';

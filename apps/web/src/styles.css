@@ -1555,3 +1555,50 @@ select {
 .track-preview[open] > summary {
   margin-bottom: 10px;
 }
+
+/* ---- Turn order (race) --------------------------------------------------- */
+
+.turn-order {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+}
+
+.turn-slot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 4px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  font-size: 0.82rem;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+.turn-slot + .turn-slot::before {
+  content: '›';
+  margin: 0 4px 0 -2px;
+  color: var(--muted);
+}
+
+.turn-slot[data-now='true'] {
+  color: var(--text);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.turn-racers {
+  display: flex;
+}
+
+.turn-racers > .token + .token {
+  margin-left: -8px;
+}
+
+.turn-now {
+  color: var(--accent);
+}
