@@ -131,6 +131,20 @@ const SPRITE_FILES: Readonly<Record<string, string>> = {
   'drow-ranger': 'dota2/drow-ranger.png',
   'night-stalker': 'dota2/night-stalker.png',
   slark: 'dota2/slark.png',
+  'void-spirit': 'dota2/void-spirit.png',
+  lich: 'dota2/lich.png',
+  magnus: 'dota2/magnus.png',
+  underlord: 'dota2/underlord.png',
+  doom: 'dota2/doom.png',
+  sven: 'dota2/sven.png',
+  kez: 'dota2/kez.png',
+  invoker: 'dota2/invoker.png',
+  largo: 'dota2/largo.png',
+  juggernaut: 'dota2/juggernaut.png',
+  lina: 'dota2/lina.png',
+  'phantom-assassin': 'dota2/phantom-assassin.png',
+  tusk: 'dota2/tusk.png',
+  grimstroke: 'dota2/grimstroke.png',
 };
 
 const SPRITE_DIR = '/character_sprite';
