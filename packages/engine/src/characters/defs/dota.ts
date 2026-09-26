@@ -509,7 +509,7 @@ const legionCommander = def(
       const winner = mine >= theirs.total ? h.self : foe;
       h.log(
         `DUEL! ${h.nameOf(h.self)} rolls ${mineText ?? mine}, ${h.nameOf(foe)} rolls ${theirs.text}. ` +
-          `${h.nameOf(winner)} wins +1 to their main move for the rest of the race.`,
+        `${h.nameOf(winner)} wins +1 to their main move for the rest of the race.`,
       );
       h.addMainMoveBonus(winner, 1);
     },
@@ -992,7 +992,7 @@ const slark = def(
 const voidSpirit = def(
   'void-spirit',
   'Void Spirit',
-  'Before my main move, I can move any other racer 1 space forward or back.',
+  'Before my main move, I can move any other racer 1 space forward or backward.',
   {
     beforeMainMove: (h) => {
       if (!isRunning(h.self) || h.self.tripped) return;
@@ -1310,7 +1310,7 @@ function omnislashPath(h: HookCtx): number[] {
   const spaces = new Set(h.running().filter((r) => r.racerId !== h.self.racerId).map((r) => r.pos));
   const hops: number[] = [];
   let at = h.self.pos;
-  for (;;) {
+  for (; ;) {
     const next = [at + 1, at + 2].find((p) => spaces.has(p));
     if (next === undefined) return hops;
     hops.push(next);
