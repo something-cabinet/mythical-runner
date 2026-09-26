@@ -2892,6 +2892,27 @@ scenario('Juggernaut — Omnislash hops to the nearer racer 1 or 2 ahead until t
   check(applyAction(clear, roll('p1')).state.pending === null, 'nobody 1 or 2 ahead: not offered');
 });
 
+scenario('Multi-dice heroes throw one plain d6 when a power makes them roll', () => {
+  for (const victim of ['ogre-magi', 'phantom-assassin', 'arc-warden']) {
+    const s = raceState(
+      [
+        { player: 'p1', racer: 'spirit-breaker', pos: 1 },
+        { player: 'p2', racer: victim, pos: 3 },
+      ],
+      'p1',
+    );
+    const bashed = rollThrough(s, 'p1', (r) => r.asked.length > 0);
+    const bash = bashed.events.find((e) => e.t === 'dice/thrown' && e.power) as
+      | { value: number; die?: number; dice?: number[] }
+      | undefined;
+    check(
+      bash !== undefined && bash.die === undefined && bash.dice === undefined && bash.value >= 1 && bash.value <= 6,
+      `${victim}: the bash is one d6`,
+      JSON.stringify(bash),
+    );
+  }
+});
+
 scenario('Spirit Breaker — an arrow space is a move too, so it bashes whoever it sweeps past', () => {
   // Wild Wilds: 4 + 3 lands on the arrow at 7, which sweeps it 3 on to 10, past the racer on 8.
   const s = raceState(

@@ -381,8 +381,8 @@ const omniknight = def(
 /**
  * FIREBLAST — "I roll two d3s and multiply them, so I move 1 to 9."
  *
- * That product is my die for anything that has me roll, like Chaos Knight's d20: rerolls,
- * a duel, Spirit Breaker's bash. Faces run 1, 2, 3, 4, 6 and 9 — never 5, 7 or 8.
+ * For the main move only, rerolls included: a roll a power asks for, like a duel or Spirit
+ * Breaker's bash, is one plain d6. Faces run 1, 2, 3, 4, 6 and 9 — never 5, 7 or 8.
  */
 const ogreMagi = def(
   'ogre-magi',
@@ -1237,8 +1237,8 @@ const kez = def(
  * INVOKE — "Before my main move, I choose a colour: blue, pink or orange. I roll 3 dice,
  * each landing on a random colour, and move the sum of the dice showing my colour."
  *
- * Anywhere from 0 to 18. The colour is chosen every turn and kept for any roll of mine
- * until the next pick — a duel or a bash throws the same three dice. Blue until the first.
+ * Anywhere from 0 to 18. The colour is chosen every turn and kept until the next pick; blue
+ * until the first. Main moves only — a duel or a bash is one plain d6.
  */
 const INVOKER_COLOURS = ['blue', 'pink', 'orange'] as const;
 const invoker = def(
@@ -1400,8 +1400,8 @@ function fierySoul(racer: MutableRacer): number {
  * COUP DE GRACE — "I roll two d6s and move the first. If the second is a 6, I move triple
  * the first instead."
  *
- * The pair is my die for anything that has me roll, like Ogre Magi's: rerolls, a bash, the
- * face a power reads. A crit is one in six, and worth 3 to 18.
+ * The pair is my main move's die, rerolls included, and the face a power reads from it. A
+ * roll a power asks for, like a bash, is one plain d6. A crit is one in six, worth 3 to 18.
  */
 const phantomAssassin = def(
   'phantom-assassin',
@@ -1542,9 +1542,10 @@ const grimstroke = def(
 /**
  * MAGNETIC FIELD — "I roll two d6s and move whichever one I choose."
  *
- * The pair is thrown as my die, and on a main move I say which face counts before anyone
- * reacts to it; if both show the same there is nothing to choose. Any other roll of mine —
- * a duel, a bash — takes the higher face, which is the one I'd pick every time.
+ * The pair is thrown for my main move, rerolls included, and I say which face counts before
+ * anyone reacts to it; the other is discarded. If both show the same there is nothing to
+ * choose, and when the clock runs out the higher one counts. A roll a power asks for, like a
+ * duel or a bash, is one plain d6.
  */
 const ARC_DICE = 'arcDice';
 const arcWarden = def('arc-warden', 'Arc Warden', 'I roll two d6s and move whichever one I choose.', {

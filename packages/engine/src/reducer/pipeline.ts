@@ -871,11 +871,16 @@ interface Thrown {
   readonly colours?: readonly string[];
 }
 
-/** Rolls `racer`'s own die: a d6, unless a power (Chaos Knight, Ogre Magi) says otherwise. */
-function rollDieOf(ctx: Ctx, rng: Rng, racer: MutableRacer): Thrown {
+/**
+ * Rolls `racer`'s own die: a d6, unless a power (Chaos Knight, Ogre Magi) says otherwise.
+ *
+ * A multi-dice throw (`throwDie`) is for the main move only; a roll a power asks for
+ * (`mainMove` false) throws one die of the racer's `dieSides` instead.
+ */
+function rollDieOf(ctx: Ctx, rng: Rng, racer: MutableRacer, mainMove = true): Thrown {
   const hooks = hooksFor(ctx.s, racer);
   const h = makeHookCtx(ctx, rng, racer);
-  if (hooks.throwDie) {
+  if (mainMove && hooks.throwDie) {
     const combined = hooks.throwDie(h);
     return {
       face: combined.face,
@@ -1051,7 +1056,7 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
     },
 
     rollDie: (target, opts) => {
-      const thrown: Thrown = opts?.plain ? { face: rng.roll(6), die: 6 } : rollDieOf(ctx, rng, target);
+      const thrown: Thrown = opts?.plain ? { face: rng.roll(6), die: 6 } : rollDieOf(ctx, rng, target, false);
       ctx.emit(thrownEvent(target, thrown, self.racerId));
       return thrown.face;
     },

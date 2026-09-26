@@ -106,9 +106,9 @@ export interface HookCtx {
   forfeit(player: PlayerId, value: number): number;
 
   /**
-   * Rolls `target`'s own die — a d6, or whatever `dieSides` or `throwDie` says. For powers that make a
+   * Rolls `target`'s own die — a d6, or one die of `dieSides` faces. For powers that make a
    * racer roll ("they roll a die", "we roll our dice"), so Chaos Knight throws its d20 there
-   * too. The throw is announced, so the board tumbles the die like a main move's.
+   * too; a `throwDie` racer throws one plain die here, since that is for main moves. The throw is announced, so the board tumbles the die like a main move's.
    *
    * Call it from the `resume` of an `askRoll`, so the player whose die it is throws it.
    *
@@ -266,7 +266,8 @@ export interface Hooks {
   /**
    * Ogre Magi: throws `self`'s die some other way than one die of `dieSides` faces. Returns
    * the face that counts, plus the dice behind it so the board can show them. Wins over
-   * `dieSides`, and applies everywhere it does.
+   * `dieSides` for the main move and its rerolls; a roll a power asks for (`rollDie`) is a
+   * single die of `dieSides`.
    */
   throwDie?(h: HookCtx): CombinedThrow;
 
