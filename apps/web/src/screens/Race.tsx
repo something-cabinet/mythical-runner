@@ -1,7 +1,7 @@
 import { FINISH, type RacerId, type RaceNumber } from '@mr/engine';
 import { useRef, type RefObject } from 'react';
 import { Board } from '../components/Board';
-import { ActionBar, RacerCard, RacerToken, Standings, Waiting } from '../components/bits';
+import { ActionBar, RacerCard, RacerToken, ReferenceButton, Standings, Waiting } from '../components/bits';
 import { abilityToken, boardLinks, borrowedPower, duelBonusToken, silencedToken, soulbindToken, ordinal, playerName, powerText, racerName, rawName, turnOrder } from '../lib/present';
 import { legalOf, useRoomContext } from '../lib/roomContext';
 import type { NumberedLine } from '../lib/useEventLog';
@@ -73,7 +73,7 @@ export function RaceScreen() {
               positions={board.positions}
               highlight={targets}
               claimedSpaces={racing ? board.claimedSpaces : []}
-              tripSpaces={racing ? board.tripSpaces : []}
+              tokens={racing ? board.tokens : []}
               roll={board.roll}
               power={board.power}
               links={boardLinks(view)}
@@ -108,6 +108,7 @@ export function RaceScreen() {
                         <span className="who">· {r.owner === view.you ? 'you' : rawName(view, r.owner)}</span>
                       </div>
                       <p className="power">{powerText(power ?? r.racerId)}</p>
+                      <ReferenceButton view={view} racer={power ?? r.racerId} className="ref-button-inline" />
                     </div>
                     <div className="stack" style={{ gap: 4, alignItems: 'flex-end' }}>
                       {arrived(r) && r.finishedRank !== null ? (

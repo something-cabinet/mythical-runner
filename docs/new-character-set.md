@@ -41,7 +41,17 @@
 - Doom: Other racers on my space or next to it have no powers, except on the Start space.
 - Sven: Before my main move, I can get +3 to my main move this turn and my next 2. Ready again 6 turns later.
 - Kez: Before my main move, I can roll an odd-only die (1, 3, 5) or an even-only die (2, 4, 6) instead of my d6.
-- Invoker: Before my main move, I pick blue, pink or orange. I roll 3 dice that each land on a random colour, and move the total of the dice in my colour (0 to 18).
+- Invoker: I can skip my main move to roll 3 dice that each land blue, pink or orange, and cast one of 10 spells. Ready again 2 turns later.
+  - Blue, blue, blue — Cold Snap: I push any racer back 6.
+  - Pink, pink, pink — EMP: I move 6. Racers I pass lose their powers for 1 turn.
+  - Orange, orange, orange — Sun Strike: I pick a space, and every racer on it trips.
+  - Blue, blue, pink — Ghost Walk: I move 2, and can't be tripped until my next turn.
+  - Blue, blue, orange — Ice Wall: until my next turn, racers who would pass my space stop there and trip.
+  - Pink, pink, blue — Tornado: I move 4, then racers within 2 spaces of me go back 2.
+  - Pink, pink, orange — Alacrity: I move 4, and get +2 to my next main move.
+  - Orange, orange, blue — Forge Spirit: for my next 3 turns, racers who stop on my space or next to it trip.
+  - Orange, orange, pink — Chaos Meteor: I move 2, then racers on the 3 spaces ahead of me trip.
+  - Blue, pink, orange — Deafening Blast: I move 2, then racers on the 3 spaces ahead of me go back 2.
 - Largo: I get +1 to my main move for each racer on my space, me included. Other racers on my space get +1 to theirs.
 - Lina: Each turn I'm not tripped, I gain a Fiery Soul stack, up to 8. I get +1 to my main move for every 2 stacks. Tripping clears them.
 - Phantom Assassin: I roll two d6s and move the first. If the second is a 6, I move triple the first instead.

@@ -807,6 +807,20 @@ select {
   letter-spacing: 0.04em;
 }
 
+.board .board-token-face {
+  fill: #1b1724;
+  stroke-width: 3;
+  filter: drop-shadow(0 2px 3px rgb(0 0 0 / 40%));
+}
+
+.board .board-token-name {
+  fill: #fffdf7;
+  font-weight: 800;
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+}
+
 .board .glyph-arrow-shape {
   fill: #ffc93c;
 }
@@ -1372,6 +1386,92 @@ select {
   padding-right: 4px;
 }
 
+/* ---- Reference cards ----------------------------------------------------- */
+
+.ref-button {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 0.78rem;
+  font-weight: 750;
+  border-radius: 6px;
+}
+
+/* On a racer card: at the bottom of the description, laid over room the card leaves for
+   it — beside the card in the markup, since the card is itself a button. */
+.racer-card-wrap {
+  position: relative;
+  display: grid;
+  min-width: 0;
+}
+
+.racer-card[data-reference='true'] .racer-body {
+  padding-bottom: 50px;
+}
+
+.racer-card-ref {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+}
+
+.ref-button-inline {
+  margin-top: 6px;
+}
+
+.ref-text {
+  margin: 0 0 6px;
+  line-height: 1.4;
+}
+
+.ref-intro {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.ref-entries {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ref-entry {
+  padding: 10px 0;
+}
+
+.ref-entry + .ref-entry {
+  border-top: 1px solid var(--border);
+}
+
+.ref-entry-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ref-swatches {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.ref-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 20%);
+}
+
+.ref-entry-name {
+  font-weight: 800;
+}
+
+.ref-entry-text {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
 /* ---- Action bar --------------------------------------------------------- */
 
 .actionbar {
@@ -1417,6 +1517,10 @@ select {
 
 .actionbar .racer-card .racer-body {
   padding: 8px 10px 10px;
+}
+
+.actionbar .racer-card[data-reference='true'] .racer-body {
+  padding-bottom: 48px;
 }
 
 /* The bar has to leave the board visible, so the portrait shrinks rather than the text. */

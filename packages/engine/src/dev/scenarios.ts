@@ -18,7 +18,7 @@ import type { Action } from '../actions.js';
 import type { GameEvent } from '../events.js';
 import { choiceId, playerId, racerId } from '../ids.js';
 import { FINISH, START, trackForRace } from '../tracks/index.js';
-import type { GameState, RacerState } from '../state.js';
+import type { BoardToken, GameState, RacerState } from '../state.js';
 import type { CharacterSetId } from '../characters/sets.js';
 import { racerLabel, racerName, racerSet, racersInSets } from '../characters/registry.js';
 import { goldToken, pointsToken, silverToken } from '../scoring.js';
@@ -84,7 +84,7 @@ function raceState(placements: readonly Placement[], active: string, raceNo: 1 |
       finished: [],
       stalledTurns: 0,
       claimedSpaces: [],
-      tripSpaces: [],
+      tokens: [],
       nextUp: [],
       extraTurns: [],
       turn: 0,
@@ -93,6 +93,15 @@ function raceState(placements: readonly Placement[], active: string, raceNo: 1 |
     queue: [],
     turnStartPos: board.find((r) => r.owner === playerId(active))?.pos ?? START,
   };
+}
+
+/** The tokens on the board, or none outside a race. */
+const tokensOf = (s: GameState): readonly BoardToken[] => (s.phase.t === 'racing' ? s.phase.tokens : []);
+
+/** `s` with `tokens` laid on the board, owned by `owner`. */
+function withTokens(s: GameState, owner: string, tokens: readonly { kind: string; pos: number; turns?: number }[]): GameState {
+  const laid = tokens.map((t, i) => ({ id: i + 1, name: t.kind, owner: racerId(owner), ...t }));
+  return { ...s, phase: { ...s.phase, tokens: laid } as GameState['phase'] };
 }
 
 const posOf = (s: GameState, racer: string): number =>
@@ -2305,7 +2314,7 @@ scenario('Techies — every space it stops on gets a mine, which goes off once',
     'p1',
   );
   const mined = rollFor(s, 'p1', 4);
-  const mines = mined.state.phase.t === 'racing' ? mined.state.phase.tripSpaces : [];
+  const mines = tokensOf(mined.state).filter((t) => t.kind === 'mine').map((t) => t.pos);
   check(mines.join(',') === '7', 'mines space 7', mines.join(','));
   check(racerAt(mined.state, 'techies')?.tripped === false, 'without tripping on it');
 
@@ -2314,9 +2323,9 @@ scenario('Techies — every space it stops on gets a mine, which goes off once',
     posOf(boom.state, 'vanilla-01') === 7 && racerAt(boom.state, 'vanilla-01')?.tripped === true,
     'the next racer to stop there trips',
   );
-  const left = boom.state.phase.t === 'racing' ? boom.state.phase.tripSpaces : [];
-  check(left.length === 0, 'and the mine is gone', left.join(','));
-  check(has(boom.events, 'space/cleared'), 'which the board is told about');
+  const left = tokensOf(boom.state);
+  check(left.length === 0, 'and the mine is gone', JSON.stringify(left));
+  check(has(boom.events, 'boardToken/removed'), 'which the board is told about');
 
   // One mine, one trip: the racer after the one who set it off walks on by.
   const field = raceState(
@@ -2326,7 +2335,7 @@ scenario('Techies — every space it stops on gets a mine, which goes off once',
     ],
     'p1',
   );
-  const laid: GameState = { ...field, phase: { ...field.phase, tripSpaces: [7] } as GameState['phase'] };
+  const laid = withTokens(field, 'techies', [{ kind: 'mine', pos: 7 }]);
   const first = rollFor(laid, 'p1', 2);
   check(racerAt(first.state, 'vanilla-01')?.tripped === true, 'the first racer onto a mine trips');
   const second = rollFor(first.state, 'p2', 2);
@@ -2346,7 +2355,7 @@ scenario('Techies — every space it stops on gets a mine, which goes off once',
     'p1',
     2,
   );
-  const armed: GameState = { ...base, phase: { ...base.phase, tripSpaces: [arrow!.index] } as GameState['phase'] };
+  const armed = withTokens(base, 'techies', [{ kind: 'mine', pos: arrow!.index }]);
   const hit = rollFor(armed, 'p1', 2);
   check(posOf(hit.state, 'vanilla-01') === arrow!.index, `the arrow at ${arrow!.index} is covered`, `pos ${posOf(hit.state, 'vanilla-01')}`);
   check(racerAt(hit.state, 'vanilla-01')?.tripped === true, 'and it trips instead');
@@ -2807,34 +2816,145 @@ scenario('Kez — picks an odd-only or even-only d6 for the turn', () => {
   check([...even].sort().join(',') === '2,4,6', 'even: 2, 4, 6', [...even].join(','));
 });
 
-scenario('Invoker — moves the sum of the dice showing its colour', () => {
+scenario('Invoker — three orbs cast one of ten spells, moving 2 per pink orb', () => {
   const s = raceState(
     [
       { player: 'p1', racer: 'invoker', pos: 1 },
-      { player: 'p2', racer: 'vanilla-01', pos: 25 },
+      { player: 'p2', racer: 'vanilla-01', pos: 5 },
+      { player: 'p3', racer: 'vanilla-02', pos: 9 },
     ],
     'p1',
   );
-  let ok = true;
-  let zero = false;
-  let big = false;
-  for (let seed = 1; seed <= 300; seed++) {
+  const spells: Record<string, string> = {
+    bbb: 'Cold Snap', ppp: 'EMP', ooo: 'Sun Strike', bbp: 'Ghost Walk', bbo: 'Ice Wall',
+    bpp: 'Tornado', ppo: 'Alacrity', boo: 'Forge Spirit', poo: 'Chaos Meteor', bpo: 'Deafening Blast',
+  };
+  const seen = new Set<string>();
+  const wrong: string[] = [];
+  for (let seed = 1; seed <= 400; seed++) {
     const at = applyAction({ ...s, seed }, roll('p1')).state;
-    const res = applyAction(at, decide('p1', 'pink'));
-    const t = res.events.find((e) => e.t === 'dice/thrown') as
-      | { value: number; dice?: number[]; colours?: string[] }
-      | undefined;
-    if (!t?.dice || !t.colours || t.dice.length !== 3) {
-      ok = false;
-      break;
-    }
-    const want = t.dice.reduce((sum, d, i) => sum + (t.colours?.[i] === 'pink' ? d : 0), 0);
-    if (t.value !== want) ok = false;
-    if (t.value === 0) zero = true;
-    if (t.value > 6) big = true;
+    let { state: after, events } = applyAction(at, decide('p1', 'invoke'));
+    const t = events.find((e) => e.t === 'dice/thrown') as { colours?: string[] } | undefined;
+    const orbs = t?.colours ?? [];
+    const n = (c: string): number => orbs.filter((o) => o === c).length;
+    const spell = spells['b'.repeat(n('blue')) + 'p'.repeat(n('pink')) + 'o'.repeat(n('orange'))] ?? '?';
+    seen.add(spell);
+    const fail = (why: string): void => void wrong.push(`seed ${seed} ${spell}: ${why}`);
+    if (orbs.length !== 3 || !logLines(events).includes(`invokes ${spell}!`)) fail(logLines(events));
+    if (spell === 'Cold Snap') after = applyAction(after, decide('p1', 'snap:vanilla-02')).state;
+    if (spell === 'Sun Strike') after = applyAction(after, decide('p1', 'strike:5')).state;
+    if (posOf(after, 'invoker') !== 1 + 2 * n('pink')) fail(`invoker on ${posOf(after, 'invoker')}`);
+    const v1 = racerAt(after, 'vanilla-01')!;
+    const v2 = racerAt(after, 'vanilla-02')!;
+    const inv = racerAt(after, 'invoker')!;
+    const ok = {
+      'Cold Snap': v2.pos === 3 && v1.pos === 5,
+      EMP: v1.memo['silenced'] === 1 && v2.memo['silenced'] === undefined,
+      'Sun Strike': v1.tripped && !v2.tripped,
+      'Ghost Walk': (inv.memo['timers'] as Record<string, number>)['ghostWalk'] === 1, // one turn already ticked off
+      'Ice Wall': tokensOf(after).some((t) => t.kind === 'iceWall' && t.pos === 1 && t.owner === inv.racerId),
+      Tornado: v1.pos === 3 && v2.pos === 9,
+      Alacrity: inv.memo['alacrity'] === true,
+      'Forge Spirit': tokensOf(after).some((t) => t.kind === 'forgeSpirit' && t.pos === 1 && t.name === 'Forge Spirit'),
+      'Chaos Meteor': v1.tripped && !v2.tripped,
+      'Deafening Blast': v1.pos === 3 && v2.pos === 9,
+    }[spell];
+    if (!ok) fail(`v1 ${v1.pos}${v1.tripped ? ' tripped' : ''}, v2 ${v2.pos}${v2.tripped ? ' tripped' : ''}, memo ${JSON.stringify(inv.memo)}`);
   }
-  check(ok, 'three coloured dice, and the pink ones summed');
-  check(zero && big, 'from nothing at all to more than a d6 can roll');
+  check(seen.size === 10, 'every one of the ten spells comes up', [...seen].join(', '));
+  check(wrong.length === 0, 'each spell does what it says', wrong.slice(0, 3).join('\n        '));
+});
+
+scenario('Invoker — every other turn, and Alacrity lands on the next main move', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'invoker', pos: 1 },
+      { player: 'p2', racer: 'vanilla-01', pos: 20 },
+    ],
+    'p1',
+  );
+  let cast: GameState | null = null;
+  for (let seed = 1; seed <= 400 && !cast; seed++) {
+    const at = applyAction({ ...s, seed }, roll('p1')).state;
+    const res = applyAction(at, decide('p1', 'invoke'));
+    if (logLines(res.events).includes('invokes Alacrity!')) cast = res.state;
+  }
+  check(cast !== null, 'found an Alacrity cast');
+  if (!cast) return;
+  const next = applyAction(applyAction(cast, roll('p2')).state, roll('p1'));
+  const rolled = next.events.find((e) => e.t === 'dice/rolled') as { value: number; natural?: number } | undefined;
+  check(!has(next.events, 'decision/requested') && rolled !== undefined, 'no Invoke on the turn after a cast');
+  check(rolled?.natural !== undefined && rolled.value === rolled.natural + 2, 'Alacrity: +2', JSON.stringify(rolled));
+  const again = applyAction(applyAction(next.state, roll('p2')).state, roll('p1'));
+  check(String(again.state.pending?.options[0]?.id) === 'invoke', 'ready again the turn after that');
+});
+
+scenario('Invoker — the Ice Wall stops a racer passing it, and trips them', () => {
+  const s = withTokens(
+    raceState(
+      [
+        { player: 'p1', racer: 'invoker', pos: 10 },
+        { player: 'p2', racer: 'vanilla-01', pos: 8 },
+      ],
+      'p2',
+    ),
+    'invoker',
+    [{ kind: 'iceWall', pos: 10, turns: 2 }],
+  );
+  const past = rollFor(s, 'p2', 5);
+  check(posOf(past.state, 'vanilla-01') === 10 && racerAt(past.state, 'vanilla-01')!.tripped, 'a 5 from 8 stops on 10, tripped');
+  const onto = rollFor(s, 'p2', 2);
+  check(posOf(onto.state, 'vanilla-01') === 10 && !racerAt(onto.state, 'vanilla-01')!.tripped, 'landing on the wall is not passing it');
+});
+
+scenario('Invoker — the Forge Spirit trips racers stopping on or next to its space', () => {
+  const s = withTokens(
+    raceState(
+      [
+        { player: 'p1', racer: 'invoker', pos: 1 },
+        { player: 'p2', racer: 'vanilla-01', pos: 8 },
+      ],
+      'p2',
+    ),
+    'invoker',
+    [{ kind: 'forgeSpirit', pos: 10, turns: 3 }],
+  );
+  check(racerAt(rollFor(s, 'p2', 3).state, 'vanilla-01')!.tripped, 'stopping on 11, next to the spirit, trips');
+  check(!racerAt(rollFor(s, 'p2', 5).state, 'vanilla-01')!.tripped, 'stopping on 13 is out of reach');
+});
+
+scenario('Invoker — the Ice Wall comes down at my next turn, and a spirit runs out of turns', () => {
+  const s = withTokens(
+    raceState(
+      [
+        { player: 'p1', racer: 'invoker', pos: 5 },
+        { player: 'p2', racer: 'vanilla-01', pos: 20 },
+      ],
+      'p1',
+    ),
+    'invoker',
+    [
+      { kind: 'iceWall', pos: 5, turns: 2 },
+      { kind: 'forgeSpirit', pos: 3, turns: 1 },
+    ],
+  );
+  const asked = applyAction(s, roll('p1'));
+  check(tokensOf(asked.state).map((t) => t.kind).join() === 'forgeSpirit', 'the wall is gone as my turn begins');
+  const done = applyAction(asked.state, decide('p1', 'roll'));
+  check(tokensOf(done.state).length === 0, 'the spirit is gone as its last turn ends');
+  check(done.events.some((e) => e.t === 'boardToken/removed' && e.by === undefined), 'running out sets off nothing');
+});
+
+scenario('Invoker — Ghost Walk shrugs off trips', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'invoker', pos: 10, memo: { timers: { ghostWalk: 2 } } },
+      { player: 'p2', racer: 'faceless-void', pos: 9 },
+    ],
+    'p2',
+  );
+  const res = applyAction(applyAction(s, roll('p2')).state, decide('p2', 'chrono'));
+  check(!racerAt(res.state, 'invoker')!.tripped, 'a Chronosphere does not trip a ghost-walking Invoker', logLines(res.events));
 });
 
 scenario('Legion Commander — a duel is a plain d6 plus earlier duel wins, whatever the die', () => {

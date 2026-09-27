@@ -1,6 +1,7 @@
 import type { CharacterSetId } from './characters/sets.js';
 import type { ChoiceId, PlayerId, RacerId } from './ids.js';
 import type { Token } from './scoring.js';
+import type { BoardToken } from './state.js';
 import type { RaceNumber } from './tracks/index.js';
 
 /**
@@ -133,8 +134,9 @@ export interface DiceThrown {
    */
   readonly dice?: readonly number[];
   /**
-   * Each die's colour, parallel to `dice`, when they were coloured and summed rather than
-   * multiplied — Invoker's blue, pink and orange.
+   * Each die's colour, parallel to `dice`, when the dice have colours instead of numbers —
+   * Invoker's blue, pink and orange orbs. `dice` then holds each colour's place in the
+   * order blue, pink, orange (1 to 3), and `value` is meaningless.
    */
   readonly colours?: readonly string[];
   /**
@@ -210,21 +212,22 @@ export interface RacerStoodUp {
 }
 
 /**
- * A mine was laid on a space (Techies): it trips the next racer to stop there. Emitted
- * where it happens in the turn, so the client can draw the mine once the racer is seen to
- * get there.
+ * A power left a token on a space (Techies' mine, Invoker's Ice Wall). Emitted where it
+ * happens in the turn, so the client can draw the token once the racer is seen to get there.
  */
-export interface SpaceMined {
-  readonly t: 'space/mined';
-  readonly racerId: RacerId;
-  readonly pos: number;
+export interface BoardTokenPlaced {
+  readonly t: 'boardToken/placed';
+  readonly token: BoardToken;
 }
 
-/** `racerId` stopped on a mine and set it off: space `pos` is back to what it was. */
-export interface SpaceCleared {
-  readonly t: 'space/cleared';
-  readonly racerId: RacerId;
+/** A token left the board: set off, or its time ran out. */
+export interface BoardTokenRemoved {
+  readonly t: 'boardToken/removed';
+  readonly id: number;
+  readonly name: string;
   readonly pos: number;
+  /** The racer that set it off — a mine going bang. Absent when it simply ran out. */
+  readonly by?: RacerId;
 }
 
 /** A star space was taken: it scores nobody else this race. */
@@ -332,8 +335,8 @@ export type GameEvent =
   | RacerWarped
   | RacerTripped
   | RacerStoodUp
-  | SpaceMined
-  | SpaceCleared
+  | BoardTokenPlaced
+  | BoardTokenRemoved
   | SpaceClaimed
   | RacerEliminated
   | AbilityTriggered

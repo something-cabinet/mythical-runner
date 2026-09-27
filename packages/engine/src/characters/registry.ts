@@ -3,7 +3,7 @@ import { CLASSIC_RACERS } from './defs/classic.js';
 import { DOTA_RACERS } from './defs/dota.js';
 import type { Hooks } from './hooks.js';
 import { CHARACTER_SETS, type CharacterSetId } from './sets.js';
-import type { RacerDef } from './types.js';
+import type { RacerDef, ReferenceCard } from './types.js';
 
 /**
  * The racer roster: every racer in every set. The classic 36 are in `defs/classic.ts`,
@@ -70,6 +70,11 @@ export function racerLabel(id: RacerId, sets: readonly CharacterSetId[]): string
 
 export function racerText(id: RacerId): string {
   return BY_ID.get(id)?.text ?? '';
+}
+
+/** A racer's reference card, for racers whose detail is kept off the card. */
+export function racerReference(id: RacerId): ReferenceCard | undefined {
+  return BY_ID.get(id)?.reference;
 }
 
 /** The "near me" window a racer's power reads or acts on, or undefined if it has none. */

@@ -1,4 +1,4 @@
-import type { GameEvent, RacerId, StateMessage } from '@mr/engine';
+import type { BoardToken, GameEvent, RacerId, StateMessage } from '@mr/engine';
 import { useEffect, useRef, useState } from 'react';
 import type { RoomClient } from './roomClient';
 import { play, type Sound } from './sound';
@@ -50,7 +50,7 @@ export interface ShownRoll {
   readonly die: number;
   /** Each die's face, when several were thrown and combined into `face` (Ogre Magi). */
   readonly dice?: readonly number[] | undefined;
-  /** Each die's colour, when coloured dice were summed into `face` (Invoker). */
+  /** Each die's colour, when the dice are colours rather than numbers (Invoker's orbs). */
   readonly colours?: readonly string[] | undefined;
   /**
    * The main move this settles into, or null while powers are still having their say —
@@ -128,8 +128,8 @@ interface Drawn {
   readonly positions: Positions;
   readonly tripped: readonly RacerId[];
   readonly eliminated: readonly RacerId[];
-  /** Techies' mines. */
-  readonly tripSpaces: readonly number[];
+  /** Tokens powers have left on spaces: Techies' mines, Invoker's Ice Wall. */
+  readonly tokens: readonly BoardToken[];
   /** Stars already taken this race. */
   readonly claimedSpaces: readonly number[];
 }
@@ -142,7 +142,7 @@ function drawnTruth(message: StateMessage | null): Drawn {
     positions: truth(message),
     tripped: board.filter((r) => r.tripped).map((r) => r.racerId),
     eliminated: board.filter((r) => r.eliminated).map((r) => r.racerId),
-    tripSpaces: racing?.tripSpaces ?? [],
+    tokens: racing?.tokens ?? [],
     claimedSpaces: racing?.claimedSpaces ?? [],
   };
 }
@@ -161,10 +161,10 @@ function markFor(e: GameEvent): ((d: Drawn) => Drawn) | null {
       return (d) => ({ ...d, tripped: withItem(d.tripped, e.racerId, false) });
     case 'racer/eliminated':
       return (d) => ({ ...d, eliminated: withItem(d.eliminated, e.racerId, true) });
-    case 'space/mined':
-      return (d) => ({ ...d, tripSpaces: withItem(d.tripSpaces, e.pos, true) });
-    case 'space/cleared':
-      return (d) => ({ ...d, tripSpaces: withItem(d.tripSpaces, e.pos, false) });
+    case 'boardToken/placed':
+      return (d) => ({ ...d, tokens: [...d.tokens.filter((t) => t.id !== e.token.id), e.token] });
+    case 'boardToken/removed':
+      return (d) => ({ ...d, tokens: d.tokens.filter((t) => t.id !== e.id) });
     case 'space/claimed':
       return (d) => ({ ...d, claimedSpaces: withItem(d.claimedSpaces, e.pos, true) });
     default:
@@ -199,10 +199,10 @@ function settle(
 export interface BoardAnimation {
   /** Where to draw each racer right now. */
   readonly positions: Positions;
-  /** Who to draw tripped, out, mined and taken — see `Drawn`. */
+  /** Who to draw tripped and out, the tokens on the board, and stars taken — see `Drawn`. */
   readonly tripped: readonly RacerId[];
   readonly eliminated: readonly RacerId[];
-  readonly tripSpaces: readonly number[];
+  readonly tokens: readonly BoardToken[];
   readonly claimedSpaces: readonly number[];
   /** True while queued moves are still playing out. */
   readonly animating: boolean;
@@ -410,7 +410,7 @@ export function useBoardPositions(client: RoomClient, message: StateMessage | nu
         if (e.t === 'race/started') {
           // A new race: everyone is back on Start. Drop any stale hops from the last race.
           queue.current = [];
-          setDrawn((prev) => ({ ...prev, tripped: [], eliminated: [], tripSpaces: [], claimedSpaces: [] }));
+          setDrawn((prev) => ({ ...prev, tripped: [], eliminated: [], tokens: [], claimedSpaces: [] }));
           show(null);
           turnNo.current = 0;
           flashedOn.current.clear();

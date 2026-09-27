@@ -2,7 +2,7 @@ import type { GameEvent } from '../events.js';
 import type { ChoiceId, PlayerId, RacerId } from '../ids.js';
 import type { Job, MoveReason } from '../jobs.js';
 import type { Rng } from '../rng.js';
-import type { DecisionOption, RacerState } from '../state.js';
+import type { BoardToken, DecisionOption, RacerState } from '../state.js';
 import type { DeepMutable, MutableState } from '../reducer/working.js';
 
 export type MutableRacer = DeepMutable<RacerState>;
@@ -15,11 +15,6 @@ export interface CombinedThrow {
   readonly sides: number;
   /** Each die's face, in the order thrown. */
   readonly dice: readonly number[];
-  /**
-   * Each die's colour, when the dice are coloured and summed rather than multiplied —
-   * Invoker's blue, pink and orange.
-   */
-  readonly colours?: readonly string[];
 }
 
 /**
@@ -125,11 +120,22 @@ export interface HookCtx {
   askRoll(roller: MutableRacer, request: { readonly prompt: string; readonly key: string; readonly data?: unknown }): void;
 
   /**
-   * Techies: lays a mine on space `pos`, which trips the next racer to stop there and is
-   * then gone. Start and the finish can't be mined. False when nothing changed — already
+   * Techies: lays a mine token on space `pos`, which trips the next racer to stop there and
+   * is then gone. Start and the finish can't be mined. False when nothing changed — already
    * mined, or a TRIP space.
    */
   mineSpace(pos: number): boolean;
+
+  /** The tokens on the board this race, in the order they were placed. See `BoardToken`. */
+  tokens(): readonly BoardToken[];
+  /**
+   * Leaves a token owned by `self` on space `pos`, named `name` on the board. It lasts
+   * `turns` of `self`'s own turns, the current one included, or until removed when
+   * `turns` is left out. Null outside a race.
+   */
+  placeToken(kind: string, name: string, pos: number, turns?: number): BoardToken | null;
+  /** Takes a token off the board. `by` is the racer that set it off, when one did. */
+  removeToken(id: number, by?: RacerId): void;
 
   /**
    * Calls this power's `resume` with `key` and `data` once the work now running has
@@ -356,6 +362,13 @@ export interface Hooks {
    * an occupied space is passed over without being counted against the move.
    */
   skipsOccupiedSpaces?(h: HookCtx): boolean;
+
+  /**
+   * Invoker's Ice Wall: another racer's move is about to step from `from` to `to`, having
+   * begun on `origin`. Return true to end the move where it stands, as if its steps had run
+   * out. Checked per step, for every racer but the mover; must not `ask`.
+   */
+  haltsMove?(h: HookCtx, mover: MutableRacer, origin: number, from: number, to: number): boolean;
 
   /**
    * Suckerfish: fires when another racer sharing `self`'s space begins a move, before any

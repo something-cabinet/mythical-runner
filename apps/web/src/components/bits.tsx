@@ -1,5 +1,5 @@
-import type { PlayerId, PlayerView, RacerId } from '@mr/engine';
-import { useEffect, useState, type ReactNode } from 'react';
+import type { PlayerId, PlayerView, RacerId, ReferenceCard } from '@mr/engine';
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import {
   hasSprite,
   initials,
@@ -7,11 +7,13 @@ import {
   powerText,
   racerInitials,
   racerName,
+  racerReference,
   racerSprite,
   racerText,
   rawName,
   seatColor,
   SEAT_INK,
+  swatchColour,
 } from '../lib/present';
 
 /** A player's coloured disc. Always carries initials, so colour is never the only cue. */
@@ -63,7 +65,10 @@ export function RacerToken({
  *
  * Power text is never truncated or hidden behind a tap. With thirty-six rule-breaking
  * powers, not being able to see what a racer does is the single easiest way for this game
- * to become unplayable.
+ * to become unplayable. The one exception is detail a racer keeps on a reference card
+ * (Invoker's ten spells): the text is then the gist, and a button under it opens the rest.
+ * The button sits over the card rather than in it, since the card is itself a button: the
+ * card leaves room at the bottom of its text, and the button is laid over that room.
  */
 export function RacerCard({
   view,
@@ -83,14 +88,16 @@ export function RacerCard({
   onSelect?: () => void;
 }) {
   const vanilla = racerText(racer) === '';
+  const reference = racerReference(racer) !== undefined;
   const interactive = !!onSelect && !disabled;
-  return (
+  const card = (
     <button
       type="button"
       className="racer-card"
       aria-pressed={interactive ? selected : undefined}
       data-dim={dim}
       data-vanilla={vanilla}
+      data-reference={reference}
       disabled={!interactive}
       onClick={onSelect}
     >
@@ -104,6 +111,93 @@ export function RacerCard({
         {footer}
       </span>
     </button>
+  );
+  if (!reference) return card;
+  return (
+    <div className="racer-card-wrap">
+      {card}
+      <ReferenceButton view={view} racer={racer} className="racer-card-ref" />
+    </div>
+  );
+}
+
+/**
+ * Opens a racer's reference card: the detail kept off its racer card, like Invoker's
+ * spells. Nothing at all for a racer without one. Each button owns its dialog, so every
+ * racer in a list can carry one.
+ */
+export function ReferenceButton({ view, racer, className = '' }: { view: PlayerView; racer: RacerId; className?: string }) {
+  const card = racerReference(racer);
+  const dialog = useRef<HTMLDialogElement>(null);
+  if (!card) return null;
+  return (
+    <>
+      <button
+        type="button"
+        className={`btn ref-button ${className}`}
+        aria-haspopup="dialog"
+        aria-label={`Reference card: ${racerName(view, racer)}`}
+        onClick={() => dialog.current?.showModal()}
+      >
+        Reference card
+      </button>
+      <ReferenceDialog ref={dialog} view={view} racer={racer} card={card} />
+    </>
+  );
+}
+
+/**
+ * A reference card in a modal: the racer's rules text, then every entry. A native
+ * `<dialog>` like the race log's, so Escape, the backdrop and focus behave without help.
+ */
+function ReferenceDialog({ ref, view, racer, card }: {
+  ref: RefObject<HTMLDialogElement | null>;
+  view: PlayerView;
+  racer: RacerId;
+  card: ReferenceCard;
+}) {
+  const heading = `ref-heading-${racer}`;
+  return (
+    <dialog
+      ref={ref}
+      className="log-dialog ref-dialog"
+      aria-labelledby={heading}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) e.currentTarget.close();
+      }}
+    >
+      <div className="log-dialog-body">
+        <div className="spread">
+          <h2 id={heading} className="section-title">
+            {racerName(view, racer)} · reference card
+          </h2>
+          <button type="button" className="btn btn-ghost" style={{ minHeight: 32, padding: '0 10px' }} onClick={() => ref.current?.close()}>
+            Close
+          </button>
+        </div>
+        <div className="log-dialog-scroll">
+          <p className="ref-text">{racerText(racer)}</p>
+          {card.intro && <p className="ref-intro">{card.intro}</p>}
+          <ul className="ref-entries">
+            {card.entries.map((entry) => (
+              <li key={entry.name} className="ref-entry">
+                <div className="ref-entry-head">
+                  {entry.swatches && (
+                    <span className="ref-swatches" aria-label={entry.swatches.join(', ')}>
+                      {entry.swatches.map((s, i) => (
+                        <span key={i} className="ref-swatch" style={{ background: swatchColour(s) }} />
+                      ))}
+                    </span>
+                  )}
+                  <span className="ref-entry-name">{entry.name}</span>
+                </div>
+                <p className="ref-entry-text">{entry.text}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </dialog>
   );
 }
 

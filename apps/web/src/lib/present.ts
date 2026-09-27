@@ -4,6 +4,7 @@ import {
   racerLabel,
   racerName as bareRacerName,
   racerText,
+  racerReference,
   powerOf,
   copyTarget,
   leashesOf,
@@ -174,7 +175,15 @@ export function racerName(view: PlayerView, id: RacerId): string {
   return racerLabel(id, view.racerSets);
 }
 
-export { racerText };
+export { racerText, racerReference };
+
+/** Invoker's orb colours, shared by the dice on the board and the chips on its reference card. */
+export const ORB_SHADES: Readonly<Record<string, string>> = { blue: '#3f7fe0', pink: '#e35fb4', orange: '#f08a24' };
+
+/** A reference card swatch's colour: the game's own shade for a name it knows, else the name as CSS. */
+export function swatchColour(name: string): string {
+  return ORB_SHADES[name] ?? name;
+}
 
 /**
  * Whose card a racer is actually running, or null when it is running its own.
@@ -517,11 +526,12 @@ export function describeEvent(e: GameEvent, view: PlayerView): LogLine | null {
       return { text: `${racer(e.racerId)} trips!`, tone: 'bad' };
     case 'racer/stoodUp':
       return { text: `${racer(e.racerId)} gets back up instead of moving`, tone: 'plain' };
-    case 'space/cleared':
-      return { text: `${racer(e.racerId)} sets off the mine on space ${e.pos}`, tone: 'bad' };
-    case 'space/mined':
+    case 'boardToken/removed':
+      // A token that ran out goes quietly; one set off is news.
+      return e.by ? { text: `${racer(e.by)} sets off the ${e.name.toLowerCase()} on space ${e.pos}`, tone: 'bad' } : null;
+    case 'boardToken/placed':
     case 'space/claimed':
-      // Already told: Techies' power logs the mine, and the token awarded logs the star.
+      // Already told: the power that placed the token logs it, and the token awarded logs the star.
       return null;
     case 'racer/eliminated':
       return { text: `${racer(e.racerId)} is out of the race!`, tone: 'bad' };

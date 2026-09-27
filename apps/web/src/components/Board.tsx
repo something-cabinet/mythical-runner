@@ -1,6 +1,6 @@
-import { FINISH, racerRange, trackForRace, type PlayerView, type RacerId, type RaceNumber } from '@mr/engine';
+import { FINISH, racerRange, trackForRace, type BoardToken, type PlayerView, type RacerId, type RaceNumber } from '@mr/engine';
 import { useEffect, useState, useSyncExternalStore, type CSSProperties } from 'react';
-import { hasSprite, ordinal, racerInitials, racerName, racerSprite, rawName, seatColor, type BoardLink } from '../lib/present';
+import { hasSprite, ORB_SHADES, ordinal, racerInitials, racerName, racerSprite, rawName, seatColor, type BoardLink } from '../lib/present';
 import { Tether } from './Tether';
 import { ROLL_TUMBLE_MS, type ShownPower, type ShownRoll } from '../lib/useBoardPositions';
 
@@ -166,11 +166,15 @@ const points = (corners: readonly (readonly [number, number])[]): string => corn
  * A d6 is the familiar rounded square with pips. Anything else — Ogre Magi's d3s, a die
  * with no well-known shape — is a plain square with the number on it.
  */
-/** Invoker's die colours, as drawn. */
-const DIE_COLOURS: Readonly<Record<string, string>> = { blue: '#3f7fe0', pink: '#e35fb4', orange: '#f08a24' };
+/** Invoker's orbs, as drawn, in face order: a 1 is blue, a 2 pink, a 3 orange. */
+const ORB_COLOURS = [ORB_SHADES['blue']!, ORB_SHADES['pink']!, ORB_SHADES['orange']!] as const;
 
-function dieColour(colour: string | undefined): string | undefined {
-  return colour === undefined ? undefined : DIE_COLOURS[colour];
+/** An orb: a die painted its colour, with nothing on it. */
+function OrbShape({ face, size }: { face: number; size: number }) {
+  const colour = ORB_COLOURS[face - 1] ?? ORB_COLOURS[0];
+  return (
+    <rect x={-size / 2} y={-size / 2} width={size} height={size} rx={size * 0.5} className="dice-face" style={{ stroke: colour, fill: colour }} />
+  );
 }
 
 function DieShape({ die, face, size, color }: { die: number; face: number; size: number; color: string }) {
@@ -251,6 +255,35 @@ function DieShape({ die, face, size, color }: { die: number; face: number; size:
 }
 
 /**
+ * A token a power left on a space: a square in its owner's seat colour, with its name on
+ * it, a word to a line.
+ */
+function TokenIcon({ token, x, y, size, color, by }: {
+  token: BoardToken;
+  x: number;
+  y: number;
+  size: number;
+  color: string;
+  by: string;
+}) {
+  const words = token.name.split(' ');
+  const fontSize = size * (words.some((w) => w.length > 5) ? 0.22 : 0.27);
+  return (
+    <g className="board-token" transform={`translate(${x} ${y})`}>
+      <title>{`${token.name} (${by})${token.turns !== undefined ? `, ${token.turns} more turn${token.turns === 1 ? '' : 's'} of theirs` : ''}`}</title>
+      <rect x={-size / 2} y={-size / 2} width={size} height={size} rx={size * 0.12} className="board-token-face" style={{ stroke: color }} />
+      <text className="board-token-name" style={{ fontSize }}>
+        {words.map((w, i) => (
+          <tspan key={i} x={0} y={(i - (words.length - 1) / 2) * fontSize * 1.1}>
+            {w}
+          </tspan>
+        ))}
+      </text>
+    </g>
+  );
+}
+
+/**
  * The latest roll as a big die in the infield. It tumbles through random faces, lands on
  * the face that was thrown, and then names who threw it. Remounted per throw via `key`.
  *
@@ -270,8 +303,8 @@ function Die({ view, roll, x, y, size, color, portrait }: {
   portrait: boolean;
 }) {
   // Usually one die; Ogre Magi throws two d3s and multiplies them, Phantom Assassin two d6s
-  // for a crit, and Invoker three coloured d6s summed by colour. Every die is shown,
-  // Invoker's in their own colours.
+  // for a crit, and Invoker three orbs whose colours make a spell. Every die is shown, and
+  // Invoker's tumble through the colours rather than the numbers.
   const final = roll.dice ?? [roll.face];
   const top = roll.die;
   const [faces, setFaces] = useState(() => (roll.instant ? final : final.map(() => 1 + Math.floor(Math.random() * top))));
@@ -318,8 +351,8 @@ function Die({ view, roll, x, y, size, color, portrait }: {
   const gap = each * 0.3;
   const span = final.length * each + (final.length - 1) * gap;
   const thrown =
-    roll.dice && roll.colours
-      ? `${roll.dice.map((d, i) => `${roll.colours?.[i] ?? ''} ${d}`).join(', ')} → ${roll.face}`
+    roll.colours
+      ? roll.colours.join(', ')
       : roll.dice && roll.dice.length > 1
       ? roll.die === 3
         ? `${roll.dice.join(' × ')} = ${roll.face}`
@@ -334,7 +367,7 @@ function Die({ view, roll, x, y, size, color, portrait }: {
       {faces.map((face, i) => (
         <g key={i} transform={`translate(${x - span / 2 + each / 2 + i * (each + gap)} ${y})`}>
           <g className="dice-body">
-            <DieShape die={roll.die} face={face} size={each} color={dieColour(roll.colours?.[i]) ?? color} />
+            {roll.colours ? <OrbShape face={face} size={each} /> : <DieShape die={roll.die} face={face} size={each} color={color} />}
           </g>
         </g>
       ))}
@@ -412,8 +445,8 @@ interface BoardProps {
   /** Racers to highlight, e.g. the target of a decision. */
   readonly highlight?: readonly RacerId[];
   readonly claimedSpaces?: readonly number[];
-  /** Spaces turned into TRIP spaces mid-race (Techies' mines), drawn over what they were. */
-  readonly tripSpaces?: readonly number[];
+  /** Tokens powers have left on spaces (Techies' mines, Invoker's Ice Wall), drawn in the corner. */
+  readonly tokens?: readonly BoardToken[];
   /** The latest roll, drawn as a die in the infield. */
   readonly roll?: ShownRoll | null;
   /** A power that just went off: its racer bursts and the infield calls it out. */
@@ -430,7 +463,7 @@ export function Board({
   positions,
   highlight = [],
   claimedSpaces = [],
-  tripSpaces = [],
+  tokens = [],
   roll = null,
   power = null,
   activeRacer = null,
@@ -546,8 +579,7 @@ export function Board({
         {track.spaces.map((space, i) => {
           const b = boxes[i] ?? { x: 0, y: 0, w: 0, h: 0 };
           const c = center(b);
-          const mined = tripSpaces.includes(space.index);
-          const e = mined ? ({ t: 'trip' } as const) : space.effect;
+          const e = space.effect;
           const isStart = space.index === 0;
           const claimed = e.t === 'star' && claimedSpaces.includes(space.index);
           const fill = isStart ? SPACE_COLORS[3] : SPACE_COLORS[(space.index - 1) % SPACE_COLORS.length];
@@ -593,7 +625,7 @@ export function Board({
               )}
               {e.t === 'trip' && (
                 <text className="glyph glyph-trip" x={c.x} y={c.y}>
-                  {mined ? 'MINE!' : 'TRIP!'}
+                  TRIP!
                 </text>
               )}
               {e.t === 'arrow' && (
@@ -612,7 +644,7 @@ export function Board({
                   : e.t === 'star'
                     ? `Space ${space.index}: star, 1 point${claimed ? ' (already taken)' : ''}`
                     : e.t === 'trip'
-                      ? `Space ${space.index}: trip${mined ? ' (mined)' : ''}`
+                      ? `Space ${space.index}: trip`
                       : e.t === 'arrow'
                         ? `Space ${space.index}: move ${e.amount > 0 ? 'forward' : 'back'} ${Math.abs(e.amount)}`
                         : `Space ${space.index}`}
@@ -630,6 +662,26 @@ export function Board({
                 />
               ))}
             </g>
+          );
+        })}
+
+        {tokens.map((token) => {
+          const b = boxes[token.pos];
+          if (!b) return null;
+          // Lined up leftward from the space's top-right corner, clear of its number.
+          const size = g.portrait ? 26 : 36;
+          const nth = tokens.filter((t) => t.pos === token.pos).indexOf(token);
+          const owner = view.board.find((r) => r.racerId === token.owner)?.owner;
+          return (
+            <TokenIcon
+              key={token.id}
+              token={token}
+              x={b.x + b.w - 5 - size / 2 - nth * (size + 3)}
+              y={b.y + 5 + size / 2}
+              size={size}
+              color={owner ? seatColor(view, owner) : '#ffc93c'}
+              by={racerName(view, token.owner)}
+            />
           );
         })}
 

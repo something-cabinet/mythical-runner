@@ -23,7 +23,7 @@ import type { ChoiceId, PlayerId, RacerId } from '../ids.js';
 import type { Job, MoveReason, ResumeDescriptor } from '../jobs.js';
 import type { Rng } from '../rng.js';
 import { pointsToken } from '../scoring.js';
-import { FINISHERS_PER_RACE } from '../state.js';
+import { FINISHERS_PER_RACE, type BoardToken } from '../state.js';
 import { FINISH, START, trackForRace, type RaceNumber } from '../tracks/index.js';
 import { type Ctx, findRacer, scoreOf } from './working.js';
 
@@ -486,9 +486,16 @@ function doMoveStep(ctx: Ctx, job: Extract<Job, { t: 'move' }>, rng: Rng): void 
     next = Math.max(START, Math.min(FINISH, next));
   }
 
+  // Invoker's Ice Wall: a step past the wall ends the move where it stands.
+  const walled = ctx.s.board.some(
+    (o) =>
+      o.racerId !== racer.racerId &&
+      !o.eliminated &&
+      hooksFor(ctx.s, o).haltsMove?.(makeHookCtx(ctx, rng, o), racer, job.origin, racer.pos, next) === true,
+  );
   // Grimstroke's Soulbind: a step that would take the racer out of reach of its partner
   // ends the move where it stands, like a clamp at Start.
-  if (leashHolds(ctx, rng, racer, racer.pos, next)) {
+  if (walled || leashHolds(ctx, rng, racer, racer.pos, next)) {
     job.remaining = 0;
     applyDisplacement(ctx, racer, rng);
     return settle();
@@ -668,9 +675,9 @@ function doSpaceEffect(ctx: Ctx, job: Extract<Job, { t: 'spaceEffect' }>, rng: R
   // Techies' mines sit on top of whatever the space was, and go off once: the racer that
   // sets one off trips instead of getting the space, and the space is its old self after.
   // Gone even if the trip is shrugged off (Templar Assassin) — the mine still went bang.
-  if (phase.tripSpaces.includes(job.pos)) {
-    phase.tripSpaces.splice(phase.tripSpaces.indexOf(job.pos), 1);
-    ctx.emit({ t: 'space/cleared', racerId: racer.racerId, pos: job.pos });
+  const mine = phase.tokens.find((t) => t.kind === MINE && t.pos === job.pos);
+  if (mine) {
+    removeToken(ctx, mine.id, racer.racerId);
     tripRacer(ctx, rng, racer, null);
     return;
   }
@@ -867,8 +874,6 @@ interface Thrown {
   readonly die: number;
   /** Each die's face, when several were combined into `face`. */
   readonly dice?: readonly number[];
-  /** Each die's colour, when coloured dice were summed (Invoker). */
-  readonly colours?: readonly string[];
 }
 
 /**
@@ -882,12 +887,7 @@ function rollDieOf(ctx: Ctx, rng: Rng, racer: MutableRacer, mainMove = true): Th
   const h = makeHookCtx(ctx, rng, racer);
   if (mainMove && hooks.throwDie) {
     const combined = hooks.throwDie(h);
-    return {
-      face: combined.face,
-      die: combined.sides,
-      dice: combined.dice,
-      ...(combined.colours ? { colours: combined.colours } : {}),
-    };
+    return { face: combined.face, die: combined.sides, dice: combined.dice };
   }
   const sides = hooks.dieSides?.(h) ?? 6;
   return { face: rng.roll(sides), die: sides };
@@ -902,7 +902,6 @@ function thrownEvent(racer: MutableRacer, thrown: Thrown, power?: RacerId): Game
     value: thrown.face,
     ...(thrown.die === 6 ? {} : { die: thrown.die }),
     ...(thrown.dice ? { dice: [...thrown.dice] } : {}),
-    ...(thrown.colours ? { colours: [...thrown.colours] } : {}),
     ...(power ? { power } : {}),
   };
 }
@@ -923,6 +922,20 @@ export function awardFor(
   const next = fn(makeHookCtx(ctx, rng, earner), value, source);
   invariant(!ctx.s.pending, `${earner.racerId} asked a question from modifyAward`);
   return next;
+}
+
+/** The token kind the engine itself sets off: Techies' mine. */
+const MINE = 'mine';
+
+/** Takes token `id` off the board, if it is still there. `by` set it off, when a racer did. */
+export function removeToken(ctx: Ctx, id: number, by?: RacerId): void {
+  const phase = ctx.s.phase;
+  if (phase.t !== 'racing') return;
+  const at = phase.tokens.findIndex((t) => t.id === id);
+  const token = phase.tokens[at];
+  if (!token) return;
+  phase.tokens.splice(at, 1);
+  ctx.emit({ t: 'boardToken/removed', id, name: token.name, pos: token.pos, ...(by ? { by } : {}) });
 }
 
 function doResume(ctx: Ctx, job: Extract<Job, { t: 'resume' }>, rng: Rng): void {
@@ -1073,12 +1086,30 @@ export function makeHookCtx(ctx: Ctx, rng: Rng, self: MutableRacer): HookCtx {
     mineSpace: (pos) => {
       const phase = ctx.s.phase;
       if (phase.t !== 'racing' || pos <= START || pos >= FINISH) return false;
-      if (phase.tripSpaces.includes(pos)) return false;
+      if (phase.tokens.some((t) => t.kind === MINE && t.pos === pos)) return false;
       if (trackForRace(phase.raceNo as RaceNumber).spaces[pos]?.effect.t === 'trip') return false;
-      phase.tripSpaces.push(pos);
-      ctx.emit({ t: 'space/mined', racerId: self.racerId, pos });
-      return true;
+      return h.placeToken(MINE, 'Mine', pos) !== null;
     },
+
+    tokens: () => (ctx.s.phase.t === 'racing' ? ctx.s.phase.tokens : []),
+
+    placeToken: (kind, name, pos, turns) => {
+      const phase = ctx.s.phase;
+      if (phase.t !== 'racing') return null;
+      const token: BoardToken = {
+        id: Math.max(0, ...phase.tokens.map((t) => t.id)) + 1,
+        kind,
+        name,
+        pos,
+        owner: self.racerId,
+        ...(turns !== undefined ? { turns } : {}),
+      };
+      phase.tokens.push(token);
+      ctx.emit({ t: 'boardToken/placed', token });
+      return token;
+    },
+
+    removeToken: (id, by) => removeToken(ctx, id, by),
 
     defer: (key, data) => {
       ctx.s.queue.unshift({

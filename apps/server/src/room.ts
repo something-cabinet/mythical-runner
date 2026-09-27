@@ -10,6 +10,7 @@ import {
   legalActions,
   MAX_PLAYERS,
   playerId as toPlayerId,
+  racerId as toRacerId,
   redact,
   type Action,
   type ClientAction,
@@ -120,15 +121,27 @@ export class RoomDO extends DurableObject<Env> {
       this.meta = (stored.get('meta') as Meta | undefined) ?? null;
       const saved = stored.get('state') as GameState | undefined;
       // Rooms saved before character sets existed drafted from the classic set, a race
-      // saved before extra turns had their own queue owes none, and one saved before
-      // Techies has no mines.
+      // saved before extra turns had their own queue owes none, one saved before Techies
+      // has no mines, and one saved before board tokens keeps its mines as bare spaces.
       this.state = saved
         ? {
             ...saved,
             racerSets: saved.racerSets ?? DEFAULT_SETS,
             phase:
               saved.phase.t === 'racing'
-                ? { ...saved.phase, extraTurns: saved.phase.extraTurns ?? [], tripSpaces: saved.phase.tripSpaces ?? [] }
+                ? {
+                    ...saved.phase,
+                    extraTurns: saved.phase.extraTurns ?? [],
+                    tokens:
+                      saved.phase.tokens ??
+                      ((saved.phase as { tripSpaces?: number[] }).tripSpaces ?? []).map((pos, i) => ({
+                        id: i + 1,
+                        kind: 'mine',
+                        name: 'Mine',
+                        pos,
+                        owner: toRacerId('techies'),
+                      })),
+                  }
                 : saved.phase,
           }
         : null;

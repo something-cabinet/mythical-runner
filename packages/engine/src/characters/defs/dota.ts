@@ -1234,44 +1234,226 @@ const kez = def(
 );
 
 /**
- * INVOKE — "Before my main move, I choose a colour: blue, pink or orange. I roll 3 dice,
- * each landing on a random colour, and move the sum of the dice showing my colour."
+ * INVOKE — "I can skip my main move to roll 3 dice that each land blue, pink or orange,
+ * and cast one of 10 spells. Ready again 2 turns later."
  *
- * Anywhere from 0 to 18. The colour is chosen every turn and kept until the next pick; blue
- * until the first. Main moves only — a duel or a bash is one plain d6.
+ * Three orbs, ten mixes, ten spells, as in Dota: blue is Quas, pink Wex, orange Exort. Only
+ * a pink orb moves me, only an orange one trips anyone, and a blue one pushes back.
+ *
+ *  - Choosing Invoke is the throw: the orbs land straight away and the spell goes off.
+ *  - Cast on turn T, it is ready again on turn T+2 — every other turn at most. Not
+ *    offered on a tripped turn, which has no main move to skip.
+ *  - A spell that moves me and then acts (Tornado, Chaos Meteor, Deafening Blast) acts from
+ *    wherever that move settles — and not at all once I've crossed the finish line.
+ *  - "Until my next turn" (Ghost Walk, Ice Wall) ends as that turn begins.
+ *  - Ice Wall stops a racer that began its move behind the wall and would step past it.
+ *    Forward moves only: going back over a racer is not passing them, nor is it passing a
+ *    wall.
+ *  - Forge Spirit guards the space it was summoned on, not wherever I go next: for the rest
+ *    of that turn and my next 3.
  */
-const INVOKER_COLOURS = ['blue', 'pink', 'orange'] as const;
-const invoker = def(
+const INVOKE_COOLDOWN = 2;
+const ORBS = ['blue', 'pink', 'orange'] as const;
+type Orb = (typeof ORBS)[number];
+/**
+ * The spells, each by its orbs counted out as blues, then pinks, then oranges — the one
+ * table both the casting and the reference card read.
+ */
+const SPELLS = [
+  { orbs: 'bbb', name: 'Cold Snap', text: 'Push any racer back 6.' },
+  { orbs: 'ppp', name: 'EMP', text: 'I move 6. Racers I pass lose their powers for 1 turn.' },
+  { orbs: 'ooo', name: 'Sun Strike', text: 'Pick a space: every racer on it trips.' },
+  { orbs: 'bbp', name: 'Ghost Walk', text: "I move 2, and can't be tripped until my next turn." },
+  { orbs: 'bbo', name: 'Ice Wall', text: 'Until my next turn, racers who would pass my space stop there and trip.' },
+  { orbs: 'bpp', name: 'Tornado', text: 'I move 4, then racers within 2 spaces of me go back 2.' },
+  { orbs: 'ppo', name: 'Alacrity', text: 'I move 4, and get +2 to my next main move.' },
+  { orbs: 'boo', name: 'Forge Spirit', text: 'For my next 3 turns, racers who stop on my space or next to it trip.' },
+  { orbs: 'poo', name: 'Chaos Meteor', text: 'I move 2, then racers on the 3 spaces ahead of me trip.' },
+  { orbs: 'bpo', name: 'Deafening Blast', text: 'I move 2, then racers on the 3 spaces ahead of me go back 2.' },
+] as const;
+type Spell = (typeof SPELLS)[number]['name'];
+const ORB_OF = { b: 'blue', p: 'pink', o: 'orange' } as const;
+/** Token kinds: the Ice Wall and the Forge Spirit stand on the board as tokens. */
+const ICE_WALL = 'iceWall';
+const FORGE_SPIRIT = 'forgeSpirit';
+/** `memo` key: Alacrity waiting to be spent. */
+const ALACRITY = 'alacrity';
+
+const invokerDef = def(
   'invoker',
   'Invoker',
-  'Before my main move, I pick blue, pink or orange. I roll 3 dice that each land on a random colour, and move the total of the dice in my colour (0 to 18).',
+  `I can skip my main move to roll 3 dice that each land blue, pink or orange, and cast one of 10 spells. Ready again ${INVOKE_COOLDOWN} turns later.`,
   {
     beforeMainMove: (h) => {
-      if (!isRunning(h.self) || h.self.tripped) return;
-      const current = String(h.self.memo['invokeColour'] ?? 'blue');
+      // "Until my next turn" is up.
+      stopTimer(h, 'ghostWalk');
+      for (const wall of ownTokens(h, ICE_WALL)) h.removeToken(wall.id);
+      if (!isRunning(h.self) || h.self.tripped || timerLeft(h.self, 'invoke') > 0) return;
       h.ask({
         player: h.self.owner,
-        prompt: 'Invoke which colour?',
-        options: INVOKER_COLOURS.map((c) => option(c, c[0]!.toUpperCase() + c.slice(1))),
+        prompt: `Invoke? Skip your roll to throw 3 orbs and cast the spell they make. Ready again ${INVOKE_COOLDOWN} turns later.`,
+        options: [option('invoke', 'Invoke'), option('roll', 'Roll normally')],
         key: 'invoke',
-        defaultChoice: current as ChoiceId,
+        defaultChoice: 'roll' as ChoiceId,
       });
     },
     resume: (h, key, choice) => {
-      if (key !== 'invoke' || !(INVOKER_COLOURS as readonly string[]).includes(String(choice))) return;
-      h.self.memo['invokeColour'] = String(choice);
+      if (key === 'invoke' && choice === ('invoke' as ChoiceId)) invoke(h);
+      else if (key === 'coldSnap') {
+        const victim = h.running().find((r) => choice === (`snap:${r.racerId}` as ChoiceId));
+        if (victim) h.move(victim, -6);
+      } else if (key === 'sunStrike') {
+        const pos = Number(String(choice).slice('strike:'.length));
+        for (const r of h.running().filter((r) => r.pos === pos)) h.trip(r);
+      } else if (key === 'Tornado' || key === 'Chaos Meteor' || key === 'Deafening Blast') aftershock(h, key);
     },
-    throwDie: (h) => {
-      const colour = String(h.self.memo['invokeColour'] ?? 'blue');
-      const dice = [0, 1, 2].map(() => ({ face: h.rng.roll(6), colour: INVOKER_COLOURS[h.rng.roll(3) - 1]! }));
-      const face = dice.filter((d) => d.colour === colour).reduce((sum, d) => sum + d.face, 0);
-      h.log(
-        `${h.nameOf(h.self)} invokes ${colour}: ${dice.map((d) => `${d.colour} ${d.face}`).join(', ')} — ${face}.`,
-      );
-      return { face, sides: 6, dice: dice.map((d) => d.face), colours: dice.map((d) => d.colour) };
+    modifyMainMove: (h, value, mover) => {
+      if (mover.racerId !== h.self.racerId || h.self.memo[ALACRITY] !== true) return value;
+      delete h.self.memo[ALACRITY];
+      h.log(`${h.nameOf(h.self)}'s Alacrity: +2.`);
+      return value + 2;
+    },
+    ignoresTrip: (h) => {
+      if (timerLeft(h.self, 'ghostWalk') === 0) return false;
+      h.log(`${h.nameOf(h.self)} ghost walks through the trip.`);
+      return true;
+    },
+    haltsMove: (h, mover, origin, from, to) => {
+      const hit = ownTokens(h, ICE_WALL).some(({ pos }) => origin < pos && from <= pos && to > pos);
+      if (!hit) return false;
+      h.log(`${h.nameOf(mover)} runs into the Ice Wall!`);
+      h.trip(mover);
+      return true;
+    },
+    onOtherStops: (h, other) => {
+      if (other.tripped || !h.running().some((r) => r.racerId === other.racerId)) return;
+      if (!ownTokens(h, FORGE_SPIRIT).some(({ pos }) => Math.abs(other.pos - pos) <= 1)) return;
+      h.log(`The Forge Spirit burns ${h.nameOf(other)}!`);
+      h.trip(other);
+    },
+    onPass: (h, passed) => {
+      if (timerLeft(h.self, 'emp') === 0) return;
+      h.log(`${h.nameOf(h.self)}'s EMP drains ${h.nameOf(passed)}.`);
+      h.silence(passed, 1);
     },
   },
 );
+
+const invoker: RacerDef = {
+  ...invokerDef,
+  reference: {
+    intro: 'The colours of the 3 dice pick the spell, in any order.',
+    entries: SPELLS.map(({ orbs, name, text }) => ({
+      name,
+      text,
+      swatches: [...orbs].map((o) => ORB_OF[o as keyof typeof ORB_OF]),
+    })),
+  },
+};
+
+/** Throws Invoker's three orbs and casts the spell they make. */
+function invoke(h: HookCtx): void {
+  h.skipMainMove();
+  startTimer(h, 'invoke', INVOKE_COOLDOWN);
+  const faces = [0, 1, 2].map(() => h.rng.roll(3));
+  const orbs = faces.map((f) => ORBS[f - 1]!);
+  h.emit({
+    t: 'dice/thrown',
+    player: h.self.owner,
+    racerId: h.self.racerId,
+    value: 0,
+    die: 3,
+    dice: faces,
+    colours: orbs,
+    power: h.self.racerId,
+  });
+  const count = (orb: Orb): number => orbs.filter((o) => o === orb).length;
+  const pink = count('pink');
+  const key = 'b'.repeat(count('blue')) + 'p'.repeat(pink) + 'o'.repeat(count('orange'));
+  const spell: Spell = SPELLS.find((s) => s.orbs === key)!.name;
+  h.log(`${h.nameOf(h.self)} invokes ${spell}!`);
+
+  switch (spell) {
+    case 'Cold Snap': {
+      // A racer on Start can't be pushed any further back.
+      const targets = h.running().filter((r) => r.racerId !== h.self.racerId && r.pos > START);
+      if (targets.length === 0) break;
+      h.ask({
+        player: h.self.owner,
+        prompt: 'Cold Snap: push which racer back 6?',
+        options: targets.map((r) => option(`snap:${r.racerId}`, h.nameOf(r), racerTarget(r.racerId))),
+        key: 'coldSnap',
+      });
+      break;
+    }
+    case 'Sun Strike': {
+      const spaces = [...new Set(h.running().filter((r) => !r.tripped).map((r) => r.pos))].sort((a, b) => a - b);
+      if (spaces.length === 0) break;
+      h.ask({
+        player: h.self.owner,
+        prompt: 'Sun Strike: every racer on the space you pick trips.',
+        options: spaces.map((p) =>
+          option(
+            `strike:${p}`,
+            `Space ${p}: ${h.running().filter((r) => r.pos === p).map((r) => h.nameOf(r)).join(', ')}`,
+            { t: 'space', index: p },
+          ),
+        ),
+        key: 'sunStrike',
+      });
+      break;
+    }
+    case 'EMP':
+      startTimer(h, 'emp', 1);
+      break;
+    case 'Ghost Walk':
+      startTimer(h, 'ghostWalk', 2);
+      break;
+    case 'Ice Wall':
+      // Two turns at most, in case my next turn's `beforeMainMove` never comes (silenced).
+      h.placeToken(ICE_WALL, 'Ice Wall', h.self.pos, 2);
+      break;
+    case 'Alacrity':
+      h.self.memo[ALACRITY] = true;
+      break;
+    case 'Forge Spirit':
+      h.placeToken(FORGE_SPIRIT, 'Forge Spirit', h.self.pos, 4);
+      break;
+    case 'Tornado':
+    case 'Chaos Meteor':
+    case 'Deafening Blast':
+      // Deferred first, so it comes due once the move below has settled.
+      h.defer(spell);
+      break;
+  }
+  h.move(h.self, pink * 2);
+}
+
+/** The second half of a spell that moves Invoker first, from where that move settled. */
+function aftershock(h: HookCtx, spell: 'Tornado' | 'Chaos Meteor' | 'Deafening Blast'): void {
+  if (!h.running().some((r) => r.racerId === h.self.racerId)) return;
+  const others = h.running().filter((r) => r.racerId !== h.self.racerId);
+  const ahead = others.filter((r) => r.pos > h.self.pos && r.pos <= h.self.pos + 3);
+  if (spell === 'Chaos Meteor') {
+    for (const r of ahead) h.trip(r);
+    return;
+  }
+  const pushed = spell === 'Tornado' ? others.filter((r) => near(h.self, r, 5) && r.pos > START) : ahead;
+  // Moves are queued at the front, so queue in reverse to push in board order.
+  for (const r of [...pushed].reverse()) h.move(r, -2);
+}
+
+/** `self`'s tokens of one kind on the board — a snapshot, so removing them as it goes is safe. */
+function ownTokens(h: HookCtx, kind: string) {
+  return h.tokens().filter((t) => t.owner === h.self.racerId && t.kind === kind);
+}
+
+/** Ends `self`'s timer `name` early. */
+function stopTimer(h: HookCtx, name: string): void {
+  const timers = { ...((h.self.memo[TIMERS] ?? {}) as Record<string, number>) };
+  delete timers[name];
+  h.self.memo[TIMERS] = timers;
+}
 
 /**
  * CROAK OF GENIUS — "My main move gets +1 for each racer on my space, me included. Every

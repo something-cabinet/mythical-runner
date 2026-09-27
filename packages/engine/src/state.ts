@@ -169,10 +169,10 @@ export type Phase =
        */
       readonly claimedSpaces: readonly number[];
       /**
-       * Techies' mines, each waiting for the next racer to stop on it. While armed, the
-       * space's own effect, star or arrow, does nothing; a mine that goes off is removed.
+       * Tokens powers have left on spaces, in the order they were placed: Techies' mines,
+       * Invoker's Ice Wall and Forge Spirit. See `BoardToken`.
        */
-      readonly tripSpaces: readonly number[];
+      readonly tokens: readonly BoardToken[];
       /**
        * Racers that take the next turns out of order, first to last: Skipper's "I go next
        * in turn order". Consumed one per hand-off, once the current player's team has
@@ -295,3 +295,27 @@ export type RedactedPhase =
     };
 
 export type RedactedPending = Omit<PendingDecision, 'resume'>;
+
+/**
+ * A token a power leaves on a space for the rest of the race to run into, drawn on the
+ * board as a square with its name on it. The power that placed it gives it meaning, save
+ * for a mine, which the engine sets off: while armed it stands in for the space's own
+ * effect, and the next racer to stop there trips and takes it away.
+ */
+export interface BoardToken {
+  /** Unique within the race. */
+  readonly id: number;
+  /** What it is, for the powers that act on it: `mine`, `iceWall`, `forgeSpirit`. */
+  readonly kind: string;
+  /** Written on the token. */
+  readonly name: string;
+  readonly pos: number;
+  /** The racer whose power placed it. */
+  readonly owner: RacerId;
+  /**
+   * How many of its owner's turns it has left, the current one included — ticked off at
+   * the end of each, like a timer, and the token is gone at 0. Absent for a token that
+   * stays until something removes it.
+   */
+  readonly turns?: number;
+}

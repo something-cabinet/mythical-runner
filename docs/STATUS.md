@@ -247,8 +247,7 @@ pieces added for wave 2, worth knowing before touching a power:
   "Once per round" was ruled to mean once per race.
   The second wave of six (Bloodseeker to Abaddon) added: `dieSides` and `h.rollDie` (Chaos
   Knight's d20, used for its main move, rerolls and any power that has it roll);
-  `phase.tripSpaces` with `h.mineSpace` (Techies — a mine replaces the space's own effect,
-  and the board draws it as MINE!); and `h.defer`, which re-enters a power's `resume`
+  `h.mineSpace` (Techies — a mine replaces the space's own effect); and `h.defer`, which re-enters a power's `resume`
   once the current work is done, so Abaddon can ask a question in reaction to a trip.
 
 - **Sound** — synthesised with Web Audio in
@@ -276,3 +275,16 @@ limits hard stops rather than bills. The game is now worth deploying.
   records full URLs. Acceptable for a friends' game.
 - **Legal:** a commercial, in-print game. Private play is fine; publishing with the real racer
   names and artwork is not. Worth remembering before deploying to a public URL.
+
+- **Board tokens** — `phase.tokens` holds markers powers leave on spaces (`BoardToken`:
+  kind, name, space, owning racer, and optionally how many of the owner's turns it lasts).
+  Powers use `h.placeToken`, `h.removeToken` and `h.tokens`; timed tokens tick down with
+  the owner's turns and leave with `boardToken/removed`. The engine itself only acts on
+  `mine` tokens (Techies); Invoker's Ice Wall and Forge Spirit are tokens its own hooks
+  read. The board draws each as a small square in the owner's seat colour with its name.
+
+- **Reference cards** — a racer whose detail is too long to read at a glance keeps it on
+  `RacerDef.reference` (an optional intro, then named entries, each with optional colour
+  swatches), and its `text` becomes the gist. The client shows a Reference button on its
+  racer card (draft, commit, choices) and in the race's "On the track" list, opening the
+  card in a native `<dialog>`. Invoker's ten spells are the first.

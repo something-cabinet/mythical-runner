@@ -8,7 +8,7 @@ import { FINISH, START, type RaceNumber } from '../tracks/index.js';
 import { FINISHERS_PER_RACE, RACE_COUNT, racersPerRace } from '../state.js';
 import { beginCommit } from './commit.js';
 import { hooksFor, SILENCED, silencedTurns, SOULBIND, TIMERS } from '../characters/powers.js';
-import { awardFor, makeHookCtx, runQueue } from './pipeline.js';
+import { awardFor, makeHookCtx, removeToken, runQueue } from './pipeline.js';
 import { activeRacers, findRacer, racersOf, type Ctx, scoreOf, seatAt } from './working.js';
 
 /**
@@ -34,7 +34,7 @@ export function beginRacing(ctx: Ctx, raceNo: RaceNumber, rng: Rng): void {
     finished: [],
     stalledTurns: 0,
     claimedSpaces: [],
-    tripSpaces: [],
+    tokens: [],
     nextUp: [],
     extraTurns: [],
     turn: 0,
@@ -255,6 +255,14 @@ export function endTurn(ctx: Ctx, rng: Rng): void {
     );
     if (Object.keys(left).length > 0) hushed.memo[TIMERS] = left;
     else delete hushed.memo[TIMERS];
+  }
+  // Its timed tokens tick with it.
+  if (hushed) {
+    for (const token of [...phase.tokens]) {
+      if (token.owner !== hushed.racerId || token.turns === undefined) continue;
+      if (token.turns > 1) phase.tokens[phase.tokens.indexOf(token)] = { ...token, turns: token.turns - 1 };
+      else removeToken(ctx, token.id);
+    }
   }
 
   if (phase.finished.length >= FINISHERS_PER_RACE) {
