@@ -153,6 +153,12 @@ const SPRITE_FILES: Readonly<Record<string, string>> = {
   'meepo-2': 'dota2/meepo.png',
   'meepo-3': 'dota2/meepo.png',
   'meepo-4': 'dota2/meepo.png',
+  lion: 'dota2/lion.png',
+  necrophos: 'dota2/necrophos.png',
+  'wraith-king': 'dota2/wraith-king.png',
+  'vengeful-spirit': 'dota2/vengeful-spirit.png',
+  weaver: 'dota2/weaver.png',
+  terrorblade: 'dota2/terrorblade.png',
 };
 
 const SPRITE_DIR = '/character_sprite';
@@ -218,7 +224,7 @@ export function borrowedPower(view: PlayerView, racer: RacerState): RacerId | nu
 /**
  * A limited-use power's remaining charges or cooldown, for the lists: Templar Assassin's
  * Refraction, Silencer's Global Silence, and the cooldowns on Faceless Void's Chronosphere,
- * Storm Spirit's d20 and Sven's God's Strength. Null for every other card.
+ * Storm Spirit's d20, Sven's God's Strength and Wraith King's Reincarnation. Null for every other card.
  *
  * `power` is the card the racer is running (see `borrowedPower`), so a Morphling borrowing
  * one shows it too. The counts come from the same `memo` keys the powers write.
@@ -243,10 +249,12 @@ export function abilityToken(
       return cooldownToken(racer, 'polarity', 'polarity', 'Reverse Polarity');
     case 'grimstroke':
       return cooldownToken(racer, 'soulbind', 'soulbind', 'Soulbind');
+    case 'wraith-king':
+      return cooldownToken(racer, 'reincarnation', 'reincarnation', 'Reincarnation');
     case 'lina': {
       const stacks = typeof racer.memo['fierySoul'] === 'number' ? (racer.memo['fierySoul'] as number) : 0;
       return {
-        label: `fiery soul ${stacks}/8`,
+        label: `fiery soul ${stacks}/6`,
         ready: stacks >= 2,
         title: `Fiery Soul: ${stacks} stack${stacks === 1 ? '' : 's'}, +${Math.floor(stacks / 2)} to her main move`,
       };
@@ -257,7 +265,7 @@ export function abilityToken(
         return {
           label: `strength ${active}`,
           ready: true,
-          title: `God's Strength: +3 for ${active === 1 ? 'this turn' : `${active} more turns`}`,
+          title: `God's Strength: +2 for ${active === 1 ? 'this turn' : `${active} more turns`}`,
         };
       }
       return cooldownToken(racer, 'strengthCooldown', 'strength', "God's Strength");

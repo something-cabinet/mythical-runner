@@ -149,7 +149,9 @@ export function LobbyScreen() {
                   </span>
                   <span className="set-text">
                     <span className="set-name">{set.name}</span>
-                    <span className="muted">{set.text}</span>
+                    <span className="muted">
+                      {set.text.replace('{count}', String(racersInSets([set.id]).length))}
+                    </span>
                   </span>
                 </button>
               );

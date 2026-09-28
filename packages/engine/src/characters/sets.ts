@@ -5,9 +5,10 @@
  * every racer in the chosen sets. Adding a set means adding it here and giving its racers
  * that `set` in their definitions — nothing else in the engine names a set.
  */
+/** `text` is the lobby blurb; `{count}` stands for how many racers the set holds. */
 export const CHARACTER_SETS = [
-  { id: 'classic', name: 'Classic', text: 'The 36 racers from the Magical Athlete box.' },
-  { id: 'dota', name: 'Dota', text: '44 heroes from Dota 2.' },
+  { id: 'classic', name: 'Classic', text: 'The {count} racers from the Magical Athlete box.' },
+  { id: 'dota', name: 'Dota', text: '{count} heroes from Dota 2.' },
 ] as const;
 
 export type CharacterSetId = (typeof CHARACTER_SETS)[number]['id'];

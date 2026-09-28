@@ -1600,7 +1600,7 @@ scenario('Sets — a new room drafts from the classic set, and the host can mix 
   );
 });
 
-scenario('Sets — Dota alone has 44 racers: enough for six players', () => {
+scenario('Sets — Dota alone has 50 racers: enough for six players', () => {
   const lobby = lobbyWith('p1', 'p2', 'p3', 'p4', 'p5');
   const five = applyAction(applyAction(lobby, toggle('p1', 'dota')).state, toggle('p1', 'classic')).state;
   check(
@@ -1608,7 +1608,7 @@ scenario('Sets — Dota alone has 44 racers: enough for six players', () => {
     'five players may start',
   );
 
-  // Six players draft 24 racers, which the set now covers with fourteen to spare — so an
+  // Six players draft 24 racers, which the set now covers with twenty-six to spare — so an
   // Egg still has somewhere to hatch from in a Dota-only game.
   const six = applyAction(five, { t: 'lobby/join', by: playerId('p6'), name: 'P6' }).state;
   check(
@@ -1618,7 +1618,7 @@ scenario('Sets — Dota alone has 44 racers: enough for six players', () => {
   const dealt = playGame({ seed: 9200, playerCount: 6, sets: ['dota'] }).state;
   const hands = Object.values(dealt.hands).flat();
   check(hands.length === 24, 'six full hands', String(hands.length));
-  check(racersInSets(['dota']).length - hands.length === 20, 'with twenty left undrafted');
+  check(racersInSets(['dota']).length - hands.length === 26, 'with twenty-six left undrafted');
 });
 
 scenario('Sets — the draft deals only from the chosen sets', () => {
@@ -3273,6 +3273,134 @@ scenario('Grimstroke — the Soulbind stops a move, shortens a warp, snaps on a 
   );
   const next = applyAction(own, roll('p1'));
   check(racerAt(next.state, 'grimstroke')?.memo['soulbind'] === undefined, "Grimstroke's next turn ends the link");
+});
+
+scenario('Lion — drains -1 from racers nearby, and gets +1 for each', () => {
+  const slowed = raceState(
+    [
+      { player: 'p1', racer: 'vanilla-01', pos: 5 },
+      { player: 'p2', racer: 'lion', pos: 6 },
+    ],
+    'p1',
+  );
+  check(rolledOf(rollFor(slowed, 'p1', 3).events).natural === 4, 'next to Lion: a 4 becomes a move of 3');
+
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'lion', pos: 5 },
+      { player: 'p2', racer: 'vanilla-01', pos: 5 },
+      { player: 'p3', racer: 'vanilla-02', pos: 6 },
+      { player: 'p4', racer: 'vanilla-03', pos: 8 },
+    ],
+    'p1',
+  );
+  const moved = rollFor(s, 'p1', 5);
+  check(rolledOf(moved.events).natural === 3, 'two racers in reach: a 3 becomes a move of 5', logLines(moved.events));
+});
+
+scenario('Necrophos — removes a tripped rival on the space just ahead, before or after the main move', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'necrophos', pos: 4 },
+      { player: 'p1', racer: 'vanilla-02', pos: 5, tripped: true },
+      { player: 'p2', racer: 'vanilla-01', pos: 5, tripped: true },
+      { player: 'p3', racer: 'vanilla-03', pos: 6, tripped: true },
+    ],
+    'p1',
+  );
+  const before = applyAction(s, roll('p1', 'necrophos'));
+  check(racerAt(before.state, 'vanilla-01')?.eliminated === true, 'the tripped rival just ahead is reaped', logLines(before.events));
+  check(racerAt(before.state, 'vanilla-02')?.eliminated === false, 'a teammate is spared');
+  check(racerAt(before.state, 'vanilla-03')?.eliminated === false, 'and once a turn is all');
+
+  const after = raceState(
+    [
+      { player: 'p1', racer: 'necrophos', pos: 1 },
+      { player: 'p2', racer: 'vanilla-01', pos: 5, tripped: true },
+    ],
+    'p1',
+  );
+  check(racerAt(rollFor(after, 'p1', 3).state, 'vanilla-01')?.eliminated === true, 'landing just behind them reaps them after the move');
+  check(racerAt(rollFor(after, 'p1', 2).state, 'vanilla-01')?.eliminated === false, 'but not from two spaces back');
+});
+
+scenario('Wraith King — stands straight back up from a trip, then cools down', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'wraith-king', pos: 1 },
+      { player: 'p2', racer: 'banana', pos: 3 },
+    ],
+    'p1',
+  );
+  const up = rollFor(s, 'p1', 5);
+  check(has(up.events, 'racer/tripped') && racerAt(up.state, 'wraith-king')?.tripped === false, 'tripped by Banana, and back up', logLines(up.events));
+  check((racerAt(up.state, 'wraith-king')?.memo['timers'] as Record<string, number> | undefined)?.['reincarnation'] === 3, 'ready again 4 turns later, this one counted');
+
+  const cooling = raceState(
+    [
+      { player: 'p1', racer: 'wraith-king', pos: 1, memo: { timers: { reincarnation: 2 } } },
+      { player: 'p2', racer: 'banana', pos: 3 },
+    ],
+    'p1',
+  );
+  check(racerAt(rollFor(cooling, 'p1', 5).state, 'wraith-king')?.tripped === true, 'on cooldown, it stays down');
+});
+
+scenario('Vengeful Spirit — skips its move to swap spaces with another racer', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'vengeful-spirit', pos: 2 },
+      { player: 'p2', racer: 'vanilla-01', pos: 9 },
+    ],
+    'p1',
+  );
+  const asked = applyAction(s, roll('p1'));
+  check(asked.state.pending?.options.some((o) => String(o.id) === 'swap:vanilla-01') === true, 'offered the swap', asked.state.pending?.prompt);
+  const swapped = applyAction(asked.state, decide('p1', 'swap:vanilla-01'));
+  check(posOf(swapped.state, 'vengeful-spirit') === 9 && posOf(swapped.state, 'vanilla-01') === 2, 'they trade places');
+  check(!has(swapped.events, 'dice/rolled'), 'instead of rolling');
+});
+
+scenario('Weaver — +2 to its main move, and a trip sends it back to Start', () => {
+  const clear = raceState(
+    [
+      { player: 'p1', racer: 'weaver', pos: 1 },
+      { player: 'p2', racer: 'vanilla-01', pos: 20 },
+    ],
+    'p1',
+  );
+  check(rolledOf(rollFor(clear, 'p1', 5).events).natural === 3, 'a 3 moves 5');
+
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'weaver', pos: 1 },
+      { player: 'p2', racer: 'banana', pos: 3 },
+    ],
+    'p1',
+  );
+  const home = rollFor(s, 'p1', 5);
+  check(posOf(home.state, 'weaver') === START && racerAt(home.state, 'weaver')?.tripped === true, 'tripped by Banana, it lands on Start', logLines(home.events));
+});
+
+scenario('Terrorblade — can pass its trip to a standing racer within 3 spaces', () => {
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'terrorblade', pos: 1 },
+      { player: 'p2', racer: 'banana', pos: 3 },
+      { player: 'p3', racer: 'vanilla-01', pos: 9 },
+      { player: 'p4', racer: 'vanilla-02', pos: 10 },
+    ],
+    'p1',
+  );
+  const down = rollFor(s, 'p1', 5);
+  const offered = down.state.pending?.options.map((o) => String(o.id)) ?? [];
+  check(offered.includes('sunder:vanilla-01') && offered.includes('sunder:banana'), 'offered racers within 3', offered.join(','));
+  check(!offered.includes('sunder:vanilla-02'), 'but not one 4 away');
+  const sundered = applyAction(down.state, decide('p1', 'sunder:vanilla-01'));
+  check(racerAt(sundered.state, 'vanilla-01')?.tripped === true, 'they go down');
+  check(racerAt(sundered.state, 'terrorblade')?.tripped === false, 'and Terrorblade is back up');
+  const stayed = applyAction(down.state, decide('p1', 'pass'));
+  check(racerAt(stayed.state, 'terrorblade')?.tripped === true, 'or it stays down');
 });
 
 // --- Report -----------------------------------------------------------------

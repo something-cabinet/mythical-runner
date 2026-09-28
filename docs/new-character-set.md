@@ -36,7 +36,7 @@
 - Earth Spirit: Before my main move, I can kick one racer on my space 3 spaces forward or back.
 - Void Spirit: Before my main move, I can move any other racer 1 space forward or backward.
 - Lich: After my main move, I pull every other racer to my space. Not from the finish line.
-- Magnus: Before or after my main move, I can warp every racer within 5 spaces to my space. Ready again 4 turns later.
+- Magnus: Before or after my main move, I can warp every racer within 2 spaces to my space. Ready again 4 turns later.
 - Underlord: I can skip my main move to _warp_ to any other racer's space.
 - Doom: Other racers on my space or next to it have no powers, except on the Start space.
 - Sven: Before my main move, I can get +2 to my main move this turn and my next 2. Ready again 6 turns later.
@@ -60,8 +60,9 @@
 - Grimstroke: Before my main move, I can bind two racers within 5 spaces of each other, me included. Until my next turn, neither can get more than 5 spaces from the other. If the link would have to hold them back forever, it snaps. Ready again 4 turns later.
 - Arc Warden: I roll two d6s and move whichever one I choose.
 - Meepo: I race as 4 Meepos. On my turn, each Meepo rolls its own die and moves on its own. I finish as soon as any one Meepo crosses the finish line.
-- Lion: Every racer on my space or next to it get -1 to their main move, and I get + 1 for each racer affected.
-- Necrophose: Before or after my move, if the racer right in front of me is tripped, I remove them from the game.
-- Wrath King: If I tripped, I stand up immediately. Ready again in 4 turns later.
-- Vengeful Spirit: I can skip my main move to swap space with another racer.
-- Weaver: I get +2 to my main move. If I tripped, I warp back to the Start space.
+- Lion: Other racers on my space or next to it get -1 to their main move. I get +1 to mine for each of them.
+- Necrophos: Before or after my main move, if a rival on the space right in front of me is tripped, I remove them from the race.
+- Wraith King: If I trip, I stand right back up. Ready again 4 turns later.
+- Vengeful Spirit: I can skip my main move to swap spaces with another racer.
+- Weaver: I get +2 to my main move. If I trip, I warp back to the Start space.
+- Terrorblade: If I trip and a racer within 3 spaces of me is standing, I can make them trip for me instead.

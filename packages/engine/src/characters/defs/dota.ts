@@ -6,7 +6,7 @@ import { LEASH, MAIN_MOVE_BONUS, SOULBIND, timerLeft, TIMERS, type Soulbind } fr
 import { defFor, isRunning } from './shared.js';
 
 /**
- * The Dota set: forty-four heroes from Dota 2, designed in `docs/new-character-set.md`.
+ * The Dota set: fifty heroes from Dota 2, designed in `docs/new-character-set.md`.
  *
  * Same conventions as the classic set: optional ("I can") powers ask and default to
  * declining, log lines name racers with `h.nameOf`, and one `h.log` per happening.
@@ -15,10 +15,10 @@ import { defFor, isRunning } from './shared.js';
  *
  *  - "Once per round" (Silencer) means once per race: a one-shot ultimate, cast before the
  *    owner's main move.
- *  - An "N-turn cooldown" (Faceless Void, Storm Spirit, Sven, Juggernaut, Grimstroke) counts the racer's own turns,
+ *  - An "N-turn cooldown" (Faceless Void, Storm Spirit, Sven, Juggernaut, Grimstroke, Wraith King) counts the racer's own turns,
  *    tripped and silenced ones included: used on turn T, it is ready again on turn T+N.
  *    Kept as an engine timer (see `TIMERS`), which also times Sven's buff.
- *  - "Skip my main move" powers (Earthshaker, Anti-Mage, Ember Spirit, Underlord, Juggernaut) are offered before the main move,
+ *  - "Skip my main move" powers (Earthshaker, Anti-Mage, Ember Spirit, Underlord, Juggernaut, Vengeful Spirit) are offered before the main move,
  *    and not at all on a tripped turn, which has no main move to skip.
  *  - A warp is not a move, so a warped racer passes nobody. It is still an arrival, though:
  *    "racers are stopped on a space after they've finished moving onto it, or otherwise
@@ -1815,6 +1815,235 @@ function bindable(h: HookCtx, first: MutableRacer) {
   return h.running().filter((r) => r.racerId !== first.racerId && Math.abs(r.pos - first.pos) <= LEASH);
 }
 
+/**
+ * MANA DRAIN — "Other racers on my space or next to it get -1 to their main move. I get +1
+ * to mine for each of them."
+ *
+ * Omniknight's aura at half strength, with the drained worth feeding Lion. Both are read
+ * off the board as each main move is settled: Lion's own counts every running racer in
+ * reach, tripped ones and teammates included, like Ember Spirit's crowd.
+ */
+const lion = def(
+  'lion',
+  'Lion',
+  'Other racers on my space or next to it get -1 to their main move. I get +1 to mine for each of them.',
+  {
+    modifyMainMove: (h, value, mover) => {
+      if (!isRunning(h.self)) return value;
+      if (mover.racerId === h.self.racerId) {
+        const drained = inReach(h).length;
+        if (drained === 0) return value;
+        h.log(`${h.nameOf(h.self)} drains ${drained} racer${drained === 1 ? '' : 's'} nearby: +${drained}.`);
+        return value + drained;
+      }
+      if (!near(h.self, mover, 3)) return value;
+      const slowed = Math.max(0, value - 1);
+      if (slowed !== value) h.log(`${h.nameOf(h.self)} drains ${h.nameOf(mover)}: -1.`);
+      return slowed;
+    },
+  },
+  3,
+);
+
+/**
+ * REAPER'S SCYTHE — "Before or after my main move, if a racer on the space right in front of
+ * me is tripped, I remove them from the race."
+ *
+ * "Right in front" is the next space ahead, and nowhere else. Not a choice: the scythe
+ * falls on the first chance, checked before the roll and, if nothing was reaped then,
+ * again once the main move has landed — once a turn either way. Rivals only; with several
+ * down on that space, Necrophos picks one. Not on a tripped turn, which has no main move
+ * to be before or after.
+ */
+const REAPED = 'reapedTurn';
+const necrophos = def(
+  'necrophos',
+  'Necrophos',
+  'Before or after my main move, if a rival on the space right in front of me is tripped, I remove them from the race.',
+  {
+    beforeMainMove: (h) => {
+      if (!h.self.tripped) reap(h);
+    },
+    afterMainMove: (h) => reap(h),
+    resume: (h, key, choice) => {
+      if (key !== 'scythe') return;
+      const victim = reapable(h).find((r) => choice === (`reap:${r.racerId}` as ChoiceId));
+      if (victim) scythe(h, victim);
+    },
+  },
+);
+
+/** Necrophos's candidates: tripped, running rivals on the space just ahead. */
+function reapable(h: HookCtx) {
+  return h.at(h.self.pos + 1).filter((r) => isRunning(r) && r.tripped && r.owner !== h.self.owner);
+}
+
+/** Swings the scythe, if it hasn't this turn and someone is there to take. */
+function reap(h: HookCtx) {
+  if (!isRunning(h.self) || h.self.memo[REAPED] === currentTurn(h)) return;
+  const victims = reapable(h);
+  if (victims.length === 0) return;
+  if (victims.length === 1) return scythe(h, victims[0]!);
+  h.ask({
+    player: h.self.owner,
+    prompt: "Reaper's Scythe: whom do you take?",
+    options: victims.map((r) => option(`reap:${r.racerId}`, h.nameOf(r), racerTarget(r.racerId))),
+    key: 'scythe',
+  });
+}
+
+function scythe(h: HookCtx, victim: MutableRacer) {
+  h.self.memo[REAPED] = currentTurn(h);
+  h.log(`${h.nameOf(h.self)}'s Reaper's Scythe takes ${h.nameOf(victim)} out of the race!`);
+  h.eliminate(victim);
+}
+
+function currentTurn(h: HookCtx): number {
+  return h.state.phase.t === 'racing' ? h.state.phase.turn : -1;
+}
+
+/**
+ * REINCARNATION — "If I trip, I stand right back up. Ready again 4 turns later."
+ *
+ * Unlike Templar Assassin's Refraction the trip does happen — Bloodseeker's count and
+ * Bristleback's spray see it — Wraith King just doesn't stay down. The cooldown counts its
+ * own turns; a trip on someone else's turn starts it counting from Wraith King's next.
+ */
+const REINCARNATION_COOLDOWN = 4;
+const wraithKing = def(
+  'wraith-king',
+  'Wraith King',
+  `If I trip, I stand right back up. Ready again ${REINCARNATION_COOLDOWN} turns later.`,
+  {
+    onRacerTripped: (h, target) => {
+      if (target.racerId !== h.self.racerId || !h.self.tripped || !isRunning(h.self)) return;
+      if (timerLeft(h.self, 'reincarnation') > 0) return;
+      startTimer(h, 'reincarnation', REINCARNATION_COOLDOWN);
+      h.self.tripped = false;
+      h.emit({ t: 'racer/stoodUp', racerId: h.self.racerId });
+      h.log(`${h.nameOf(h.self)} Reincarnates and rises again.`);
+    },
+  },
+);
+
+/**
+ * NETHER SWAP — "I can skip my main move to swap spaces with another racer."
+ *
+ * Forwards or backwards, with any running racer not already on my space. Two warps, so
+ * nobody passes anybody, and both spaces fire for the racer arriving on them.
+ */
+const vengefulSpirit = def(
+  'vengeful-spirit',
+  'Vengeful Spirit',
+  'I can skip my main move to swap spaces with another racer.',
+  {
+    beforeMainMove: (h) => {
+      if (!isRunning(h.self) || h.self.tripped) return;
+      const targets = swappable(h);
+      if (targets.length === 0) return;
+      h.ask({
+        player: h.self.owner,
+        prompt: 'Nether Swap instead of rolling?',
+        options: [
+          ...targets.map((r) => option(`swap:${r.racerId}`, `Swap with ${h.nameOf(r)} (space ${r.pos})`, racerTarget(r.racerId))),
+          option('roll', 'Roll normally'),
+        ],
+        key: 'swap',
+        defaultChoice: 'roll' as ChoiceId,
+      });
+    },
+    resume: (h, key, choice) => {
+      if (key !== 'swap' || choice === ('roll' as ChoiceId)) return;
+      const target = swappable(h).find((r) => choice === (`swap:${r.racerId}` as ChoiceId));
+      if (!target) return;
+      h.skipMainMove();
+      const [mine, theirs] = [h.self.pos, target.pos];
+      h.log(`${h.nameOf(h.self)} Nether Swaps with ${h.nameOf(target)}.`);
+      h.warp(target, mine);
+      h.warp(h.self, theirs);
+    },
+  },
+);
+
+/** Vengeful Spirit's targets: running racers on some other space. */
+function swappable(h: HookCtx) {
+  return h.running().filter((r) => r.racerId !== h.self.racerId && r.pos !== h.self.pos);
+}
+
+/**
+ * TIME LAPSE, in reverse — "I get +2 to my main move. If I trip, I warp back to the Start
+ * space."
+ *
+ * Fast and fragile. The warp comes with the trip, so a Weaver that Abaddon helps straight up
+ * still goes home first. Already on Start, there's nowhere to go.
+ */
+const weaver = def('weaver', 'Weaver', 'I get +2 to my main move. If I trip, I warp back to the Start space.', {
+  modifyMainMove: (h, value, mover) => {
+    if (mover.racerId !== h.self.racerId) return value;
+    h.log(`${h.nameOf(h.self)} skitters ahead: +2.`);
+    return value + 2;
+  },
+  onRacerTripped: (h, target) => {
+    if (target.racerId !== h.self.racerId || !h.self.tripped || !isRunning(h.self) || h.self.pos === START) return;
+    h.log(`${h.nameOf(h.self)} trips and lapses back to the Start space.`);
+    h.warp(h.self, START);
+  },
+});
+
+/**
+ * SUNDER — "If I trip and a racer within 3 spaces of me is standing, I can make them trip
+ * for me instead."
+ *
+ * Three spaces either way, teammates included. Offered once the trip has settled, like
+ * Tidehunter's roll, so nothing to offer if Terrorblade is already back up. Terrorblade
+ * only gets up if the other racer actually goes down: a Templar Assassin shrugging off the
+ * trip leaves him on the floor.
+ */
+const SUNDER_REACH = 3;
+const terrorblade = def(
+  'terrorblade',
+  'Terrorblade',
+  `If I trip and a racer within ${SUNDER_REACH} spaces of me is standing, I can make them trip for me instead.`,
+  {
+    onRacerTripped: (h, target) => {
+      if (target.racerId !== h.self.racerId || !h.self.tripped || !isRunning(h.self)) return;
+      h.defer('sunder');
+    },
+    resume: (h, key, choice) => {
+      if (!h.self.tripped || !isRunning(h.self)) return;
+      if (key === 'sunder') {
+        const targets = sunderable(h);
+        if (targets.length === 0) return;
+        h.ask({
+          player: h.self.owner,
+          prompt: `${h.nameOf(h.self)} is down. Sunder with a racer to make them trip instead?`,
+          options: [
+            ...targets.map((r) => option(`sunder:${r.racerId}`, `Sunder ${h.nameOf(r)}`, racerTarget(r.racerId))),
+            option('pass', 'Stay down'),
+          ],
+          key: 'sunderWith',
+          defaultChoice: 'pass' as ChoiceId,
+        });
+        return;
+      }
+      if (key !== 'sunderWith' || choice === ('pass' as ChoiceId)) return;
+      const victim = sunderable(h).find((r) => choice === (`sunder:${r.racerId}` as ChoiceId));
+      if (!victim) return;
+      h.log(`${h.nameOf(h.self)} Sunders with ${h.nameOf(victim)}!`);
+      if (!h.trip(victim)) return;
+      h.self.tripped = false;
+      h.emit({ t: 'racer/stoodUp', racerId: h.self.racerId });
+    },
+  },
+);
+
+/** Terrorblade's targets: running racers within `SUNDER_REACH` still on their feet. */
+function sunderable(h: HookCtx) {
+  return h
+    .running()
+    .filter((r) => r.racerId !== h.self.racerId && !r.tripped && Math.abs(r.pos - h.self.pos) <= SUNDER_REACH);
+}
+
 export const DOTA_RACERS: readonly RacerDef[] = [
   bountyHunter,
   spiritBreaker,
@@ -1861,4 +2090,10 @@ export const DOTA_RACERS: readonly RacerDef[] = [
   arcWarden,
   meepo,
   ...meepoPieces,
+  lion,
+  necrophos,
+  wraithKing,
+  vengefulSpirit,
+  weaver,
+  terrorblade,
 ];
