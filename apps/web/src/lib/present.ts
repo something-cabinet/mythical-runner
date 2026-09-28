@@ -239,6 +239,8 @@ export function abilityToken(
       return cooldownToken(racer, 'overload', 'd20', 'Overload (d20)');
     case 'juggernaut':
       return cooldownToken(racer, 'omnislash', 'omnislash', 'Omnislash');
+    case 'magnus':
+      return cooldownToken(racer, 'polarity', 'polarity', 'Reverse Polarity');
     case 'grimstroke':
       return cooldownToken(racer, 'soulbind', 'soulbind', 'Soulbind');
     case 'lina': {

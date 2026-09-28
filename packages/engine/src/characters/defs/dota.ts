@@ -589,20 +589,29 @@ function oracleStreak(racer: MutableRacer): number {
 }
 
 /**
- * OVERLOAD — "Before my main move, I can roll a d20 instead of a d6. 6-turn cooldown."
+ * OVERLOAD — "Before my main move, I can roll a d20 instead of a d6. 6-turn cooldown. While
+ * it's recharging, I get -1 to my main move."
  *
  * Offered before the main move, and not on a tripped turn, which has no roll to swap. The
  * d20 is my die for the rest of that turn — a reroll throws it again — and the d6 is back
  * from the next. The d20 is a one-turn timer, so it lapses at the turn's end even if the
  * power was lost mid-turn to Doom's aura.
+ *
+ * The -1 is on the turns after the d20 until it's ready again, not on the d20 turn itself.
  */
 const OVERLOAD_COOLDOWN = 6;
 const stormSpirit = def(
   'storm-spirit',
   'Storm Spirit',
-  `Before my main move, I can roll a d20 instead of my d6. Ready again ${OVERLOAD_COOLDOWN} turns later.`,
+  `Before my main move, I can roll a d20 instead of my d6. Ready again ${OVERLOAD_COOLDOWN} turns later. Until then, I get -1 to my main move.`,
   {
     dieSides: (h) => (timerLeft(h.self, 'overloading') > 0 ? 20 : 6),
+    modifyMainMove: (h, value, mover) => {
+      if (mover.racerId !== h.self.racerId) return value;
+      if (timerLeft(h.self, 'overload') === 0 || timerLeft(h.self, 'overloading') > 0) return value;
+      h.log(`${h.nameOf(h.self)} is recharging: -1.`);
+      return value - 1;
+    },
     beforeMainMove: (h) => {
       if (!isRunning(h.self) || h.self.tripped || timerLeft(h.self, 'overload') > 0) return;
       h.ask({
@@ -750,23 +759,23 @@ const techies = def(
 );
 
 /**
- * CHAOS STRIKE — "I roll a d20, and get -9 to my main move. It can take me backwards."
+ * CHAOS STRIKE — "I roll a d20, and get -8 to my main move. It can take me backwards."
  *
  * The d20 is my die for anything that has me roll: rerolls, a duel, Spirit Breaker's bash.
- * The -9 is only on the main move. Below 0 it runs backwards, clamped at Start; at exactly
- * 0 there is no move. Self modifiers apply last, so the -9 comes after everyone else's —
+ * The -8 is only on the main move. Below 0 it runs backwards, clamped at Start; at exactly
+ * 0 there is no move. Self modifiers apply last, so the -8 comes after everyone else's —
  * a Gunk can't clamp a backwards move to 0.
  */
 const chaosKnight = def(
   'chaos-knight',
   'Chaos Knight',
-  'I roll a d20 and get -9 to my main move, so I can go backwards.',
+  'I roll a d20 and get -8 to my main move, so I can go backwards.',
   {
     dieSides: () => 20,
     modifyMainMove: (h, value, mover) => {
       if (mover.racerId !== h.self.racerId) return value;
-      h.log(`${h.nameOf(h.self)}'s Chaos Strike: -9.`);
-      return value - 9;
+      h.log(`${h.nameOf(h.self)}'s Chaos Strike: -8.`);
+      return value - 8;
     },
   },
 );
@@ -1074,39 +1083,57 @@ const lich = def('lich', 'Lich', 'After my main move, I pull every other racer t
 });
 
 /**
- * SKEWER — "I drag every racer on my path along with me to where I stop. If that's the
- * finish line, I'm placed first."
+ * REVERSE POLARITY — "Before or after my main move, I can warp every racer within 5 spaces
+ * to my space. 4-turn cooldown."
  *
- * "On my path" is every racer I pass: stopped on a space I crossed, strictly between
- * where I started and where I end, on any forward move of mine. Racers sharing my
- * starting space aren't on the path. They're warped along, so the drag passes nobody, but
- * they do arrive — my space fires for them. Over the finish line, I'm placed before the
- * racers I dragged across with me.
- *
- * Knocked back — a backward arrow, a push — my path runs the other way, and the racers I
- * go back over are dragged to where I stop just the same, though going back is no pass.
+ * "Within 5" is the usual window: my space and two either side. Warped, so it passes
+ * nobody, but they arrive and my space fires for each. Asked twice a turn while it is
+ * ready, like Chronosphere: before the roll, and again once the main move has landed, with
+ * the window counted from where I stand then. Not from the finish line, which would carry
+ * them over it. The cooldown counts my own turns like the others: used on turn T, ready
+ * again on turn T+4.
  */
+const POLARITY_COOLDOWN = 4;
 const magnus = def(
   'magnus',
   'Magnus',
-  "Racers I pass are dragged along to the space where I stop. If I cross the finish line, I'm placed ahead of them.",
+  `Before or after my main move, I can warp every racer within 5 spaces to my space. Ready again ${POLARITY_COOLDOWN} turns later.`,
   {
-    onPass: (h, passed) => {
-      if (h.self.eliminated || !isRunning(passed)) return;
-      if (h.self.pos === FINISH && h.self.finishedRank === null) h.takePlace();
-      h.log(`${h.nameOf(h.self)} skewers ${h.nameOf(passed)} along.`);
-      h.warp(passed, h.self.pos);
-    },
-    // Knocked back over racers — an arrow, a push — Magnus takes them along the same way.
-    onCrossBack: (h, crossed) => {
-      if (!isRunning(h.self)) return;
-      for (const r of crossed) {
-        h.log(`${h.nameOf(h.self)} skewers ${h.nameOf(r)} back along.`);
-        h.warp(r, h.self.pos);
-      }
+    beforeMainMove: (h) => offerPolarity(h, 'before'),
+    afterMainMove: (h) => offerPolarity(h, 'after'),
+    resume: (h, key, choice) => {
+      if (key !== 'polarity' || choice !== ('polarity' as ChoiceId)) return;
+      const pulled = polarityTargets(h);
+      if (pulled.length === 0) return;
+      startTimer(h, 'polarity', POLARITY_COOLDOWN);
+      h.log(`${h.nameOf(h.self)} reverses polarity: everyone near is pulled to space ${h.self.pos}.`);
+      for (const r of pulled) h.warp(r, h.self.pos);
     },
   },
+  5,
 );
+
+/** Asks Magnus whether to reverse polarity now, if it is ready and would pull anyone. */
+function offerPolarity(h: HookCtx, when: 'before' | 'after'): void {
+  if (!isRunning(h.self) || h.self.pos === FINISH || timerLeft(h.self, 'polarity') > 0) return;
+  const pulled = polarityTargets(h);
+  if (pulled.length === 0) return;
+  h.ask({
+    player: h.self.owner,
+    prompt: `Reverse Polarity ${when} your move? It pulls ${pulled.map((r) => h.nameOf(r)).join(', ')} to space ${h.self.pos}. ${POLARITY_COOLDOWN}-turn cooldown.`,
+    options: [
+      option('polarity', `Pull ${pulled.length}`),
+      option('wait', when === 'before' ? 'Not yet — ask after my move' : 'Save it'),
+    ],
+    key: 'polarity',
+    defaultChoice: 'wait' as ChoiceId,
+  });
+}
+
+/** Racers Reverse Polarity would pull: running, within 5, and not already with Magnus. */
+function polarityTargets(h: HookCtx): MutableRacer[] {
+  return h.running().filter((r) => r.racerId !== h.self.racerId && r.pos !== h.self.pos && near(h.self, r, 5));
+}
 
 /**
  * FIEND'S GATE — "I can skip my main move to warp to any other racer."

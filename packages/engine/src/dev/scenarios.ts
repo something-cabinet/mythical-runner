@@ -2179,7 +2179,7 @@ scenario('Largo — +1 per racer on its space, itself included, and +1 to everyo
   check(alone.natural === undefined, 'next to it is not on it: nothing', JSON.stringify(alone));
 });
 
-scenario('Storm Spirit — rolls a d6, or a d20 on a 6-turn cooldown', () => {
+scenario('Storm Spirit — rolls a d6, or a d20 on a 6-turn cooldown with -1 while it recharges', () => {
   const s = raceState(
     [
       { player: 'p1', racer: 'storm-spirit', pos: 1 },
@@ -2208,6 +2208,13 @@ scenario('Storm Spirit — rolls a d6, or a d20 on a 6-turn cooldown', () => {
   check(timers?.['overload'] === 5 && timers['overloading'] === undefined, 'cooling down, and back to the d6 after the turn', JSON.stringify(timers));
   const again = raceState([{ player: 'p1', racer: 'storm-spirit', pos: 1, memo: { timers: { overload: 2 } } }, { player: 'p2', racer: 'vanilla-01', pos: 20 }], 'p1');
   check(applyAction(again, roll('p1')).state.pending === null, 'not offered while cooling down');
+  const slowed = rollFor(again, 'p1', 3).events.find((e) => e.t === 'dice/rolled') as { natural?: number };
+  check(slowed.natural === 4, 'recharging: a 4 moves 3', JSON.stringify(slowed));
+  const d20 = rollUntil(s, 'p1', () => true);
+  const overloaded = applyAction(d20.state, decide('p1', 'overload')).events.find((e) => e.t === 'dice/rolled') as { natural?: number };
+  check(overloaded.natural === undefined, 'no -1 on the d20 turn itself', JSON.stringify(overloaded));
+  const fresh = rollFor(s, 'p1', 4, { by: 'p1', choice: 'd6' }).events.find((e) => e.t === 'dice/rolled') as { natural?: number };
+  check(fresh.natural === undefined, 'no -1 while it is ready', JSON.stringify(fresh));
 });
 
 scenario('Bloodseeker — +1 to the main move for each other racer down', () => {
@@ -2376,7 +2383,7 @@ scenario('Techies — every space it stops on gets a mine, which goes off once',
   check(!logLines(onTrap.events).includes('mine'), 'a TRIP space needs no mine', logLines(onTrap.events));
 });
 
-scenario('Chaos Knight — rolls a d20 with -9 to its main move, which can go backwards', () => {
+scenario('Chaos Knight — rolls a d20 with -8 to its main move, which can go backwards', () => {
   const s = raceState(
     [
       { player: 'p1', racer: 'chaos-knight', pos: 10 },
@@ -2395,11 +2402,11 @@ scenario('Chaos Knight — rolls a d20 with -9 to its main move, which can go ba
   );
 
   const big = rollUntil(s, 'p1', (r) => thrown(r.events) === 15);
-  check(posOf(big.state, 'chaos-knight') === 16, 'a 15 moves 6', `pos ${posOf(big.state, 'chaos-knight')}`);
-  const nine = rollUntil(s, 'p1', (r) => thrown(r.events) === 9);
-  check(posOf(nine.state, 'chaos-knight') === 10 && !has(nine.events, 'racer/moved'), 'a 9 goes nowhere');
+  check(posOf(big.state, 'chaos-knight') === 17, 'a 15 moves 7', `pos ${posOf(big.state, 'chaos-knight')}`);
+  const eight = rollUntil(s, 'p1', (r) => thrown(r.events) === 8);
+  check(posOf(eight.state, 'chaos-knight') === 10 && !has(eight.events, 'racer/moved'), 'an 8 goes nowhere');
   const low = rollUntil(s, 'p1', (r) => thrown(r.events) === 2);
-  check(posOf(low.state, 'chaos-knight') === 3, 'a 2 moves 7 back', `pos ${posOf(low.state, 'chaos-knight')}`);
+  check(posOf(low.state, 'chaos-knight') === 4, 'a 2 moves 6 back', `pos ${posOf(low.state, 'chaos-knight')}`);
 
   // Self modifiers come last, so Gunk's clamp at 0 sees the d20 face, not the backwards move.
   const gooped = raceState(
@@ -2410,7 +2417,7 @@ scenario('Chaos Knight — rolls a d20 with -9 to its main move, which can go ba
     'p1',
   );
   const both = rollUntil(gooped, 'p1', (r) => thrown(r.events) === 4);
-  check(posOf(both.state, 'chaos-knight') === 4, 'a 4 with Gunk: 4 - 1 - 9 = 6 back', `pos ${posOf(both.state, 'chaos-knight')}`);
+  check(posOf(both.state, 'chaos-knight') === 5, 'a 4 with Gunk: 4 - 1 - 8 = 5 back', `pos ${posOf(both.state, 'chaos-knight')}`);
 });
 
 scenario('Abaddon — can help a tripped racer up, and moves 3 for it', () => {
@@ -2670,69 +2677,45 @@ scenario('Lich — after its move, pulls everyone to its space', () => {
   check(racerAt(after.state, 'vanilla-02')?.pos === at, 'the one ahead is pulled back', `${racerAt(after.state, 'vanilla-02')?.pos} vs ${at}`);
 });
 
-scenario('Magnus — drags every racer it passes to where it stops, and finishes ahead of them', () => {
+scenario('Magnus — before or after its move, can warp every racer within 5 to its space, on a 4-turn cooldown', () => {
   const s = raceState(
     [
-      { player: 'p1', racer: 'magnus', pos: 5 },
-      { player: 'p2', racer: 'vanilla-01', pos: 5 },
-      { player: 'p3', racer: 'vanilla-02', pos: 7 },
+      { player: 'p1', racer: 'magnus', pos: 10 },
+      { player: 'p2', racer: 'vanilla-01', pos: 8 },
+      { player: 'p3', racer: 'vanilla-02', pos: 12 },
+      { player: 'p4', racer: 'vanilla-03', pos: 13 },
     ],
     'p1',
   );
-  const moved = rollFor(s, 'p1', 4);
-  check(racerAt(moved.state, 'vanilla-02')?.pos === 9, 'the racer on its path is dragged to 9', String(racerAt(moved.state, 'vanilla-02')?.pos));
-  check(racerAt(moved.state, 'vanilla-01')?.pos === 5, 'the racer on its starting space stays');
+  const asked = applyAction(s, roll('p1'));
+  check(asked.state.pending?.prompt.includes('before') === true, 'asked before the roll');
+  const before = applyAction(asked.state, decide('p1', 'polarity'));
+  const b = (id: string): number | undefined => racerAt(before.state, id)?.pos;
+  check(b('vanilla-01') === 10 && b('vanilla-02') === 10, 'racers two either side are warped to 10', `${b('vanilla-01')}, ${b('vanilla-02')}`);
+  check(b('vanilla-03') === 13, 'a racer three away stays', String(b('vanilla-03')));
+  check((b('magnus') ?? 0) > 10 && before.state.pending === null, 'then Magnus moves on, and is not asked again', String(b('magnus')));
+  const timers = racerAt(before.state, 'magnus')?.memo['timers'] as Record<string, number> | undefined;
+  check(timers?.['polarity'] === 3, 'cooling down', JSON.stringify(timers));
 
-  const home = raceState(
-    [
-      { player: 'p2', racer: 'vanilla-01', pos: 27 },
-      { player: 'p1', racer: 'magnus', pos: 26 },
-      { player: 'p3', racer: 'vanilla-02', pos: 1 },
-    ],
-    'p1',
-  );
-  const over = rollFor(home, 'p1', 5);
-  check(racerAt(over.state, 'magnus')?.finishedRank === 1, 'Magnus takes 1st', String(racerAt(over.state, 'magnus')?.finishedRank));
-  check(racerAt(over.state, 'vanilla-01')?.finishedRank === 2, 'and the dragged racer 2nd', String(racerAt(over.state, 'vanilla-01')?.finishedRank));
+  // Waiting, then pulling from where the move lands: 10 + 1 = 11 reaches 13, not 8.
+  let after: { state: GameState; events: readonly GameEvent[] } | null = null;
+  for (let seed = 1; seed < 400 && !after; seed++) {
+    const r1 = applyAction(applyAction({ ...s, seed }, roll('p1')).state, decide('p1', 'wait'));
+    if (racerAt(r1.state, 'magnus')?.pos === 11 && r1.state.pending?.prompt.includes('after') === true) {
+      after = applyAction(r1.state, decide('p1', 'polarity'));
+    }
+  }
+  const a = (id: string): number | undefined => (after ? racerAt(after.state, id)?.pos : undefined);
+  check(a('vanilla-03') === 11 && a('vanilla-02') === 11 && a('vanilla-01') === 8, 'after the move, pulled from where it landed', `${a('vanilla-01')}, ${a('vanilla-02')}, ${a('vanilla-03')}`);
 
-  // Wild Wilds' space 16 knocks 4 back: Magnus passes 13 and 14, stops on the arrow and
-  // ends on 12 — where the skewered racers must end up too.
-  const knocked = raceState(
+  const cooling = raceState(
     [
-      { player: 'p1', racer: 'magnus', pos: 11 },
-      { player: 'p2', racer: 'vanilla-01', pos: 13 },
-      { player: 'p3', racer: 'vanilla-02', pos: 14 },
+      { player: 'p1', racer: 'magnus', pos: 10, memo: { timers: { polarity: 2 } } },
+      { player: 'p2', racer: 'vanilla-01', pos: 11 },
     ],
     'p1',
-    2,
   );
-  const arrowed = rollFor(knocked, 'p1', 5);
-  const at = (id: string): string => String(racerAt(arrowed.state, id)?.pos);
-  check(
-    at('magnus') === '12' && at('vanilla-01') === '12' && at('vanilla-02') === '12',
-    'knocked back by an arrow, Magnus takes the racers it passed with it',
-    `magnus ${at('magnus')}, vanilla-01 ${at('vanilla-01')}, vanilla-02 ${at('vanilla-02')}`,
-  );
-
-  // From 14, a roll of 2 lands on the arrow at 16 and knocks Magnus back to 12 — over the
-  // racer on 13, who was behind all along and was never passed.
-  const behind = raceState(
-    [
-      { player: 'p1', racer: 'magnus', pos: 14 },
-      { player: 'p2', racer: 'vanilla-01', pos: 13 },
-      { player: 'p3', racer: 'vanilla-02', pos: 11 },
-    ],
-    'p1',
-    2,
-  );
-  const back = rollFor(behind, 'p1', 2);
-  const bat = (id: string): string => String(racerAt(back.state, id)?.pos);
-  check(
-    bat('magnus') === '12' && bat('vanilla-01') === '12',
-    'knocked back over a racer, Magnus drags it back to where it stops',
-    `magnus ${bat('magnus')}, vanilla-01 ${bat('vanilla-01')}`,
-  );
-  check(bat('vanilla-02') === '11', 'a racer beyond where Magnus stops stays put', bat('vanilla-02'));
+  check(applyAction(cooling, roll('p1')).state.pending === null, 'not offered while cooling down');
 });
 
 scenario('Underlord — skips its move to warp to another racer', () => {

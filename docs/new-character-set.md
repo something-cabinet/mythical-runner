@@ -21,12 +21,12 @@
 - Alchemist: I get double points from finish cups and star spaces.
 - Legion Commander: Whenever a racer shares my space, I can shout DUEL! We each roll a d6 and add our past duel wins. The winner gets +1 to their main move for the rest of the race. I win ties.
 - Oracle: Before my main move, I call odd or even. Each correct call in a row is worth 1 more: +1, then +2, then +3… A wrong call resets it.
-- Storm Spirit: Before my main move, I can roll a d20 instead of my d6. Ready again 6 turns later.
+- Storm Spirit: Before my main move, I can roll a d20 instead of my d6. Ready again 6 turns later. Until then, I get -1 to my main move.
 - Bloodseeker: I get +1 to my main move for each other racer currently tripped.
 - Clockwerk: Before or after my main move, I push every racer 1 space away from me.
 - Pudge: Before my main move, I can _warp_ any racer to my space.
 - Techies: Every space I stop on gets a mine. The next racer to stop there trips, and the mine is gone.
-- Chaos Knight: I roll a d20 and get -9 to my main move, so I can go backwards.
+- Chaos Knight: I roll a d20 and get -8 to my main move, so I can go backwards.
 - Abaddon: Whenever another racer trips, I can help them straight back up. If I do, I move 3.
 - Bristleback: If I trip, I also trip all racers on my space or next to it.
 - Drow Ranger: I roll a d10 instead of a d6 when no other racer is on my space or next to it.
@@ -36,7 +36,7 @@
 - Earth Spirit: Before my main move, I can kick one racer on my space 3 spaces forward or back.
 - Void Spirit: Before my main move, I can move any other racer 1 space forward or backward.
 - Lich: After my main move, I pull every other racer to my space. Not from the finish line.
-- Magnus: Racers I pass are dragged along to the space where I stop. If I cross the finish line, I'm placed ahead of them.
+- Magnus: Before or after my main move, I can warp every racer within 5 spaces to my space. Ready again 4 turns later.
 - Underlord: I can skip my main move to _warp_ to any other racer's space.
 - Doom: Other racers on my space or next to it have no powers, except on the Start space.
 - Sven: Before my main move, I can get +2 to my main move this turn and my next 2. Ready again 6 turns later.

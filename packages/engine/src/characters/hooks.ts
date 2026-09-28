@@ -379,14 +379,6 @@ export interface Hooks {
   /** `self` passed `passed` during a move. */
   onPass?(h: HookCtx, passed: MutableRacer): void;
 
-  /**
-   * Magnus: a backward move of `self`'s has settled, crossing `crossed` — the running racers
-   * strictly between where it began and where it ended. Going back over a racer is not a
-   * pass, so this is its own hook. Fired before the move's space and stop hooks; must not
-   * suspend.
-   */
-  onCrossBack?(h: HookCtx, crossed: readonly MutableRacer[]): void;
-
   /** `self` was passed by `passer` during their move. */
   onPassed?(h: HookCtx, passer: MutableRacer): void;
 
