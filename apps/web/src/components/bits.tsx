@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'rea
 import {
   hasSprite,
   initials,
+  pieceNumber,
   points,
   powerText,
   racerInitials,
@@ -56,6 +57,7 @@ export function RacerToken({
       style={{ background: seatColor(view, owner), color: SEAT_INK, ['--size' as string]: `${size}px` }}
     >
       {art ? <img src={racerSprite(racer)} alt="" /> : racerInitials(racer)}
+      {pieceNumber(racer) && <span className="piece-number">{pieceNumber(racer)}</span>}
     </span>
   );
 }

@@ -1,6 +1,7 @@
 import {
   CHARACTER_SETS,
   currentDrafter,
+  getRacer,
   racerLabel,
   racerName as bareRacerName,
   racerText,
@@ -146,6 +147,12 @@ const SPRITE_FILES: Readonly<Record<string, string>> = {
   'phantom-assassin': 'dota2/phantom-assassin.png',
   tusk: 'dota2/tusk.png',
   grimstroke: 'dota2/grimstroke.png',
+  'arc-warden': 'dota2/arc-warden.png',
+  // Meepo's other three pieces wear the same face; `pieceNumber` tells them apart.
+  meepo: 'dota2/meepo.png',
+  'meepo-2': 'dota2/meepo.png',
+  'meepo-3': 'dota2/meepo.png',
+  'meepo-4': 'dota2/meepo.png',
 };
 
 const SPRITE_DIR = '/character_sprite';
@@ -160,6 +167,15 @@ export function racerSprite(id: RacerId): string {
 /** True when `racerSprite` is a real likeness rather than the stand-in. */
 export function hasSprite(id: RacerId): boolean {
   return id in SPRITE_FILES;
+}
+
+/**
+ * The number a squad's extra piece wears in front of its portrait — "2" for Meepo 2 — or
+ * null for any other racer. The pieces share one face, so this is what tells them apart.
+ */
+export function pieceNumber(id: RacerId): string | null {
+  if (!getRacer(id).pieceOf) return null;
+  return /(\d+)\s*$/.exec(bareRacerName(id))?.[1] ?? null;
 }
 
 /**

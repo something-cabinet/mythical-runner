@@ -39,7 +39,7 @@
 - Magnus: Racers I pass are dragged along to the space where I stop. If I cross the finish line, I'm placed ahead of them.
 - Underlord: I can skip my main move to _warp_ to any other racer's space.
 - Doom: Other racers on my space or next to it have no powers, except on the Start space.
-- Sven: Before my main move, I can get +3 to my main move this turn and my next 2. Ready again 6 turns later.
+- Sven: Before my main move, I can get +2 to my main move this turn and my next 2. Ready again 6 turns later.
 - Kez: Before my main move, I can roll an odd-only die (1, 3, 5) or an even-only die (2, 4, 6) instead of my d6.
 - Invoker: I can skip my main move to roll 3 dice that each land blue, pink or orange, and cast one of 10 spells. Ready again 2 turns later.
   - Blue, blue, blue — Cold Snap: I push any racer back 6.
@@ -53,10 +53,15 @@
   - Orange, orange, pink — Chaos Meteor: I move 2, then racers on the 3 spaces ahead of me trip.
   - Blue, pink, orange — Deafening Blast: I move 2, then racers on the 3 spaces ahead of me go back 2.
 - Largo: I get +1 to my main move for each racer on my space, me included. Other racers on my space get +1 to theirs.
-- Lina: Each turn I'm not tripped, I gain a Fiery Soul stack, up to 8. I get +1 to my main move for every 2 stacks. Tripping clears them.
+- Lina: Each turn I'm not tripped, I gain a Fiery Soul stack, up to 6. I get +1 to my main move for every 2 stacks. Tripping clears them.
 - Phantom Assassin: I roll two d6s and move the first. If the second is a 6, I move triple the first instead.
 - Juggernaut: I can skip my main move to _warp_ onto a racer 1 or 2 spaces ahead of me, the nearer one if both. Then I must keep hopping the same way until no racer is 1 or 2 spaces ahead. Only the space I finish on takes effect. Ready again 4 turns later.
 - Tusk: Before my main move, and again after it, I can punch a racer on my space to trip them.
 - Grimstroke: Before my main move, I can bind two racers within 5 spaces of each other, me included. Until my next turn, neither can get more than 5 spaces from the other. If the link would have to hold them back forever, it snaps. Ready again 4 turns later.
 - Arc Warden: I roll two d6s and move whichever one I choose.
 - Meepo: I race as 4 Meepos. On my turn, each Meepo rolls its own die and moves on its own. I finish as soon as any one Meepo crosses the finish line.
+- Lion: Every racer on my space or next to it get -1 to their main move, and I get + 1 for each racer affected.
+- Necrophose: Before or after my move, if the racer right in front of me is tripped, I remove them from the game.
+- Wrath King: If I tripped, I stand up immediately. Ready again in 4 turns later.
+- Vengeful Spirit: I can skip my main move to swap space with another racer.
+- Weaver: I get +2 to my main move. If I tripped, I warp back to the Start space.

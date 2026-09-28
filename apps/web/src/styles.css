@@ -402,7 +402,7 @@ select {
   appearance: none;
   border: 1px solid var(--border);
   background: var(--surface);
-  border-radius: 999px;
+  border-radius: 4px;
   padding: 6px 12px;
   font-weight: 800;
   letter-spacing: 0.14em;
@@ -461,7 +461,7 @@ select {
   font-weight: 750;
   font-size: 0.95rem;
   padding: 4px 10px;
-  border-radius: 999px;
+  border-radius: 4px;
   background: var(--surface-2);
 }
 
@@ -508,6 +508,7 @@ select {
    is inset far enough to sit inside the circle, which leaves a ring of the owner's seat
    colour showing however opaque the art itself is. */
 .token-sprite {
+  position: relative;
   overflow: hidden;
   padding: calc(var(--size) * 0.13);
 }
@@ -543,12 +544,17 @@ select {
   white-space: nowrap;
 }
 
+/* Statuses read as labels stuck on a row rather than buttons: square corners, an outline
+   in the tag's own colour, and small caps. */
 .tag {
-  font-size: 0.72rem;
-  font-weight: 750;
-  letter-spacing: 0.04em;
-  padding: 2px 8px;
-  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  line-height: 1.5;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
   background: var(--surface-3);
   color: var(--muted);
   white-space: nowrap;
@@ -1089,6 +1095,33 @@ select {
   stroke-width: 2;
 }
 
+/* The number a squad piece wears over its shared portrait (Meepo 2, 3, 4): white with a
+   dark outline so it reads over the art and every seat colour. */
+.board .piece-number {
+  fill: #fff;
+  stroke: #1b1724;
+  stroke-width: 3px;
+  paint-order: stroke;
+  font-weight: 900;
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+}
+
+.token .piece-number,
+.power-callout-face .piece-number {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 1.4em;
+  font-weight: 900;
+  line-height: 1;
+  -webkit-text-stroke: 3px #1b1724;
+  paint-order: stroke fill;
+}
+
 .board .trip-badge-label {
   fill: #fff;
   font-weight: 850;
@@ -1206,6 +1239,7 @@ select {
 }
 
 .power-callout-face {
+  position: relative;
   flex: none;
   display: grid;
   place-items: center;
@@ -1677,7 +1711,7 @@ select {
   align-items: center;
   gap: 6px;
   padding: 3px 10px 3px 4px;
-  border-radius: 999px;
+  border-radius: 4px;
   background: var(--surface-3);
   font-size: 0.82rem;
   font-weight: 650;

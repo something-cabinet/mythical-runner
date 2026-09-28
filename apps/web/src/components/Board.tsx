@@ -1,6 +1,6 @@
 import { FINISH, racerRange, trackForRace, type BoardToken, type PlayerView, type RacerId, type RaceNumber } from '@mr/engine';
 import { useEffect, useState, useSyncExternalStore, type CSSProperties } from 'react';
-import { hasSprite, ORB_SHADES, ordinal, racerInitials, racerName, racerSprite, rawName, seatColor, type BoardLink } from '../lib/present';
+import { hasSprite, ORB_SHADES, ordinal, pieceNumber, racerInitials, racerName, racerSprite, rawName, seatColor, type BoardLink } from '../lib/present';
 import { Tether } from './Tether';
 import { ROLL_TUMBLE_MS, type ShownPower, type ShownRoll } from '../lib/useBoardPositions';
 
@@ -427,6 +427,7 @@ function PowerCallout({ view, power, g, infield }: { view: PlayerView; power: Sh
       >
         <span className="power-callout-face" style={{ width: unit(52), height: unit(52), fontSize: unit(19) }}>
           {hasSprite(power.racerId) ? <img src={racerSprite(power.racerId)} alt="" /> : racerInitials(power.racerId)}
+          {pieceNumber(power.racerId) && <span className="piece-number">{pieceNumber(power.racerId)}</span>}
         </span>
         <div style={{ minWidth: 0 }}>
           <div className="power-callout-name">{racerName(view, power.racerId)}</div>
@@ -772,6 +773,11 @@ export function Board({
                   ) : (
                     <text className="piece-label" style={{ fontSize: Math.round(radius * 0.8) }}>
                       {racerInitials(r.racerId)}
+                    </text>
+                  )}
+                  {pieceNumber(r.racerId) && (
+                    <text className="piece-number" style={{ fontSize: Math.round(radius * 1.1) }}>
+                      {pieceNumber(r.racerId)}
                     </text>
                   )}
                 </g>

@@ -1160,24 +1160,25 @@ const underlord = def('underlord', 'Underlord', "I can skip my main move to warp
 const doom = def('doom', 'Doom', 'Other racers on my space or next to it have no powers, except on the Start space.', {}, 3);
 
 /**
- * GOD'S STRENGTH — "I can activate my power to get +3 to my main move for 3 turns. 6-turn
+ * GOD'S STRENGTH — "I can activate my power to get +2 to my main move for 3 turns. 6-turn
  * cooldown."
  *
  * Activated before the main move, so the turn it's cast is the first of the three. The
  * three are my own turns, tripped ones included — a trip wastes one.
  */
+const STRENGTH_BONUS = 2;
 const STRENGTH_TURNS = 3;
 const STRENGTH_COOLDOWN = 6;
 const sven = def(
   'sven',
   'Sven',
-  `Before my main move, I can get +3 to my main move this turn and my next ${STRENGTH_TURNS - 1}. Ready again ${STRENGTH_COOLDOWN} turns later.`,
+  `Before my main move, I can get +${STRENGTH_BONUS} to my main move this turn and my next ${STRENGTH_TURNS - 1}. Ready again ${STRENGTH_COOLDOWN} turns later.`,
   {
     beforeMainMove: (h) => {
       if (!isRunning(h.self) || h.self.tripped || timerLeft(h.self, 'strengthCooldown') > 0) return;
       h.ask({
         player: h.self.owner,
-        prompt: `God's Strength? +3 to your main move for ${STRENGTH_TURNS} turns. ${STRENGTH_COOLDOWN}-turn cooldown.`,
+        prompt: `God's Strength? +${STRENGTH_BONUS} to your main move for ${STRENGTH_TURNS} turns. ${STRENGTH_COOLDOWN}-turn cooldown.`,
         options: [option('strength', "God's Strength"), option('wait', 'Not yet')],
         key: 'strength',
         defaultChoice: 'wait' as ChoiceId,
@@ -1191,8 +1192,8 @@ const sven = def(
     },
     modifyMainMove: (h, value, mover) => {
       if (mover.racerId !== h.self.racerId || timerLeft(h.self, 'strength') === 0) return value;
-      h.log(`${h.nameOf(h.self)}'s God's Strength: +3.`);
-      return value + 3;
+      h.log(`${h.nameOf(h.self)}'s God's Strength: +${STRENGTH_BONUS}.`);
+      return value + STRENGTH_BONUS;
     },
   },
 );
@@ -1540,14 +1541,14 @@ function omnislashPath(h: HookCtx): number[] {
 }
 
 /**
- * FIERY SOUL — "Every turn I gain a stack of Fiery Soul, up to 8. I get +1 to my main move
+ * FIERY SOUL — "Every turn I gain a stack of Fiery Soul, up to 6. I get +1 to my main move
  * for every 2 stacks. Tripping resets them."
  *
  * The stack comes before the main move, so it counts on the turn it's gained: +1 from the
- * second turn, +4 from the eighth. A tripped turn gains nothing — the trip has just burned
+ * second turn, +3 from the sixth. A tripped turn gains nothing — the trip has just burned
  * them all — and neither does a silenced one.
  */
-const FIERY_SOUL_MAX = 8;
+const FIERY_SOUL_MAX = 6;
 const lina = def(
   'lina',
   'Lina',

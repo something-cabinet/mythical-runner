@@ -2773,7 +2773,7 @@ scenario('Doom — racers on its space or next to it have no powers', () => {
   check(free.value === (free.natural ?? NaN) + 2, 'two spaces away, Hare has its +2', JSON.stringify(free));
 });
 
-scenario("Sven — God's Strength: +3 for 3 of its turns, then a cooldown", () => {
+scenario("Sven — God's Strength: +2 for 3 of its turns, then a cooldown", () => {
   const s = raceState(
     [
       { player: 'p1', racer: 'sven', pos: 1 },
@@ -2785,14 +2785,14 @@ scenario("Sven — God's Strength: +3 for 3 of its turns, then a cooldown", () =
   check(asked.state.pending?.prompt.includes("God's Strength") === true, 'offered before the roll');
   const cast = applyAction(asked.state, decide('p1', 'strength'));
   const first = rolledOf(cast.events);
-  check(first.value === (first.natural ?? NaN) + 3, 'this turn: +3', JSON.stringify(first));
+  check(first.value === (first.natural ?? NaN) + 2, 'this turn: +2', JSON.stringify(first));
   const timers = racerAt(cast.state, 'sven')?.memo['timers'] as Record<string, number> | undefined;
   check(timers?.['strength'] === 2 && timers['strengthCooldown'] === 5, 'two more turns of it, five of cooldown', JSON.stringify(timers));
 
   const second = applyAction(applyAction(cast.state, roll('p2')).state, roll('p1'));
   check(second.state.pending === null || !second.state.pending.prompt.includes("God's Strength"), 'not offered again while cooling down');
   const next = rolledOf(second.events);
-  check(next.value === (next.natural ?? NaN) + 3, 'next turn: still +3', JSON.stringify(next));
+  check(next.value === (next.natural ?? NaN) + 2, 'next turn: still +2', JSON.stringify(next));
 });
 
 scenario('Kez — picks an odd-only or even-only d6 for the turn', () => {
@@ -3062,8 +3062,8 @@ scenario('Lina — a Fiery Soul stack a turn, +1 per 2 stacks, and a trip burns 
   check(posOf(moved.state, 'lina') === 7 && rolledOf(moved.events).natural === 3, '3 + 2 from four stacks', String(posOf(moved.state, 'lina')));
   check(racerAt(moved.state, 'lina')?.memo['fierySoul'] === 4, 'and one stack gained');
 
-  const capped = rollFor({ ...s, board: s.board.map((r) => ({ ...r, memo: r.racerId === racerId('lina') ? { fierySoul: 8 } : r.memo })) }, 'p1', 5);
-  check(posOf(capped.state, 'lina') === 7 && rolledOf(capped.events).natural === 1, 'eight stacks is the cap: +4', String(posOf(capped.state, 'lina')));
+  const capped = rollFor({ ...s, board: s.board.map((r) => ({ ...r, memo: r.racerId === racerId('lina') ? { fierySoul: 6 } : r.memo })) }, 'p1', 5);
+  check(posOf(capped.state, 'lina') === 7 && rolledOf(capped.events).natural === 2, 'six stacks is the cap: +3', String(posOf(capped.state, 'lina')));
 });
 
 scenario('Phantom Assassin — two d6s, the first counts, tripled when the second is a 6', () => {
