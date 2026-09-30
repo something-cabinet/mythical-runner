@@ -395,6 +395,12 @@ export interface Hooks {
    */
   blocksOvershoot?(h: HookCtx): boolean;
 
+  /**
+   * Sniper: the space that counts as `self`'s finish line. Reaching it — by a step forward
+   * or a warp onto or past it — puts the racer over the real finish. FINISH when absent.
+   */
+  finishLine?(h: HookCtx): number;
+
   /** End of `self`'s own turn. */
   onTurnEnd?(h: HookCtx): void;
 

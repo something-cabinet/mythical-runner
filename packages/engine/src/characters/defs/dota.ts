@@ -1971,23 +1971,46 @@ function swappable(h: HookCtx) {
 }
 
 /**
- * TIME LAPSE, in reverse — "I get +2 to my main move. If I trip, I warp back to the Start
- * space."
+ * TIME LAPSE, in reverse — "I get +2 to my main move. Every 2nd time I trip, I warp back to
+ * the Start space."
  *
- * Fast and fragile. The warp comes with the trip, so a Weaver that Abaddon helps straight up
- * still goes home first. Already on Start, there's nowhere to go.
+ * Fast and fragile. Every trip counts, the one on Start included; only the warp is skipped
+ * there, since there's nowhere to go. The warp comes with the trip, so a Weaver that Abaddon
+ * helps straight up still goes home first.
  */
-const weaver = def('weaver', 'Weaver', 'I get +2 to my main move. If I trip, I warp back to the Start space.', {
+const WEAVER_TRIPS = 'lapseTrips';
+const weaver = def('weaver', 'Weaver', 'I get +2 to my main move. Every 2nd time I trip, I warp back to the Start space.', {
   modifyMainMove: (h, value, mover) => {
     if (mover.racerId !== h.self.racerId) return value;
     h.log(`${h.nameOf(h.self)} skitters ahead: +2.`);
     return value + 2;
   },
   onRacerTripped: (h, target) => {
-    if (target.racerId !== h.self.racerId || !h.self.tripped || !isRunning(h.self) || h.self.pos === START) return;
-    h.log(`${h.nameOf(h.self)} trips and lapses back to the Start space.`);
+    if (target.racerId !== h.self.racerId || !h.self.tripped || !isRunning(h.self)) return;
+    const trips = (typeof h.self.memo[WEAVER_TRIPS] === 'number' ? (h.self.memo[WEAVER_TRIPS] as number) : 0) + 1;
+    h.self.memo[WEAVER_TRIPS] = trips;
+    if (trips % 2 !== 0 || h.self.pos === START) return;
+    h.log(`${h.nameOf(h.self)} trips a second time and lapses back to the Start space.`);
     h.warp(h.self, START);
   },
+});
+
+/**
+ * TAKE AIM — "I get -1 to my main move. My finish line is on space 25."
+ *
+ * Crossing space 25 is crossing the line: the step onto it, or a warp onto or past it,
+ * takes Sniper straight over the finish. Only forwards, so a Sniper silenced past 25
+ * finishes on the next step forward once his power is back.
+ */
+const SNIPER_FINISH = 25;
+const sniper = def('sniper', 'Sniper', `I get -1 to my main move. My finish line is on space ${SNIPER_FINISH}.`, {
+  modifyMainMove: (h, value, mover) => {
+    if (mover.racerId !== h.self.racerId) return value;
+    const aimed = Math.max(0, value - 1);
+    if (aimed !== value) h.log(`${h.nameOf(h.self)} takes aim: -1.`);
+    return aimed;
+  },
+  finishLine: () => SNIPER_FINISH,
 });
 
 /**
@@ -2096,4 +2119,5 @@ export const DOTA_RACERS: readonly RacerDef[] = [
   vengefulSpirit,
   weaver,
   terrorblade,
+  sniper,
 ];

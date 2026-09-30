@@ -1,10 +1,10 @@
-# Custom character set
+# Dota character set
 
 - Ideally at least 16 characters per set.
 - "Next to me" means one space either side. "Within 2 spaces" reaches two spaces either side.
 - "Ready again N turns later" is a cooldown counted in the racer's own turns.
 
-## DOTA
+## List
 
 - Bounty Hunter: When I stop on a space with exactly one other racer, I steal 1 point chip from them. Cups are safe.
 - Spirit Breaker: When I pass a racer, they roll a die. On a 1, they trip.
@@ -64,5 +64,7 @@
 - Necrophos: Before or after my main move, if a rival on the space right in front of me is tripped, I remove them from the race.
 - Wraith King: If I trip, I stand right back up. Ready again 4 turns later.
 - Vengeful Spirit: I can skip my main move to swap spaces with another racer.
-- Weaver: I get +2 to my main move. If I trip, I warp back to the Start space.
+- Weaver: I get +2 to my main move. Every 2nd time I trip, I warp back to the Start space.
 - Terrorblade: If I trip and a racer within 3 spaces of me is standing, I can make them trip for me instead.
+- Sniper: I get -1 to my main move. My finish line is on space 25.
+- Zeus: Before my move, I can choose a space and put a Nimbus token on it, trip anyone who step on it. Nimbus token last until my next turn.

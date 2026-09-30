@@ -421,7 +421,8 @@ function doMoveStep(ctx: Ctx, job: Extract<Job, { t: 'move' }>, rng: Rng): void 
   // spaces they need. If they overshoot, they don't move." Checked only at the very start
   // of the move — `origin` is unchanged from `queueMove` — since the whole move is voided,
   // not just the excess.
-  if (job.dir === 1 && racer.pos === job.origin && racer.pos + job.remaining > FINISH) {
+  const line = finishLineOf(ctx, rng, racer);
+  if (job.dir === 1 && racer.pos === job.origin && racer.pos + job.remaining > line) {
     const stickler = ctx.s.board.find(
       (o) =>
         o.racerId !== racer.racerId &&
@@ -451,6 +452,8 @@ function doMoveStep(ctx: Ctx, job: Extract<Job, { t: 'move' }>, rng: Rng): void 
     job.remaining = 0;
     return settle();
   }
+  // Sniper: a step onto their own finish line is over the finish.
+  if (job.dir === 1 && next >= line) next = FINISH;
 
   // Leaptoad: "While moving, I skip spaces with other racers on them." An occupied space
   // is passed over without counting against the move — even backwards.
@@ -822,6 +825,11 @@ function tripRacer(ctx: Ctx, rng: Rng, target: MutableRacer, by: RacerId | null)
   return true;
 }
 
+/** Sniper: the space that counts as `racer`'s finish line. FINISH for everyone else. */
+function finishLineOf(ctx: Ctx, rng: Rng, racer: MutableRacer): number {
+  return hooksFor(ctx.s, racer).finishLine?.(makeHookCtx(ctx, rng, racer)) ?? FINISH;
+}
+
 /**
  * Puts a racer on a space without moving it there: "don't count it as moving for
  * triggering powers, passing racers, etc."
@@ -843,7 +851,13 @@ function warpRacer(
   resolveStop = true,
   triggerSpace = true,
 ): void {
-  const to = leashedWarp(ctx, rng, target, Math.max(START, Math.min(FINISH, pos)));
+  const landing = Math.max(START, Math.min(FINISH, pos));
+  const to = leashedWarp(
+    ctx,
+    rng,
+    target,
+    landing >= finishLineOf(ctx, rng, target) ? FINISH : landing,
+  );
   if (to === target.pos) return;
   target.pos = to;
   ctx.emit({ t: 'racer/warped', racerId: target.racerId, to });

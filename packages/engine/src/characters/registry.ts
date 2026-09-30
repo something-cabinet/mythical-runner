@@ -14,7 +14,7 @@ import type { RacerDef, ReferenceCard } from './types.js';
  */
 export const RACERS: readonly RacerDef[] = [...CLASSIC_RACERS, ...DOTA_RACERS];
 
-const SET_SIZES: Readonly<Record<CharacterSetId, number>> = { classic: 36, dota: 50 };
+const SET_SIZES: Readonly<Record<CharacterSetId, number>> = { classic: 36, dota: 51 };
 
 for (const set of CHARACTER_SETS) {
   const found = RACERS.filter((r) => r.set === set.id && !r.pieceOf).length;

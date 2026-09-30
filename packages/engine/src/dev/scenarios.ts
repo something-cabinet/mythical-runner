@@ -1608,7 +1608,7 @@ scenario('Sets — Dota alone has 50 racers: enough for six players', () => {
     'five players may start',
   );
 
-  // Six players draft 24 racers, which the set now covers with twenty-six to spare — so an
+  // Six players draft 24 racers, which the set now covers with twenty-seven to spare — so an
   // Egg still has somewhere to hatch from in a Dota-only game.
   const six = applyAction(five, { t: 'lobby/join', by: playerId('p6'), name: 'P6' }).state;
   check(
@@ -1618,7 +1618,7 @@ scenario('Sets — Dota alone has 50 racers: enough for six players', () => {
   const dealt = playGame({ seed: 9200, playerCount: 6, sets: ['dota'] }).state;
   const hands = Object.values(dealt.hands).flat();
   check(hands.length === 24, 'six full hands', String(hands.length));
-  check(racersInSets(['dota']).length - hands.length === 26, 'with twenty-six left undrafted');
+  check(racersInSets(['dota']).length - hands.length === 27, 'with twenty-seven left undrafted');
 });
 
 scenario('Sets — the draft deals only from the chosen sets', () => {
@@ -3361,7 +3361,7 @@ scenario('Vengeful Spirit — skips its move to swap spaces with another racer',
   check(!has(swapped.events, 'dice/rolled'), 'instead of rolling');
 });
 
-scenario('Weaver — +2 to its main move, and a trip sends it back to Start', () => {
+scenario('Weaver — +2 to its main move, and every 2nd trip sends it back to Start', () => {
   const clear = raceState(
     [
       { player: 'p1', racer: 'weaver', pos: 1 },
@@ -3378,8 +3378,41 @@ scenario('Weaver — +2 to its main move, and a trip sends it back to Start', ()
     ],
     'p1',
   );
-  const home = rollFor(s, 'p1', 5);
-  check(posOf(home.state, 'weaver') === START && racerAt(home.state, 'weaver')?.tripped === true, 'tripped by Banana, it lands on Start', logLines(home.events));
+  const first = rollFor(s, 'p1', 5);
+  check(posOf(first.state, 'weaver') !== START && racerAt(first.state, 'weaver')?.tripped === true, 'a first trip leaves it where it fell', logLines(first.events));
+
+  const again = raceState(
+    [
+      { player: 'p1', racer: 'weaver', pos: 1, memo: { lapseTrips: 1 } },
+      { player: 'p2', racer: 'banana', pos: 3 },
+    ],
+    'p1',
+  );
+  const home = rollFor(again, 'p1', 5);
+  check(posOf(home.state, 'weaver') === START && racerAt(home.state, 'weaver')?.tripped === true, 'a second trip lands it on Start', logLines(home.events));
+});
+
+scenario('Sniper — -1 to its main move, and its finish line is space 25', () => {
+  const clear = raceState(
+    [
+      { player: 'p1', racer: 'sniper', pos: 1 },
+      { player: 'p2', racer: 'vanilla-01', pos: 20 },
+    ],
+    'p1',
+  );
+  check(rolledOf(rollFor(clear, 'p1', 3).events).natural === 4, 'a 4 moves 3');
+
+  const s = raceState(
+    [
+      { player: 'p1', racer: 'sniper', pos: 22 },
+      { player: 'p2', racer: 'vanilla-01', pos: 2 },
+    ],
+    'p1',
+  );
+  const done = rollFor(s, 'p1', 3);
+  check(posOf(done.state, 'sniper') === FINISH, 'reaching 25 crosses the finish', logLines(done.events));
+  const short = rollFor(s, 'p1', 2);
+  check(posOf(short.state, 'sniper') === 24, 'one short stays on the track');
 });
 
 scenario('Terrorblade — can pass its trip to a standing racer within 3 spaces', () => {
